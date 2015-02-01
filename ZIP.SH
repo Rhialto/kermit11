@@ -1,10 +1,10 @@
 #/bin/bash
-zip -l ~kermit/archives/kermit11.zip -n ps pdf * || exit 1
-zip ~kermit/archives/kermit11.zip *.ps *.pdf || exit 1
+zip -l ~kermit/archives/krt11.zip -n ps pdf * || exit 1
+zip ~kermit/archives/krt11.zip *.ps *.pdf || exit 1
 cd ~kermit/archives
-ls -ldga kermit11.zip || exit 1
-unzip -t kermit11.zip
+ls -ldga krt11.zip || exit 1
+unzip -t krt11.zip
 cd ~kermit/archives
-chmod 644 kermit11.zip
-chgrp kermit kermit11.zip
+chmod 644 krt11.zip
+chgrp kermit krt11.zip
 exit 0

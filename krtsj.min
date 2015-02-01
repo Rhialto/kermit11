@@ -1,0 +1,10 @@
+	.title	KRTSJ.MIN  Kermit-11_min root module for RT-11FB,SB,SJ
+	.ident	"V03.62"		   ; /62/ 31-May-93  Billy Youdelman
+					   ; for LOW MEMORY OVERLAYS
+					   ; *** MINIMUM SYSTEM VERSION ***
+	.psect	$RTQUE	,rw,d,gbl,rel,con
+	.psect	RTDIR	,rw,d,gbl,rel,con  ; /BBS/ force into root
+	.psect	FBSTART	,ro,i,lcl,rel,con
+fbstart::jmp	kermit			   ; force transfer address here
+
+	.end	fbstart

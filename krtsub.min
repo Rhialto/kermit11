@@ -1,0 +1,638 @@
+	.title	KRTSUB	Commonly used subroutines
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1983 Change Software, Inc.
+;
+;	This software is furnished under a license and may
+;	be  used  and  copied  only in accordance with the
+;	terms of such license and with  the  inclusion  of
+;	the  above copyright notice.  This software or any
+;	other copies thereof may not be provided or other-
+;	wise made available to any other person.  No title
+;	to and ownership of the software is hereby  trans-
+;	ferred.
+;
+;	The information in this  software  is  subject  to
+;	change  without notice and should not be construed
+;	as a commitment by the author.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+
+	.psect	$code
+	.sbttl	BASIC+ CVT$$ function
+	.enabl	lsb
+
+	C.CRLF	=	4
+	C.LSPA	=	10
+	C.SSPA	=	20
+	C.LCUC	=	40
+	C.TSPA	=	200
+
+	PAT	=	0
+	LASTCH	=	2
+	SADDR	=	4
+	LSIZE	=	6
+
+cvt$$::	save	<r1,r2,r3,r4,r5>
+	sub	#lsize	,sp
+	mov	sp	,r4
+	mov	(r5)+	,r2
+	mov	r2	,saddr(r4)
+	mov	(r5)+	,r1
+	mov	(r5)+	,pat(r4)
+	clrb	lastch(r4)
+	mov	r2	,r5
+	tst	r1
+	beq	130$
+
+10$:	clr	r3
+	bisb	(r5)+	,r3
+
+	bit	#c.lspa	,pat(r4)
+	bne	25$
+
+	bit	#c.sspa	,pat(r4)
+	beq	30$
+	cmpb	r3	,#tab
+	bne	21$
+	movb	#space	,r3
+21$:	cmpb	lastch(r4),#space
+	beq	25$
+	cmpb	lastch(r4),#tab
+	bne	30$
+25$:	 cmpb	r3	,#space
+	 beq	120$
+	 cmpb	r3	,#tab
+	 beq	120$
+	  bic	#c.lspa	,pat(r4)
+
+30$:	bit	#c.crlf	,pat(r4)
+	beq	50$
+
+	mov	#junkch	,r0
+	tstb	r3
+	beq	120$
+40$:	tstb	@r0
+	beq	50$
+	cmpb	r3	,(r0)+
+	beq	120$
+	br	40$
+
+50$:	bit	#c.lcuc	,pat(r4)
+	beq	60$
+	cmpb	r3	,#'z!40
+	bhi	60$
+	cmpb	r3	,#'a!40
+	blo	60$
+	 bicb	#40	,r3
+
+60$:	movb	r3	,(r2)+
+120$:	movb	r3	,lastch(r4)
+	dec	r1
+	bgt	10$
+
+130$:	mov	r2	,r0
+	sub	saddr(r4),r0
+	ble	160$
+	bit	#c.tspa	,pat(r4)
+	beq	160$
+	mov	saddr(r4),r1
+	add	r0	,r1
+140$:	cmpb	-(r1)	,#space
+	beq	150$
+	cmpb	(r1)	,#tab
+	bne	160$
+150$:	sob	r0	,140$
+160$:	add	#lsize	,sp
+	unsave	<r5,r4,r3,r2,r1>
+	return
+
+	.save
+	.psect	$pdata
+junkch:	.byte	cr ,lf ,ff ,esc
+	.byte	0
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Get length of .asciz string
+
+l$len::	mov	r0	,-(sp)
+10$:	tstb	(r0)+
+	bne	10$
+	sub	(sp)+	,r0
+	dec	r0
+	return
+
+
+	.sbttl	Write a right justified decimal number to TT
+
+	DFWIDTH	= 6
+
+l$wrdec::save	<r1,r4,r5>
+	mov	#dfwidth,r1
+	mov	r1	,r4
+	add	#6	,r1
+	bic	#1	,r1
+	mov	r4	,-(sp)
+	mov	@r5	,-(sp)
+	mov	sp	,r5
+	tst	-(r5)
+	sub	r1	,sp
+	mov	sp	,@r5
+	call	l$cvtnum
+	add	(r5)	,r4
+	clrb	(r4)
+	wrtall	(r5)
+	add	r1	,sp
+	cmp	(sp)+	,(sp)+
+	unsave	<r5,r4,r1>
+	mov	(sp)+	,(sp)
+	return
+
+
+	.sbttl	The real number conversion subroutine
+
+l$cvtnum::save	<r0,r1,r2,r3,r4>
+	mov	(r5)	,r2
+	mov	4(r5)	,r3
+	bgt	80$
+	 mov	#dfwidth,r3
+80$:	mov	r3	,r1
+1$:	movb	#space	,(r2)+
+	sob	r1	,1$
+	mov	r3	,r4
+	mov	2(r5)	,r1
+	bpl	2$
+	 neg	r1
+2$:	clr	r0
+	div	#10.	,r0
+	add	#'0	,r1
+	cmp	r2	,@r5
+	beq	100$
+	movb	r1	,-(r2)
+	mov	r0	,r1
+	beq	3$
+	sob	r3	,2$
+	tst	r1
+	bne	100$
+3$:	tst	2(r5)
+	bpl	4$
+	cmp	r2	,@r5
+	beq	100$
+	 movb	#'-	,-(r2)
+	br	4$
+100$:	movb	#'*	,@r2
+4$:	unsave	<r4,r3,r2,r1,r0>
+	return
+
+
+	.sbttl	Simple (non-wildcarded) string comparison
+
+instr::	save	<r1,r2,r3,r4>
+	mov	(r5)	,r0
+	mov	4(r5)	,r1
+	mov	6(r5)	,r2
+	ble	6$
+	mov	2(r5)	,r4
+	ble	6$
+	sub	r2	,r4
+	clr	r3
+
+1$:	cmp	r3	,r4
+	bgt	6$
+
+	  cmpb	(r0)+	,(r1)
+	  bne	5$
+
+	    save	<r0,r1,r2>
+	    inc	r1
+	    dec	r2
+	    ble	3$
+
+2$:	    cmpb	(r0)+ , (r1)+
+	    bne	4$
+	    sob	r2	,2$
+3$:	    mov	r3	,r0
+	    inc	r0
+	    add	#6	,sp
+	    br	7$
+
+4$:	    unsave	<r2,r1,r0>
+5$:	  inc	r3
+	br	1$
+
+6$:	clr	r0
+7$:	unsave	<r4,r3,r2,r1>
+	return
+
+
+	.sbttl	Convert rad50 word to 3 ascii bytes
+
+rdtoa::	save	<r0,r1,r3>
+	mov	2(r5)	,r1
+	mov	(r5)	,r3
+com:	clr	r0
+	div	#50*50	,r0
+	movb	radchr(r0),(r3)+
+	clr	r0
+	div	#50	,r0
+	movb	radchr(r0),(r3)+
+	movb	radchr(r1),(r3)+
+	unsave	<r3,r1,r0>
+	return
+
+	.save
+	.psect	$pdata
+radchr:	.ascii	" ABCDEFGHIJKLMNOPQRSTUVWXYZ$.?0123456789:"
+	.even
+	.restore
+
+
+	.sbttl	16-bit integer to ascii
+
+L10012::MOV	R0	,-(SP)
+	CLR	R0
+L10016:	INC	R0
+	SUB	#12	,(SP)
+	BCC	L10016
+	ADD	#72	,(SP)
+	DEC	R0
+	BEQ	L10042
+	JSR	PC	,L10012
+L10042:	MOVB	(SP)+	,(R1)+
+	RTS	PC
+
+L10266::MOV	R0	,-(SP)
+	CLR	R0
+L10272:	INC	R0
+	SUB	#12	,(SP)
+	BCC	L10272
+	ADD	#72	,(SP)
+	DEC	R0
+	BEQ	L10316
+	JSR	PC	,L10266
+L10316:	MOVB	(SP)+	,R0
+L10320:	jmp	writ1ch
+
+
+	.sbttl	32-bit integer to ascii from RSX SYSLIB.OLB
+
+$CDDMG::JSR	R5	,$SAVRG
+	MOV	R0	,R3
+	MOV	#23420	,R4
+	MOV	#12	,R5
+	TST	R2
+	BEQ	C00024
+C00022:	BIS	#1000	,R5
+C00024=	C00022+2
+	CMP	(R1)	,R4
+	BCC	C00104
+	MOV	(R1)+	,R0
+	MOV	(R1)	,R1
+	DIV	R4	,R0
+	MOV	R1	,-(SP)
+	MOV	R0	,R1
+	BEQ	C00064
+	MOV	#24000	,R2
+	CALL	C00072
+	BIS	#1000	,R5
+	MOV	R0	,R3
+C00064:	MOV	(SP)+	,R1
+	MOV	#20000	,R2
+C00072:	MOV	R3	,R0
+	BIS	R5	,R2
+	CALL	$CBTA
+	BR	C00116
+C00104:	MOV	#5	,R2
+C00110:	MOVB	#52	,(R0)+
+	SOB	R2	,C00110
+C00116:	RETURN
+
+$CBTA::	JSR	R5	,$SAVRG
+	MOVB	R2	,R5
+	CLRB	R2
+	SWAB	R2
+	ASR	R2
+	BCC	E00134
+	TST	R1
+	BPL	E00134
+	NEG	R1
+	MOVB	#55	,(R0)+
+E00134:	MOV	R0	,R4
+	ROR	R2
+	ROR	R2
+	ROR	R3
+	CLRB	R3
+	BISB	R2	,R3
+	CLRB	R2
+	BISB	#60	,R2
+	MOV	R1	,R0
+E00160:	MOV	R0	,R1
+	CLR	R0
+	DIV	R5	,R0
+	CMP	R1	,#11
+	BLOS	E00200
+	ADD	#7	,R1
+E00200:	ADD	R2	,R1
+	MOV	R1	,-(SP)
+	DECB	R3
+	BLE	E00234
+	TST	R0
+	BNE	E00230
+	TST	R2
+	BPL	E00234
+	TST	R3
+	BPL	E00230
+	BIC	#20	,R2
+E00230:	CALL	E00160
+E00234:	MOVB	(SP)+	,(R4)+
+	MOV	R4	,R0
+	RETURN
+
+$SAVRG::MOV	R4	,-(SP)
+	MOV	R3	,-(SP)
+	MOV	R5	,-(SP)
+	MOV	6(SP)	,R5
+	CALL	@(SP)+
+	MOV	(SP)+	,R3
+	MOV	(SP)+	,R4
+	MOV	(SP)+	,R5
+	RETURN
+
+
+	.sbttl	Get value of decimal number
+
+l$val::	save	<r3>
+	clr	r1
+	mov	(r5)	,r3
+30$:	movb	(r3)+	,r0
+	beq	5$
+	sub	#'9+1	,r0
+	add	#9.+1	,r0
+	bcc	70$
+	mul	#10.	,r1
+	bcs	70$
+	add	r0	,r1
+	bcc	30$
+70$:	mov	sp	,r0
+	br	100$
+5$:	clr	r0
+100$:	unsave	<r3>
+	return
+
+
+	.sbttl	Integer ascii to octal value
+
+octval::save	<r3>
+	clr	r1
+	mov	(r5)	,r3
+30$:	movb	(r3)+	,r0
+	beq	5$
+	sub	#'7+1	,r0
+	add	#7+1	,r0
+	bcc	70$
+	ash	#3	,r1
+	add	r0	,r1
+	br	30$
+70$:	mov	sp	,r0
+	br	100$
+5$:	clr	r0
+100$:	unsave	<r3>
+	return
+
+
+	.sbttl	Integer to ascii octal conversion
+
+l$otoa::save	<r0,r1,r2>
+	mov	(r5)	,r1
+	mov	2(r5)	,r0
+	mov	#6	,r2
+	call	10$
+	clrb	(r1)
+	unsave	<r2,r1,r0>
+	return
+
+10$:	mov	r0	,-(sp)
+	bic	#^c<7>	,(sp)
+	add	#60	,(sp)
+	ror	r0
+	asr	r0
+	asr	r0
+	dec	r2
+	beq	20$
+	call	10$
+20$:	movb	(sp)+	,(r1)+
+	return
+
+
+	.sbttl	Write integer in (r5) to TT as octal number
+
+l$wroc::save	<r0>
+	sub	#10	,sp
+	mov	sp	,r0
+	calls	l$otoa	,<r0,(r5)>
+	wrtall	r0
+	add	#10	,sp
+	unsave	<r0>
+	return
+
+
+	.sbttl	Copy an .asciz string
+
+copyz$::save	<r0,r1>
+	tst	4+6(sp)
+	bne	5$
+	mov	#77777	,4+6(sp)
+5$:	mov	4+4(sp)	,r0
+	mov	4+2(sp)	,r1
+10$:	movb	(r0)+	,(r1)+
+	beq	20$
+	dec	4+6(sp)
+	bne	10$
+20$:	clrb	-(r1)
+	unsave	<r1,r0>
+	mov	@sp	,6(sp)
+	add	#6	,sp
+	return
+
+
+	.sbttl	STRCAT and STRCPY
+
+strcpy::save	<r1>
+	mov	2+2(sp)	,r0
+	mov	2+4(sp)	,r1
+10$:	movb	(r1)+	,(r0)+
+	bne	10$
+	mov	2+2(sp)	,r0
+	unsave	<r1>
+	mov	(sp)	,4(sp)
+	cmp	(sp)+	,(sp)+
+	return
+
+strcat::save	<r1>
+	mov	2+2(sp)	,r0
+	mov	2+4(sp)	,r1
+5$:	tstb	(r0)+
+	bne	5$
+	dec	r0
+10$:	movb	(r1)+	,(r0)+
+	bne	10$
+	mov	2+2(sp)	,r0
+	unsave	<r1>
+	mov	(sp)	,4(sp)
+	cmp	(sp)+	,(sp)+
+	return
+
+
+	.sbttl	Uncontrol a char
+
+l$xor::	save	<r0>
+	mov	4(sp)	,r0
+	ixor	#100	,r0
+	mov	r0	,4(sp)
+	unsave	<r0>
+	return
+
+
+	.sbttl	Scan a string for a character
+
+scanch::save	<r2>
+	mov	6(sp)	,r2
+	clr	r0
+10$:	tstb	@r2
+	beq	90$
+	inc	r0
+	cmpb	4(sp)	,(r2)+
+	bne	10$
+	br	100$
+90$:	clr	r0
+100$:	unsave	<r2>
+	mov	@sp	,4(sp)
+	cmp	(sp)+	,(sp)+
+	return
+
+
+	.sbttl	Upper case one arg, or all of them
+	.enabl	lsb
+
+upone::	save	<r1,r0>
+	mov	#space	,r1
+	br	10$
+
+upcase::save	<r1,r0>
+	clr	r1
+10$:	cmpb	(r0)	,r1
+	blos	100$
+	cmpb	(r0)	,#'a!40
+	blo	20$
+	cmpb	(r0)	,#'z!40
+	bhi	20$
+	bicb	#40	,(r0)
+20$:	inc	r0
+	br	10$
+100$:	unsave	<r0,r1>
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Integer to decimal ascii conversion
+
+i4toa::	mov	#x4$	,r2
+	br	itoa
+i2toa::	mov	#x2$	,r2
+itoa::	save	<r0>
+10$:	movb	#'0-1	,r0
+20$:	inc	r0
+	sub	(r2)	,r3
+	bcc	20$
+	add	(r2)+	,r3
+	movb	r0	,(r1)+
+	tst	(r2)
+	bne	10$
+	unsave	<r0>
+	rts	pc
+
+	.save
+	.psect	$pdata
+x4$:	.word	1000., 100.
+x2$:	.word	10., 1., 0
+	.restore
+
+
+	.if df NONEIS
+
+	.sbttl	MUL for a non-EIS CPU
+
+p$mul::	mov	r0	,-(sp)
+	mov	r1	,-(sp)
+	mov	r2	,-(sp)
+
+	mov	10(sp)	,r0
+	mov	12(sp)	,r1
+	clr	r2
+
+10$:	asr	r1
+	bcc	20$
+	add	r0	,r2
+	bcs	30$
+20$:	asl	r0
+	tst	r1
+	bne	10$
+
+30$:	mov	r2	,12(sp)
+
+	mov	(sp)+	,r2
+	mov	(sp)+	,r1
+	mov	(sp)+	,r0
+
+	mov	(sp)+	,(sp)
+	return
+
+
+	.sbttl	DIV for a non-EIS CPU
+
+p$div::	mov	r0	,-(sp)
+	mov	r1	,-(sp)
+	mov	r2	,-(sp)
+
+	mov	10(sp)	,r2
+	mov	12(sp)	,r0
+	mov	14(sp)	,r1
+
+	mov	#40	,-(sp)
+	mov	r1	,-(sp)
+	clr	r1
+
+40$:	asl	r0
+	rol	r2
+	rol	r1
+	cmp	r1	,(sp)
+	bcs	54$
+	sub	(sp)	,r1
+	inc	r0
+54$:	dec	2(sp)
+	bgt	40$
+
+	cmp	(sp)+	,(sp)+
+
+	mov	r1	,12(sp)
+	mov	r0	,14(sp)
+
+	mov	(sp)+	,r2
+	mov	(sp)+	,r1
+	mov	(sp)+	,r0
+
+	mov	(sp)+	,(sp)
+	return
+
+	.endc
+
+	.end

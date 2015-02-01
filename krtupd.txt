@@ -1,0 +1,182 @@
+KRTUPD.DOC   What's New in KRT and KRTTSX         V03.63       27-Sep-1997
+----------   ------ --- -- --- --- ------         ------       -----------
+
+This revision includes the following changes and updates since the
+last formal (given to Columbia University) release -
+
+1.  Added SET/SHOW CONTROL-CHARACTER ala C-Kermit.  If you can do it
+there, you can do it here too, with the exact same command syntax.
+
+This is useful for speeding up transfers, particularly binary data,
+as it turns off control-char quoting, which uses two bytes to transmit
+one non-printing char.  See HELP SET CONTROL-CHAR for details and usage.
+
+Other Kermits that support this include MS-Kermit, its W95 successor
+and C-Kermit.
+
+2.  TSX EMT 114 is now used for output when TT is the link device
+under TSX.  This makes Kermit _much_ zippier..  As the TSX docs say
+ttyout loops are not handled very efficiently.
+
+3.  Transmitted and received file attributes were made individually
+settable and showable, ala C-Kermit.  These additions are documented
+in HELP SET ATTRIBUTES and are useful when another Kermit has trouble
+with some but not all of them.
+
+4.  The file name conversion code was patched to accomodate various
+previously troublesome Unix file names, such as .x. or .x: or ..x.
+which were being erronously taken as implicitly wildcarded names.
+Also all previously undefined chars in those possible in file names
+were added, again for Unix compatibility.
+
+5. Added SET FILE WILDCARDS - this doesn't modify RT-11 or TSX but
+allows getting Unix files with a leading dot in the name while using
+an output file to rename same (SET FILE WILD EXPLICIT to do this).
+The default is IMPLICIT, as it always has been in K11/KRT.
+
+6.  Added a warning message when receiving an empty file so one will
+know why no data were transfered.
+
+7.  Added a file name when opening LP as the log file so later
+versions of RT-11 are happy.  As in the past LP must either be
+spooled or extremely fast to serve as the log device.
+
+8.  GETs to LP are now possible, although there's currently no
+wildcard support when renaming files (whether to LP or a disk).
+
+9.  CSISPC file size specifications, as in FILENAME[size], are now
+supported and file sizes are now displayed when sending or receiving.
+
+Note that for text files from foreign systems KRT adds 25% + 1 block
+to the received size to accomodate differing line termination schemes,
+and this increased size is what will be displayed, even though the
+file will most likely be closed later at some smaller number of blocks.
+If this bump up exceeds the currently available free space even though
+the file 'should' fit a size which does may now be tried.
+
+10.  Modifed the test for a Line Time Clock (KRTOSI) to accomodate
+QED's fast machines, per a suggestion from Alan Sieving of QED.  It
+now completes as fast as possible regardless of machine type, while
+previously the QED CPUs finised the delay loop in less than one
+clock tick.
+
+11.  Added DAYTIME and SHOW DAYTIME commands.
+
+12.  Use of a quoted string to place a blank at end of prompt string,
+as in SET PROMPT "Kermit-11> ", is now supported.
+
+13. Increased the command line input buffer to 132. bytes, in the EIS
+assembly only.  This accomodates long command lines in take files and
+of course also works for keyboard input.  Also fixed all possible sign
+extension problems now that LN$MAX > 127.  As distributed KRTTSX.SAV
+is built with EIS instructions and KRT.SAV is not.
+
+14.  Added a T3000X.42 modem definition for XOFF restraint with this
+modem.  Note that S48 must be set to 0 here or the modem will NOT do
+XOFF restraint, regardless of what the modem docs say, at least in the
+modem's ready to accept a command mode and sometimes when on-line to
+another modem and exchanging data that need restraint.  This is a bug
+in the modem itself and is the reason RTS/CTS flow control was added
+to KM.  As long as Kermit is doing XOFF flow control (the only choice
+possible other than with the KM handler) it will also be forced to
+quote both XOFF/XON and their 8-bit counterparts, thus this won't
+impact file transfers.
+
+15.  An error packet is now sent to the other Kermit when appropriate
+(as when a write to a local file fails) so the transfer gets properly
+aborted.
+
+16.  The file type (ASCII, binary, etc) is now displayed in the create
+messages (to be sure you know what's going on) when transfering files.
+
+17.  The contents of SEND FILE ACK and RECEIVE FILE ACK packets, such
+as a file name returned by the remote Kermit, are now repeated char
+decoded, 8-bit unquoted and then displayed during file transfers.
+
+18.  The REMOTE command code now displays the reasons for retries as
+each occurs.  Error packets are now sent when giving up, to attempt to
+stop any possible lingering activity at the other end.  The BYE and
+FINISH commands were moved into the REMOTE command processor so these
+two now also use the above error handling enhancements.
+
+Repeated char encoding is now done on REMOTE command arguments.  This
+makes a big difference for a command like REMOTE DELETE *~ sent to a
+Unix system, which without repeat encoding becomes 'rm *' after going
+though C-Kermit and thus hoses everything.  8-bit quoting (for ASCII
+chars > 177) is also now done (automatic when parity is in use) here.
+
+19.  CD/CWD and REMOTE CD/CWD will now operate without an argument.
+RT-11/TSX assigns are now tested for illegal string lengths as well.
+
+20.  REMOTE WHO now passes arguments to the remote host.  Some hosts
+support this, such as VMS where it's really handy on a busy system.
+
+21. The first data packet is now actually rebuilt when resizing due
+to its failing so the next retry is actually done with the smaller
+sized packet.  In the past the reduction wasn't done until the next
+packet was sent, which is of course too late..
+
+22.  A rewind routine was added to KRTRMS.MAC for use when resizing
+packets ala the above, instead of closing and reopening the file.
+
+23.  An error in testing for terminal emulator command chars after
+having SET CONSOLE 8-BIT is now fixed.
+
+24.  The packet data processing routine (BUFFIL) was moved back to
+the root for speed, as cleaning up made space available for it once
+again.  This means less calling of overlays and helps quite a bit
+when running on a floppies-only system.
+
+25.  Added SPFUNs to the KM (Kermit Modem) comm handler to support
+xmodem ala how it could be done with CL.  See KRTKM.MAC for details.
+
+26.  Made "_" = "-" when parsing commands.  This is _only_ for KRT's
+commands, any arguments and everything else remain untouched.
+
+27.  Moved the HELP text index to a separate file (KRTIDX.MAC) and
+added KRTIDX.BAS to create same, dumping KRTHLP.PRE and KRTHLP.BAS.
+KRTHLP.MAC is now a permanent file.  KRTHLP had finally overflowed
+4096. words, now there's plenty of room available.
+
+28.  Modified the command definition macro (KRTCDF.MAC) to accept the
+location of an optional prompt string instead of the string itself.
+This allows sharing strings which reduced the overall program size by
+2 blocks.
+
+29.  Moved SHOW VERSION to KRTCMD and modified it so REMOTE HELP can
+call and use it, thus displaying the exact same string one sees when
+KRT is started.
+
+30.  Fixed a  problem with the SET PHONE XMODE value specified in
+a SET CL PORTS string from being overwritten by the default value
+in the modem definition.  Now if a value is explicitly supplied it
+will prevail.
+
+31.  Moved all the pre-defined modem data to a separate module
+(KRTMDM.MAC) to make room for more defintions there and to allow
+for future expansion of the dialer module KRTDIA.  Moved SET$DTR
+and SET$MODEM back to the dialer as there is now plenty of room
+and this reduces the size of the unmapped (KRT.SAV) image.
+
+32.  Fixed a problem with garbage being appended to a log file name.
+
+33.  Fixed an unpopped stack on error exit from BUFEMP (receiving
+a file).  This bug was introduced in V3.62 (but there was no error
+checking at all before that), sorry!
+
+34.  Any possibly lingering data from a modem is now flushed before
+beginning dialing or redialing.
+
+35.  All source files have been thoroughly cleaned up and fully
+commented and the HELP text and doc files are completely caught up.
+
+All program data have been moved to the tops of their source
+modules to make foreign language translation as easy as possible.
+
+The narrative edit history has been split out into its own file
+(KRTHIS.DOC) so KRT.DOC is no longer the monster it was..
+
+Billy Youdelman
+billy@MIX.COM
+27-Sep-1997
+-eof-

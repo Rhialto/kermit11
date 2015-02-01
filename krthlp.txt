@@ -1,0 +1,4643 @@
+V03.63 27-Sep-1997
+1 ?
+
+ The question mark used as an argument dumps the dispatch
+ table for that command, thus listing all things possible:
+
+	Kermit-11>?	       ; display available commands
+	Kermit-11>SET ?        ; show all possible sets
+	Kermit-11>SET FILE ?   ; list all valid options
+
+1 @
+
+ Open an indirect file for command input.  Same as TAKE.
+ If no device is specified the logicals TAK, KRT, DK and
+ SY will be tried, in that order.  Either "!" or ";" may
+ be used as a comment delimiter in Kermit-11 TAKE files.
+ All Kermit commands  except  control characters are ok,
+ and EXIT may be used in place of ^Z.   The maximum line
+ length is 132. bytes.
+
+	Kermit-11>@ file    ; default type is .COM
+	Kermit-11>@file     ; RT-11 syntax is ok
+
+1 ASCII-Set
+
+	Table of Octal, Decimal and Hex values for ASCII characters
+
+ Char Key Oct Dec Hex    Ch Oct Dec Hex    Ch Oct Dec Hex    Ch Oct Dec Hex
+ ---- --- --- --- ---    -- --- --- ---    -- --- --- ---    -- --- --- ---
+ NUL  ^SP 000  0.  0     SP 040 32. 20     @  100 64. 40     `  140  96. 60
+ SOH  ^A  001  1.  1     !  041 33. 21     A  101 65. 41     a  141  97. 61
+ STX  ^B  002  2.  2     "  042 34. 22     B  102 66. 42     b  142  98. 62
+ ETX  ^C  003  3.  3     #  043 35. 23     C  103 67. 43     c  143  99. 63
+ EOT  ^D  004  4.  4     $  044 36. 24     D  104 68. 44     d  144 100. 64
+ ENQ  ^E  005  5.  5     %  045 37. 25     E  105 69. 45     e  145 101. 65
+ ACK  ^F  006  6.  6     &  046 38. 26     F  106 70. 46     f  146 102. 66
+ BEL  ^G  007  7.  7     '  047 39. 27     G  107 71. 47     g  147 103. 67
+
+ BS   ^H  010  8.  8     (  050 40. 28     H  110 72. 48     h  150 104. 68
+ HT   ^I  011  9.  9     )  051 41. 29     I  111 73. 49     i  151 105. 69
+ LF   ^J  012 10.  A     *  052 42. 2A     J  112 74. 4A     j  152 106. 6A
+ VT   ^K  013 11.  B     +  053 43. 2B     K  113 75. 4B     k  153 107. 6B
+ FF   ^L  014 12.  C     ,  054 44. 2C     L  114 76. 4C     l  154 108. 6C
+ CR   ^M  015 13.  D     -  055 45. 2D     M  115 77. 4D     m  155 109. 6D
+ SO   ^N  016 14.  E     .  056 46. 2E     N  116 78. 4E     n  156 110. 6E
+ SI   ^O  017 15.  F     /  057 47. 2F     O  117 79. 4F     o  157 111. 6F
+
+ DLE  ^P  020 16. 10     0  060 48. 30     P  120 80. 50     p  160 112. 70
+ DC1  ^Q  021 17. 11     1  061 49. 31     Q  121 81. 51     q  161 113. 71
+ DC2  ^R  022 18. 12     2  062 50. 32     R  122 82. 52     r  162 114. 72
+ DC3  ^S  023 19. 13     3  063 51. 33     S  123 83. 53     s  163 115. 73
+ DC4  ^T  024 20. 14     4  064 52. 34     T  124 84. 54     t  164 116. 74
+ NAK  ^U  025 21. 15     5  065 53. 35     U  125 85. 55     u  165 117. 75
+ SYN  ^V  026 22. 16     6  066 54. 36     V  126 86. 56     v  166 118. 76
+ ETB  ^W  027 23. 17     7  067 55. 37     W  127 87. 57     w  167 119. 77
+
+ CAN  ^X  030 24. 18     8  070 56. 38     X  130 88. 58     x  170 120. 78
+ EM   ^Y  031 25. 19     9  071 57. 39     Y  131 89. 59     y  171 121. 79
+ SUB  ^Z  032 26. 1A     :  072 58. 3A     Z  132 90. 5A     z  172 122. 7A
+ ESC  ^[  033 27. 1B     ;  073 59. 3B     [  133 91. 5B     {  173 123. 7B
+ FS   ^\  034 28. 1C     <  074 60. 3C     \  134 92. 5C     |  174 124. 7C
+ GS   ^]  035 29. 1D     =  075 61. 3D     ]  135 93. 5D     }  175 125. 7D
+ RS   ^~  036 30. 1E     >  076 62. 3E     ^  136 94. 5E     ~  176 126. 7E
+ US   ^?  037 31. 1F     ?  077 63. 3F     _  137 95. 5F    DEL 177 127. 7F
+
+1 ASSIGN
+
+ Like that of RT-11, except only DK (the default disk) is supported.
+ This specifies what Kermit will use as its default disk, it doesn't
+ modify the monitor's assignment for DK.
+
+	Kermit-11>ASS LD0 DK
+
+1 Binary-Files
+
+ Binary files include task or save images and other special types
+ requiring all eight bits in each byte.  Text  files like program
+ sources normally  only  use  the lower seven bits.  Binary files
+ should be transferred on an eight-bit line, which on most PDP-11
+ systems is the default.  Under RT-11 Kermit-11 defaults to space
+ parity as its handlers are 7-bit devices, and 8-bit quoting will
+ be required to transfer binary data.  This adds a byte for every
+ one with the high bit set and thus increases the transfer time.
+
+  Various Kermits are at different stages of  development.  Some
+  may NOT handle binary files automatically thus the command SET
+  FILE FIXED must be done on BOTH before a binary file transfer.
+  Versions 2.16 and up of Kermit-11 do automatically switch into
+  the binary mode.  Under RT-11 the file type must be defined in
+  sending Kermit's binary types list (see HELP SET BINARY) prior
+  to transmission.
+
+ Binary files are best exchanged using CRC error checking.  This
+ isn't the default and may need to be SET on the other Kermit if
+ it can't recover yours from the init packet.
+
+ Note that transferring a text file with one or both Kermits set
+ to binary mode may result in an unusable file due to the chance
+ of including embedded record control information.  If this does
+ occur KED may be used (open the file and then immediately EXIT)
+ to strip the hi bits from it.
+
+ Prior to Version 2.21 Kermit-11 didn't support 8-bit prefixing.
+ Before V2.23, repeat character encoding wasn't supported.
+
+   A problem was discovered with  attribute  packet  processing
+   in versions of Kermit-11  prior to  3.49.  This implies that
+   versions 3.49 or later of Kermit-11 will not  be  completely
+   compatible  with older versions.   The best workaround until
+   a copy of ver 3.49 or later can be obtained  is  to  disable
+   attribute packet processing with the SET NOATTR command then
+   SET FILE FIXED on BOTH ends before transferring binary data.
+
+1 BUG
+
+ Displays where to get help should one encounter a bug in this program.
+
+1 BYE
+
+ Synonym for LOGOUT.
+
+1 CD
+
+ Makes the specified device the default disk, directing to it
+ file operations for which no device is explicitly specified.
+ This only modifies Kermit, the monitor remains unchanged and
+ you'll be back where you started after exiting the program.
+
+ If no device/directory is given some Kermits, including this
+ one and C-Kermit, will default to the home (login) directory.
+
+1 Character-Sets
+
+ RT-11 stores all files transparently thus no character set
+ conversion is necessary for files received by or sent from
+ this Kermit.
+
+1 CLS
+
+ CLear Screen, with numerous resets for VT-100 terminal.
+ CLX does the same, then enables the reverse video mode.
+
+1 CLX
+
+ Clears a VT-100 screen ala CLS, then sets the reverse video mode.
+
+1 Common-Problems
+
+ Can't talk to the modem:
+
+ Check modem control signals.  If all else fails, put a breakout box in
+ the line and  observe  what  signals are present.  Some modems require
+ DTR to be high even to accept local commands (while not connected to a
+ remote system).  It may be necessary to first SET DTR to get the modem
+ ready.  Some "Hayes" style modems will only accept upper case in their
+ command strings.  It may be necessary to increase the time allowed for
+ carrier detection, particularly when MNP, PEP or V.42 error control is
+ being used, perhaps on BOTH ends.  See HELP SET DIAL TIME for this one
+ and consult the manager of the system you're calling.
+
+ If you are using the XL/XC handler and an interface whose speed is set
+ via hardware switches or wire wrap be sure it's correct.  It should be
+ set for 8 data bits and no parity as well.  If you need to look at the
+ board to check it, the system MUST be powered down before removing and
+ reinstalling it.
+
+ File transfer fails:
+
+ If the file transfer aborts on retries immediately,  there  may  be  a
+ parity  problem.  If the problem shows up on binary files, try the SET
+ PARITY SPACE command on BOTH Kermits, which forces  8-bit  data  to be
+ prefixed into seven bits.  If you instead get a retry about once every
+ 10 seconds, the other Kermit is not  responding  and  your  Kermit  is
+ timing out.  Check to see if your connection is still present.
+
+ Under RT-11 the default is SPACE parity, you may need to set the other
+ Kermit to conform.
+
+ If you are sending binary data between unlike Kermits, you  will  most
+ likely have to give the proper command to each to prepare them for it.
+ For Kermit-11 use SET FILE BIN or SET FILE FIX, many other Kermits use
+ the syntax SET FILE TYPE BIN.  CRC error detection should also be used
+ which is done via SET BLO 3 on both ends.
+
+ If your Kermit's packets are being echoed back, try a SET  SEND  START
+ value  command for your Kermit, and a SET REC START same-value for the
+ other Kermit.  This will force Kermit to ignore any echoed packets  as
+ they  won't  have  the default start of packet character (a CONTROL A,
+ octal 1).
+
+ If you are calling into a TSX+ system, you may need to first:
+
+	.SET TT 8BIT
+
+ at the monitor to transfer binary files.  You may also need to:
+
+	.SET TT BITS=8
+
+ however this is a hardware function and thus should be done from a
+ primary line ONLY first, before any subprocess that may run Kermit
+ is spawned.  Doing this from a subprocess may write garbage in the
+ line-parameters word, rendering it useless.
+
+1 CONNECT
+
+ Attaches your terminal  to  the  device that has been SET LINE.
+ To exit and reconnect your terminal to the local system running
+ Kermit type the  "escape sequence,"  which by default is Ctrl-\
+ (an "escape character" used to prefix local commands when using
+ this terminal emulator, see HELP SET ESCAPE) followed by a "C".
+
+ Note well that  "escape"  as used here is _NOT_ the same as the
+ ESC key commonly found on keyboards (unless it has been defined
+ to be the same char via SET ESCAPE).
+
+ The following commands are available by prefixing them with the
+ currently defined escape character:
+
+	B	Send a break to the remote
+	C	Connect back to the local Kermit
+	H	Print this message
+	I	Drop DTR for 0.5 sec (hang up), then restore it
+	Q	Suspend CONSOLE logging
+	R	Resume CONSOLE logging
+	S	CONSOLE logging status
+	X	Reset flow control (XOFF/XON or RTS/CTS as SET)
+	Z	Zap the handler, 100% hose & unhang if possible
+	^x	Send control char "x" to remote using A..Z[\]~?
+	RUBOUT	Send a break to the remote
+	? or /	Print this message
+
+ Once the escape key has been struck or if between keys for the
+ control character command a 5 second timer is started.  Should
+ it expire before another key is pressed, the command is tossed
+ and the terminal emulator resumed.  If data are being received
+ when the escape is typed an XOFF may occur, after which a char
+ sent via the ^x facility may not be accepted at the other end.
+ A received flow control hold will cause each character entered
+ thereafter at the terminal to ring its bell and then overwrite
+ the char previously held in the input buffer.  The "X" and "Z"
+ commands above may be used to attempt to clear a hung line.
+
+ Under TSX-Plus CONNECT allows local window processing.  If you
+ prefer emulating operation of SET HOST/PORT in that ^W/^B will
+ be passed to the remote and local window buffering (if then in
+ use) suspended, see HELP SET VLSWCH.  When VLSWCH is LOCAL one
+ may type two ^Ws which will pass the second one to the remote.
+ TSX passes all other chars to the remote (including line feed)
+ except XOFF and XON (^S,^Q).  If using the KM handler AND your
+ terminal is fast enough to not XOFF, you may SET TT NOPAGE and
+ pass ^S and ^Q as well.
+
+ If a modem is on-line and DTR is dropped (via the "I" command)
+ while connected, the modem will be reinitialized (as it resets
+ many modems) on exiting CONNECT.   This may cause a noticeable
+ delay depending on the length of the init string and the speed
+ at which it may be sent (the last speed set will be used).
+
+ SET CONSOLE alters terminal emulator parameters.  SET TERMINAL
+ modifies items associated with the actual terminal itself.
+
+1 Control-Chars
+
+  Ctrl-C - Aborts the process currently running and returns to the
+	   main command line.  When the program is not waiting for
+	   input from the keyboard TWO ^Cs must be typed.  When it
+	   involves stopping a remote system's packets the bell is
+	   rung to acknowledge the abort, at which one should wait
+	   for this to complete.  This is necessary to avoid chaos
+	   between systems and maintain return paths.  Further ^Cs
+	   will lead to an unconditional abort and transmission of
+	   an error packet which usually stops the remote cleanly.
+	   While waiting for keyboard input, ^C resets the command
+	   recall pointer in SL to the last command entered.
+
+  Ctrl-Z - Exit a command level, or to the monitor if none left.
+
+  Ctrl-\ - Default  "escape"  character for the terminal emulator.
+	   Used to prefix local commands.  See HELP SET ESCAPE for
+	   additional information.  This is NOT the ESC key on the
+	   typical keyboard (unless you SET it to be the same).
+
+ During the exchange of packets (GET/SEND files, REMOTE cmds) these
+ are checked at the end of each DATA packet, and may involve a wait
+ until the current data packet is handled.  Before data have begun,
+ Ctrl-C is the only abort possible:
+
+  Ctrl-A - Prints the current byte count sent or received
+  Ctrl-E - Sends an error packet, aborting asap
+  Ctrl-X - Skip the current file, begin transferring the next one
+  Ctrl-Z - Skips the entire group of files, aborts
+
+1 COPY
+
+ Creates a copy of the input file.  Wildcards are not supported,
+ and it is more efficient to use COPY from the monitor.  You may
+ move a single file retaining the input file name with:
+
+	Kermit-11>COP file dev:
+
+1 CWD
+
+ Synonym for CD.
+
+1 DATE
+
+ Displays today's date.  This program supports dates through 31-Dec-2099.
+
+1 DAYTIME
+
+ Displays the current date and time.
+
+1 Debugging
+
+ Various debug options are available.  See HELP SET DEBUG for
+ in depth information.  Try HELP SET RANDOM regarding a means
+ to deliberately force errors to test recovery from them, and
+ HELP EXAMINE for info about looking at data in memory.
+
+     Logging to TT  (independent of any disk based logging)
+	Files, Packets, States	    SET DEB [NO]TT
+	Packet data as received	    SET DEB [NO]RPACK
+
+     Logging to a file:		    LOG file debug-mode
+	CONNECT terminal logging    SET DEB CONSOLE file
+	Packets/Files/States	    SET DEB PACKET file
+	CONN + Packets/Files/States SET DEB ON file
+	Raw packet I/O		    SET DEB RAW file
+
+     Off disk based debugging       LOG
+     Stop ALL debugging, incl. TT   SET DEB NONE
+
+ Logging during CONNECT may be controlled by typing the escape
+ character followed by a Q to suspend or an R to resume.
+
+1 DELETE
+
+ Deletes a single specified file.  Wildcards are not supported.
+ The entire command name "DELETE" must be used (no substring is
+ acceptable) as some small protection against accidents.
+
+1 DIAL
+
+ Attempts to get an attached modem to dial the number specified.  One
+ must first SET LINE and SET MODEM appropriately.  If the line you're
+ calling is busy you may REDIAL, which retries up to 65,535 times, or
+ less if specified in an argument to it.  When the call succeeds your
+ terminal will be connected to the remote system.
+
+ Phone numbers may be defined and then referenced via symbolic names.
+ See HELP SET PHONE NUMBER for details.
+
+ The following demonstrates using a generic Hayes modem with TSX-Plus
+ by attaching CL0 to TSX line #9:
+
+	Kermit-11>SET CL0 LINE 9	}
+	Kermit-11>SET SPEED 2400	}
+	Kermit-11>SET PHONE XMODE 4	} these may be in KRT.INI
+	Kermit-11>SET MODEM HAYES	}
+	Kermit-11>SET PHONE TONE	}
+	Kermit-11>SET PH NU BP 837-0892 }
+	Kermit-11>DIAL BP
+	AT X4 DT 837-0892
+	RING
+	CONNECT 2400
+	Connecting to CL0:  DTE Speed:  2400
+	Type ^\C to return to your local machine
+	    .
+	    .
+	    . ^\C
+
+	Kermit-11>HANGUP
+
+ Dialing may be aborted by striking  any  key after the process has
+ begun, as long as that's before actually connecting to the remote.
+ DTR is dropped for 0.5 second then, as this can reset many modems,
+ the modem is reinitialized, which may result in a noticeable delay
+ depending on the length and speed of the init string.
+
+ SET DIAL TIME-OUT n (in seconds) can modify the time spent waiting
+ for a response before assuming the call has failed.  It is usually
+ 30 ~ 45 secs.   Please note only this and SET DIAL SETTLE-TIME are
+ usable with a pre-defined modem (anything besides the USER-DEFINED
+ modem itself).  For modems which recognize a busy signal the cycle
+ time will be as fast as it's reported.
+
+ If you are using a Hayes style modem, which falls back to a slower
+ speed when it can't connect  at  the speed used to place the call,
+ under TSX-Plus with the CL handler Kermit saves the initial speed,
+ drops down to the connected speed, then restores it before dialing
+ the next call, unless it's manually set otherwise in the interim.
+
+ If a modem response string for RING has been defined and the modem
+ can detect same, the call is considered to have failed after seven
+ rings.  Consult your modem's documentation then see HELP SET PHONE
+ XMODE regarding enabling the appropriate extended response mode.
+
+1 DIRECTORY
+
+ Displays the default device directory, or that of a specified device.
+ Wildcarding is  implicit  regardless of how the monitor has been set.
+ Switches (/opt) are not implemented.
+
+  Kermit-11>DIR		   ; all files on DK: (default device)
+  Kermit-11>DIR .MAC	   ; all files of type .MAC (same as *.MAC)
+  Kermit-11>DIR KRT*.MAC   ; all beginning with KRT of type .MAC
+  Kermit-11>DIR LD0:.MAC   ; all files of type .MAC on LD0:
+  Kermit-11>DIR EDIT.	   ; file name must be just EDIT with no type
+  Kermit-11>DIR EDIT%	   ; 5 chars, first 4 are EDIT, any type
+  Kermit-11>DIR .MAP,.SAV  ; comma delimits, see HELP SET FILE CSI
+
+1 DISCONNECT
+
+ Synonym for HANGUP.
+
+1 DISMOUNT
+
+ Deassigns the specified logical disk, under TSX V6.2 and up.
+
+	Kermit-11>DIS LD0
+
+ Note that here it is not necessary to first dismount a logical
+ disk before mounting something new using the same unit number.
+
+1 EXAMINE
+
+ Format and print global read/write data to the terminal:
+
+	Kermit-11>EXA PACKET	; dump packet buffer to TT
+	Kermit-11>EXA *		; all defined variables
+	Kermit-11>EXA 44	; address of your choice
+
+ Please  note  attempting  to  examine  an illegal address
+ will crash the program.  The .MAP file for the Kermit you
+ are using may be used to locate addresses not included in
+ the internal symbol table.  Some overlays are permanently
+ loaded (refer to the link command file for the version in
+ use) but most are not, and these most likely will be gone
+ by the time one has returned to Kermit's command line.
+
+1 EXIT
+
+ Terminates Kermit-11 and exits to the monitor, resetting the link
+ device and modem if same were assigned from within the program.
+
+1 File-Format-Info
+
+ The general format of a PDP-11 file name is:
+
+   NODE::DEVICE:[DIRECTORY]NAME.TYPE;VERSION
+
+ "Node" refers to the DECNET node name, for instance HIHO::, if in use.
+ "Device", if present, refers to the physical device or logical name of
+ that on which the file resides.  Two colons "::" delimit the node name
+ and a single colon ":" delimits the device name.  A named directory is
+ delimited by enclosing it within "[]" brackets.
+
+ In the case of RSX-11M/M+ and RT-11, the device name can be  either  a
+ physical name, such as DU0:, or a logical name which will translate to
+ a physical device name, such as LB:.
+
+ For RSTS/E "device" can be a physical device such as DB0: or DU1: or a
+ user or system logical name which  may  include both a physical device
+ and a directory.  Logical  names  are  composed of 1 to 9 alphanumeric
+ characters including "$", as in DISK$ONE:, LB: and so on.  For example
+ the DCL system command:
+
+	$ ASS/SYS DB1:[200,210] SRC$DIR
+
+ associates both the device DB1: and directory [200,210] with SRC$DIR:.
+ An explicitly specified directory overrides any named directory within
+ in a logical name.  Names longer than 9 chars will be truncated.
+
+ Named directories are not used in RT-11, which uses logical disks (see
+ HELP MOUNT) instead.
+
+ On RSTS/E and RSX-11M/M+ the [directory] is a UIC (user identification
+ code) or PPN (project,programmer number) of the format [NNN,MMM].  All
+ users are assigned a UIC or PPN when the account is created.  It's the
+ number you give to LOGIN to log into the system, and also your default
+ UIC or PPN.   Micro-RSX and P/OS may have directories in either UIC or
+ named directory format, such as [1,12] or [KERMIT].  P/OS will default
+ to [USERFILES].
+
+ The NAME field is the primary identifier for the file.  The  name  can
+ be  one  to  nine  characters  for RSX-11M/M+ and P/OS, and one to six
+ characters for RSTS/E, RT-11 and TSX+.  The TYPE field is usually used
+ to  group  files  according  to some convention.  For example, EDI.FTN
+ refers to a Fortran-77 source file, CALEND.C to a "C" source file, and
+ K11POS.TSK refers to a task image.  The TYPE may be 0 to 3 characters.
+
+ The version field is only used by RSX and defaults to the highest then
+ available.  Version numbers may range up to 32,767.
+
+ All systems mentioned support some sort of file name wildcarding,  the
+ flexibility of which varies by executive.  All  support the use of "*"
+ to represent either a fully wildcarded NAME or TYPE.  RSTS/E  supports
+ the use of "?" to match any single character, whereas the others use a
+ "%" to match any single character.   The  RSTS/E  Kermit  server  will
+ translate "%" to "?" internally for GET and REM DIR commands, and this
+ modified Kermit-11 translates "?" to "%" when necessary.
+
+		Examples of wildcarded file names:
+
+	*.B2S		match any file with a TYPE of B2S
+	K11%%%.MAC	match any file starting with K11, followed by
+			one to three characters, with a TYPE of MAC
+	K11???.MAC	same as above, but for RSTS/E
+	XYZ.*;*		all versions of files with a NAME of XYZ with
+			any TYPE (RSX-11M/M+ and P/OS only)
+
+		 File formats (binary and text):
+
+ RT-11 and TSX-Plus
+
+ RT-11 treats all files as a contiguous stream of characters.  There is
+ no information stored in the directory to tell the system (or program)
+ that a file is readable text (source program, runoff document, ...) or
+ binary data (executable program, object modules, etc).  An application
+ program like Kermit-11 needs to know what type of file to expect, thus
+ the presence of the SET FILE TYPE command (discussed below).  The only
+ real convention is that text files are streams of 7-bit data with each
+ record terminated by a carriage-return/line-feed, and binary files use
+ the file TYPE (.SAV, .SYS, ..) to identify them as such.  This is what
+ Kermit checks to determine if a file should be sent as text or binary.
+ See HELP SET BINARY for detailed info.
+
+ RSTS/E, P/OS and RSX-11M/M+
+
+ These systems can support a large number of file attributes via FCS-11
+ (RSX-11M/M+) or RMS-11 (all).  Text files are  normally  either STREAM
+ format (FB$STM) or VARIABLE with implied carriage control (FB$VAR  and
+ FB$CR).  RSTS/E has historically defaulted to STREAM,  whereas the RSX
+ based systems use VARIABLE.  Kermit-11 uses the defaults when creating
+ files if the sending Kermit doesn't supply attribute data.  Conversion
+ of the internal data format to one which can be transmitted to another
+ Kermit is transparent for these file types.  Both attributes  and  the
+ file TYPE are examined by Kermit-11 to determine if a file needs to be
+ sent as a text (default) or binary file.  On RSTS/E Kermit also checks
+ the protection code as there bit 6 is used to flag an executable file.
+
+	 Saving files on the PDP-11 from your microcomputer:
+
+ If the other Kermit doesn't adequately support attribute exchange then
+ one must SET FILE TYPE FIXED on both (local and remote) Kermits to get
+ or send non-text files correctly.  When Kermit-11 is thus put into its
+ binary mode, all data are read from or written to the file without any
+ translation or internal record control information.  Any attributes in
+ the file's directory entry are ignored and data are read or written in
+ unformatted 512 byte blocks.  Thus it is indeed  possible  to transfer
+ files like task images and object libraries.  Detailed info concerning
+ the capabilities of this modified Kermit-11 is in HELP SET ATTRIBUTES.
+
+ Never try to do a wildcarded send with mixed  binary  and  text  files
+ while the file type is set FIXED.  The result could be unusable as not
+ all systems store text data in the same internal format.  For example,
+ if the binary mode is forced on under RSX (SET FILE TYPE FIXED) a file
+ with implied carriage control (normal for RSX text files) will be sent
+ as (for each line) two bytes containing the record length, followed by
+ the actual data null padded to an even length.  This is not incorrect,
+ rather, it is EXACTLY how the data are stored on the disk.
+
+ In general, avoid sending anything other than unformatted binary files
+ and  text  files  to  unlike  systems.  For example, requesting an RMS
+ indexed file from the PDP-11 to be sent to a PC would cause  Kermit-11
+ to send it as a binary file,  but the file's attributes would be lost.
+ Sending such a file back to the PDP-11 would  result  in  an  unusable
+ file unless you could reconstruct the attribute information.
+
+1 FINISH
+
+ Tells the remote Kermit server to stop and then, as this does not
+ actually log out the remote session, CONNECTs back to the remote.
+
+1 GET
+
+ Requests a remote Kermit server to send the specified file or group of
+ files.  This command can only be used when Kermit-11 is local, while a
+ Kermit server is running on the other end of the link specified by SET
+ LINE.  This means you must have CONNECTed to the other  system, logged
+ in, run  Kermit  there, issued the SERVER command, and escaped back to
+ your local machine.
+
+ If you are trying to receive binary files from a Kermit which does not
+ support attribute transmission SET FILE TYPE FIXED and SET BLOCK-CHECK
+ on BOTH ends first, or the transmission may appear fine while all high
+ bits are actually being tossed.
+
+ When receiving text files from a non RT-11 system this Kermit will add
+ 25% to the received file size as record terminators are often excluded
+ from what is reported, or are of a different size (Unix).  Files close
+ to the maximum free space may be accommodated by SET FILE CREATE-SIZE,
+ which overrides any passed size attribute, or by explicitly specifying
+ a size with the FILENAME[size] syntax where "size" is the desired size
+ expressed as a decimal number of blocks.  See HELP SET FILE CREATE for
+ further info.
+
+	Kermit-11>GET ABC.FILE XYZ.DAT[100]  ; xyz.dat will be 100 blks
+
+ The remote filespec may be anything that's legal at the remote system,
+ it is not  parsed  or validated locally.  Both "!" and ";" are sent to
+ the remote from the keyboard though they're comment delimiters in TAKE
+ files.  Lower case alpha may be used (see HELP SET FILE NAMING), space
+ (command argument delimiter) and non-printing chars are only available
+ by typing them in at the remote Kermit's command line.
+
+ If a file arrives that you don't really want, you can try to cancel it
+ by typing Ctrl-X which sends the request to the remote Kermit.  If the
+ remote understands it (some Kermits may not) it will comply, otherwise
+ it will continue to send.  If a file group is being sent, you can bomb
+ the entire group by typing Ctrl-Z.  These control chars are checked at
+ the end of each DATA packet.  Use Ctrl-C to abort when the need arises
+ before receiving the beginning of the first file.
+
+ If the remote Kermit is not capable of server functions, then you must
+ CONNECT to it, use the SEND command, escape back here and use RECEIVE.
+ Note that file(s) must be specified at the SEND end as RECEIVE expects
+ to find the name in the send file init packet.
+
+			GET Command Summary:
+
+    Tells a remote Kermit server to send a file or group of files.
+    Wildcards, ppns, etc, may be used.  Wildcarded renaming is not
+    supported, except an optional output device (only) may be used
+    to place a single file where desired.
+
+	Kermit-11>GET *.MAC		; gets all .MAC files
+	Kermit-11>GET afile dev:	; put afile on dev:
+	Kermit-11>GET afile asfile	; rename to asfile
+	Kermit-11>GET afile,b*,cfile	; comma delimits file names
+
+1 HANGUP
+
+ Drops DTR for 0.5 sec then restores it.  This only available under CL
+ from TSX+ V6.0 or above, KM (RT-11 V4.0/TSX+ V5.0 + up) or XL/XC from
+ RT-11 V5.2 or above.  If a modem is on-line it is presumed a DTR drop
+ requires reinitializing it.  This is done immediately after restoring
+ DTR and may slightly increase the time required to complete.
+
+ Your modem MUST be able to disconnect when DTR is lowered for this to
+ actually dump the telephone connection.
+
+1 HELP
+
+ Entering HELP alone prints the list of available topics.
+ For detailed information about a specific function:
+
+	Kermit-11>HELP topic [subtopic] ..
+
+ Should one prefer the printed page, this dumps help text
+ to LP to produce a handy reference:
+
+	Kermit-11>HPRINT topic [subtopic] ..
+
+ See HELP HPRINT and HELP PRINT for printing other than to
+ LP.   HELP and HPRINT also support wildcarding, as in:
+
+	Kermit-11>H *		; everything
+	Kermit-11>H SET *	; all sets
+	Kermit-11>H SET FIL *	; all file types
+
+ This modified Kermit-11 contains an internal index to its
+ help text file.  If KRTHLP.HLP is modified Kermit must be
+ rebuilt.  See KRTHLP.MAC for instructions.
+
+1 HOME
+
+ Resets the default device to the home directory.
+ This is, if not set otherwise, DK when Kermit-11
+ was started.  SHOW displays current assignments.
+
+1 HPRINT
+
+ Like HELP but also dumps text to LP to produce a handy reference:
+
+	Kermit-11>HPRINT topic [subtopic] ..
+	Kermit-11>HPRINT *
+
+ You may ASSIGN xx LP under RT-11 (where xx is a disk) then run KRT
+ and use HPRINT to create a disk file of the text formatted as it's
+ displayed by the program.  The file name KRTHLP.OUT will be used.
+
+ LP is the only printer device name Kermit supports and HPRINT does
+ not support a device name argument.  You may ASSIGN something else
+ as LP from the monitor before starting Kermit.
+
+	.ASSIGN LS LP		! have Kermit print to LS
+	.K11			! run program, do printing
+	.DEASSIGN LP		! then clean-up when done
+
+1 Installation-Notes
+
+ This program will run under RT-11 or TSX-Plus.  The system clock must be
+ running.  As distributed KRT is built to run on a non-EIS CPU and KRTTSX
+ is built for EIS processors.  These monitors and handlers are supported:
+
+  RT-11SJ   V5.0 + up   TT  KM  XL	; SYSGEN for TIMER support
+  RT-11FB   V4.0 + up   TT  KM  XL	; SYSGEN for..
+  RT-11XM   V5.1 + up   TT  KM  XC  XL	;  ..SPCPS support
+  RT-11 all V5.6 + up   TT  KM  XC  XL	; including separate I&D space
+  TSX-Plus  V5.0 + up   TT  CL  KM  XL	; see HELP INSTALL TSX
+
+  NOTE:  XL first appeared in RT-11 V5.1.  Prior releases must use either
+  TT (the console terminal port) or KM (a "Kermit Modem" handler supplied
+  with this program) for communicating with the outside world.
+
+ KRTTSX.SAV uses extended memory overlays for XB,XM,ZB,ZM,TSX and KRT.SAV
+ low memory overlays for  FB,SB,SJ,TSX  to accommodate small systems.  FB
+ is the ONLY RT-11 V4 monitor which can run this program.  VBGEXE or VRUN
+ may be used under mapped RT-11 monitors.  It's best to load any handlers
+ required first, even for a background task.  KRT's maximum packet-length
+ is 600., KRTTSX's is 1920., this is determined by the NONEIS conditional
+ code for MAXLNG in KRTMAC.MAC.
+
+ KRTTSX requires 166kb of memory to load, KRT only needs 41kb.  Under TSX
+ it's 172kb and 47kb for V6.5 or 171kb and 46kb with V6.4.  KRT increases
+ disk I/O as its overlays are not kept resident.  When none of these will
+ load KRTMIN (sometimes distributed separately) is a special version that
+ uses less memory by only communicating through the console terminal port
+ (see KRTMIN.DOC for details).
+
+ If you already have some form of Kermit on your system, you may try this
+ one out by copying to a disk containing no other Kermit files, assigning
+ that disk DK, deassigning HLP, INI and KRT, and running the new program.
+ Assuming LD0 is a scratch disk and you have an 8" floppy:
+
+	.COP DY0:*.(SAV,HLP,INI) LD0:
+	.ASS LD0 DK
+	.DEA HLP
+	.DEA INI
+	.DEA KRT
+	.SET USR SWAP	! if running RT-11
+	.RU KRTTSX	! use KRT if KRTTSX won't load
+
+ To dial out, edit the copy of  KRT.INI  on  LD0 as needed for your site.
+ It is not necessary to use a command file for such things as attaching a
+ CL unit to a TSX line before running this Kermit - everything may now be
+ easily handled during its initialization.  At this point it is suggested
+ you use the running Kermit to read through its own HELP,  especially the
+ SET LINE and SET CL topics.  If you opt to use any sort of indirect .COM
+ file to actually run  KRT/KRTTSX,  please  note that under TSX using the
+ ^>R KRT.. option to force command file input to the running program will
+ cause the test for TT input during the strike any key abort when dialing
+ to hang and you won't be able to dial out from the command file.  Kermit
+ does process indirect command (TAKE) files as well as arguments from the
+ command line used to run it, either of which may be used instead of ^>R:
+
+	.KRTTSX DIAL TOMMY  ! dials number defined in init as "tommy"
+	.KRTTSX TAKE TOMMY  ! runs the indirect command file tommy.com
+
+ You may also have to force arguments for the program to it when run from
+ a command file under TSX:
+
+	R KRTTSX ^1 ^2 ^3   ! as needed, up to 6 args
+
+ There is an additional problem when forcing command line input to Kermit
+ in that comment delimiters "!" and ";" are processed as normal chars and
+ will cause errors.  This allows them to be passed to a remote system for
+ RSX/VMS version numbers and the like.  They are treated as delimiters in
+ Kermit's internal command file processing, thus the best procedure is to
+ dump the "^>R KERMIT" line from such files and treat them as Kermit TAKE
+ files.  If typing in arguments when starting Kermit is a problem one may
+ use a separate command file run from the monitor containing only:
+
+	R KRTTSX TAKE TOMMY
+
+ This allows tommy.com to contain comments without crashing when run.
+
+ If it's decided to permanently install this program all old Kermit files
+ (K*.HLP, K*.INI, K*.SAV, etc) should be backed up then replaced by those
+ from this package.  Dialing from a command file (if in use) will need to
+ be treated per the above.
+
+ After ensuring RT-11 or TSX requirements are met patch KRT.INI (examples
+ follow) for your site, then copy these to SY:
+
+ KRTTSX.SAV  -  or KRT.SAV, the executable image, rename as desired
+ KRTHLP.HLP  -  HELP text file, may also be on HLP, KRT or DK
+
+ and this to the logical INI, KRT or a default disk of your choice:
+
+ KRT.INI  -  initialization command file
+
+ When started  KRT/KRTTSX  will  check  INI,  KRT,  DK and SY for KRT.INI.
+ Keeping it off SY allows others to use a different init file, and permits
+ the program to be easily run in the remote mode by callers to the system.
+ Or, one may SET LINE TT to accomplish the same thing.  For multiple users
+ sharing a group of lines check HELP SET CL before editing KRT.INI.
+
+ The HELP text file search (for KRTHLP.HLP) path is HLP, KRT, SY and DK.
+
+ KRT.SAV/KRTTSX.SAV may be  renamed  as  is convenient (K11 or KERMIT) but
+ KRT.INI  and  KRTHLP.HLP are called (by these names) by Kermit,  and thus
+ must not be renamed.  If the HELP text (KRTHLP.HLP) is altered in any way
+ Kermit must be rebuilt.  See KRTHLP.PRE for details.
+
+ Kermit is then run by its name, and an initial command line may be passed
+ to it as argument(s) to the KMON command:
+
+	.K11		! run Kermit
+	.K11 DIAL DEC	! run Kermit, dialing number set in init file
+
+ Also check the specific info for your operating system if Kermit will not
+ be the only task running.
+
+2 Files-Required
+
+ The following files comprise everything required for KRT/KRTTSX:
+
+ KRT   .BWR	"Beware" file, known bugs and possible things to come..
+ KRT   .COM	Links low memory overlays image, KRT.SAV
+ KRT   .DOC	Installation and Release Notes
+ KRT   .IND	Bob Schor's Kermit-11 init file manipulator, an IND process
+ KRT   .INI	Sample initialization file
+ KRT   .MAP	Link map of low memory overlays image, KRT.SAV
+ KRT   .SAV	Low memory overlays image, for RT-11FB,SB,SJ and TSX+
+ KRTAIL.MAC	Tailgating protection for TSX+ V6.31 and below
+ KRTASM.COM	Assembles all source modules for an EIS CPU
+ KRTASM.NON	Assemble all sources for a non-EIS CPU using macros in KRTNHD
+ KRTATR.MAC	Attribute packet processing
+ KRTCDF.MAC	Command macro definition .INCLUDE file
+ KRTCMD.MAC	Main program loop, commands calling APR4
+ KRTCM1.MAC	APR4 overlay for the rest of the commands
+ KRTCOM.MAC	Main loop commands data table
+ KRTCON.MAC	CONNECT terminal emulator
+ KRTCVT.MAC	File name conversion routines
+ KRTDAT.MAC	Global read/write data
+ KRTDEB.MAC	EXAMINE command, display memory by symbol or address
+ KRTDEF.MAC	Packet definition .INCLUDE file
+ KRTDIA.MAC	DIAL command, also SET MODEM and SHOW DIAL
+ KRTDIR.MAC	Directory operations
+ KRTDSP.MAC	I/O dispatching to handler or terminal
+ KRTEDI.MAC	SL command line editor
+ KRTERM.MAC	I/O support for the controlling terminal line (TT)
+ KRTERR.MAC	Error messages
+ KRTHIS.DOC	Narrative in-depth edit history
+ KRTHLP.HLP	HELP text file
+ KRTHLP.MAC	HELP command processor
+ KRTIDX.BAS	Builds KRTIDX.MAC from KRTHLP.HLP
+ KRTIDX.MAC	HELP text file index for high speed lookups
+ KRTINI.MAC	Initialization, packet logging
+ KRTKM .MAC	"Kermit Modem" handler
+ KRTLNK.COM	Links extended memory overlays image, KRTTSX.SAV
+ KRTMAC.MAC	Macro definitions .INCLUDE file
+ KRTMDM.MAC	Pre-defined modems database
+ KRTNHD.MAC	MUL, DIV, SOB, ASH macros for non-EIS CPU
+ KRTOID.COM	Link for RT-11 V5.6 separate I&D space, low memory overlays
+ KRTOSI.MAC	One-shot initialization at program start
+ KRTPAK.MAC	Low level packet processing
+ KRTREC.MAC	Incoming file protocol processing
+ KRTRMS.MAC	File access, RMS emulation
+ KRTSEN.MAC	Outgoing file protocol processing
+ KRTSER.MAC	Server support
+ KRTSHO.MAC	SHOW, COPY, DELETE, PRINT, RENAME commands
+ KRTSJ .CND	RT-11FB,SB,SJ conditional assembly file for KM handler
+ KRTSJ .MAC	Root module for low memory overlays image
+ KRTSTD.MAC	SET command data table
+ KRTST0.MAC	SET command overlay 0
+ KRTST1.MAC	SET command overlay 1
+ KRTSUB.MAC	Misc common utility routines
+ KRTSV4.COM	Build KM handler under RT-11 V4
+ KRTSYS.COM	Build KM handler under RT-11 V5
+ KRTTRA.MAC	TRANSMIT command
+ KRTTSX.CND	TSX conditional assembly file for KM handler
+ KRTTSX.MAP	Link map for extended memory overlays image, KRTTSX.SAV
+ KRTTSX.SAV	Extended memory overlays image, for RT-11XB,XM,ZB,ZM and TSX+
+ KRTUTL.MAC	Misc utility routines, mount for TSX+
+ KRTVID.COM	Link for RT-11 V5.6 sep I&D space, extended memory overlays
+ KRTXL .MAC	I/O support for CL, KM, XC and XL
+ KRTXM .CND	XM conditional assembly file for KM handler
+ KRTXM .MAC	Root module for extended memory overlays image
+ KRTXMO.MAC	XMODEM, also SEND command processor
+
+2 KM
+
+ KM is a "Kermit Modem" communications handler provided to support
+ TSX-Plus features not otherwise available under RT-11, as well as
+ older releases of TSX that preceded its CL handler.   KM combines
+ the best of both worlds, including the following under RT-11:
+
+	o  Works with DL(V), Falcon and PRO serial interfaces
+	o  Speed may be SET and SHOWn from within Kermit
+	o  Automatic fallback to the connected speed
+	o  An eight-bit data path
+	o  Selectable hardware (RTS/CTS) flow control
+	o  Emulation of TSX's CLCLR (flush pending I/O)
+	o  DTR toggling to support Kermit's HANGUP command
+	o  Usable with RT-11 V4.0 and up, and TSX-Plus V5.0 and up
+
+ To use KM you must first edit the appropriate conditional assembly
+ files for the serial line interface in your system:
+
+	KRTSJ .CND  -  for RT-11FB, RT-11SB, and RT-11SJ
+	KRTXM .CND  -  for RT-11XB, RT-11XM, RT-11ZB and RT-11ZM
+	KRTTSX.CND  -  for TSX-Plus
+
+ Then assemble and link using KRTSYS.COM if being done under RT-11
+ V5.0 or above, or KRTSV4.COM if using any RT-11 V4 release.  This
+ will create KM.SYS, KMX.SYS and KM.TSX, which should be copied to
+ your system device (SY) where they may be INSTALLed and LOADed as
+ needed.  Note that KRTKM.MAC (the handler source file) must be on
+ the default disk for this assembly.  Under TSX you'll have to use
+ TSXMOD to add a definition for KM as shown below, or define it in
+ TSGEN.MAC and rebuild the system.  In either case you must reboot
+ as it only loads handlers when started.  KM may be mapped to save
+ low memory.
+
+	DEVDEF	<KM>,MAPH
+
+ WARNING:   Earlier versions of RT-11 may choke on the "dma=no" in
+ the .drdef macro.  If it causes an error your system doesn't need
+ it and it should be dumped to allow successful assembly.
+
+ KM supports the following SET commands from the monitor (KMON):
+
+	SET KM CSR=octal-address	! except on the PRO for
+	SET KM VECTOR=octal-address	! which these are fixed
+
+ Hardware flow control REQUIRES pins 4 and 5 be carried through in
+ the modem cable, 4 to 4 (RTS) and 5 to 5 (CTS), DTE (the port) to
+ DCE (the modem), in addition to those otherwise normally present.
+ See HELP SET FLOW-CONTROL for info about its use.
+
+ The port should be set up for 8 data bits and NO parity as Kermit
+ does parity in software.
+
+ WARNING:  If the interface provides selectable interrupt priority
+ and your max speed will be greater than 4800 you will likely have
+ to use BIRQ 5 to avoid dropping chars.
+
+ NOTE:  This handler does NOT support VTCOM, nor is it intended to
+ be used with anything other than KRT V03.62 or future releases.
+
+ WARNING:  Because it's  impossible  to  bomb  an outstanding read
+ completion routine once KM has been assigned the  link  the  only
+ way to deassign KM is to exit Kermit.
+
+ See the top of KRTKM.MAC for detailed installation instructions.
+
+2 KRT.INI-Examples
+
+ ! Multiple users under TSX-Plus with possibly assorted modems
+ ! This seeks the first available line/port from those specified
+ ! May be installed on SY to be shared by all users, see HELP SET CL
+ SET CL PORTS 9/19200/T25/3 11/2400/H/6 8/2400/H/4
+ SET CL UNITS 2 1 0
+ SET CL PRIORITY 71	! don't drop chars at high speeds
+ SET CL LINE *	! search for first available combination of the above
+ ! For efficiency's sake, the above may be reduced to:
+ !SET CL POR 9/19200/T25/3 11/2400/H/6 8/2400/H/4,UNI 2 1 0,PRI 71,LIN *
+ SET VLSWCH REMOTE	! emulate SET HOST/PORT if needed
+  ... other items as required ...
+
+ ! Single user under TSX-Plus
+ SET CL0 LINE 9		! includes "SET LINE CL0," unneeded by PRO-series
+ SET SPE 2400		! CL or KM only, others must do from monitor
+ SET PHO XMODE 4	! enable CONNECT/speed messages for fall back
+ SET MOD HAYES
+ ...
+
+ ! Generic RT-11 ..
+ SET LINE KM		! to call out..
+ SET FLOW-CONTROL RTS	! if preferred, must be enabled in hardware too
+ SET MOD HAYES
+  ...
+
+ ! System-independent items
+ SET LONG ON		! enable long packets
+ SET SL ON,KED		! turn on SL editor, enable its KED mode
+ SET PHONE TONE
+ SET PROMPT "Kermit-11> "
+ SET PHO NUM DECUS 1 800 521-8950	! Username: INFORMATION for info..
+
+ By default init file commands and informational responses to them are not
+ echoed to the screen.  After the init completes the default terminal mode
+ becomes NOQUIET, unless set in said file, which overrides these defaults.
+ If you wish to display the entire init process, make SET TT NOQ the first
+ line in KRT.INI.  A file may be tested by running it as a TAKE file:
+
+	Kermit-11>@dev:KRT.INI
+
+ SHOW FILE to check the name of the init file Kermit-11 used at start-up.
+
+2 Modems
+
+ Generally, connecting a modem requires an appropriate interface such
+ as a DLV-11E which supports DTR and software speed selection.  It is
+ possible to get by without such things, however (and particularly on
+ TSX) this may pose a security risk in that the system has no control
+ signals with which to log out a disconnected job.
+
+ Keeping the above in mind, note that if your modem requires  DTR  to
+ be present, you must use an interface that asserts it, force it high
+ internally in the modem, or build a cable to force it high.  Without
+ an appropriate interface HANGUP will not function and TSX is open to
+ serious security problems if incoming calls are allowed.
+
+  WARNING:  If the interface provides selectable interrupt priority
+  and your max speed will be greater than 4800 you will likely have
+  to use BIRQ 5 to avoid dropping chars.  The port should be set up
+  for 8 data bits and NO parity as Kermit does parity in software.
+
+ The modem cable must at a minimum carry through pins 2 and 3 (data),
+ 7 (ground), 8 (DCD) and 20 (DTR).  Under TSX the modem may be set to
+ answer the line (pin 22, the ring indicator, must also be connected)
+ then when Kermit is started if a CL unit is attached to the line and
+ a modem set Kermit retains control of it all until dropping the line
+ or exiting the program,  when the modem and line will be restored to
+ their idle (auto-answer) state.
+
+ The SET MODEM command is used to establish the type of modem you are
+ using for the DIAL command.  Enter SET MODEM ? for a current list of
+ of pre-defined modem types.  See HELP SET DIAL for information about
+ entering a USER-DEFINED modem structure.
+
+ This Kermit is capable of matching the DTE (system) speed to that of
+ the DCE (modem) in response to a message by the modem (CONNECT nnnn)
+ only if using the CL or KM handler.  Currently the generic Hayes and
+ Telebit T2500/T3000 modem definitions support this.  Under XL/XC the
+ speed can't be changed after Kermit is running, it must be done from
+ the monitor first otherwise the queue will be lost.  The DCE must be
+ locked to the same speed, which must be at least the highest desired
+ carrier speed.  The MNP and V.42 versions of the above support this.
+ If this is not suitable, a USER-DEFINED modem structure may be used.
+
+ Be aware that file transfers FROM this Kermit via a modem whose DCE
+ speed is greater than the connected speed (with the distant system)
+ will require XOFF flow control, and servicing the interrupts caused
+ by it may substantially increase the cpu's loading.  If the maximum
+ connected speed possible is 2400 or less, dropping the DTE speed to
+ 9600 (when same must be locked for MNP/V.42) is a good idea.  Using
+ the KM handler's hardware flow control is another option.
+
+ NOTE:  This program toggles DTR to reset the modem thus this option
+ must be enabled as part of the modem's default configuration.
+
+  The following examples have been taken from actual daily use with
+  this program to both dial in and out under TSX-Plus.  Note the S7
+  register (wait time to connect) is set to 255 when Kermit inits a
+  modem to dial out so Kermit's SET DIAL TIME-OUT takes precedence.
+
+3 Anchor
+
+	Anchor Automation "Signalman Lightning 24" Model MK24:
+
+                CONFIGURATION
+
+   S00=002    S01=000    S02=128    S03=013  NOTE: S0=2 here because this
+   S04=010    S05=008    S06=002    S07=020  modem occasionally glitches
+   S08=002    S09=006    S10=005    S11=040  DCD when answering the first
+   S12=050    S13=000    S14=044    S15=000  ring, which TSX will catch &
+   S16=000    S17=000    S18=000    S19=000  then hang up on when it's not
+   S20=000    S21=016    S22=118    S23=054  there 0.5 second later..
+   S24=000    S25=005    S26=000    S27=000
+   S28=000    S29=000    S30=000    S31=255
+   S32=001    S33=000    S34=000    S35=001
+
+   B=0  Y=0  &M=0   &D=2   &C=1  &J=0  &T=0
+   X=4  M=1   F=1    E=0    Q=1   V=1
+
+   DIAL=TONE    SPEED=2400     PARITY=NONE
+
+   The Anchor modem will save all of the above, including its "S" registers
+   in RAM (backed up with a lithium battery), via AT&W.  Then one need only
+   send ATZ to restore its auto-answer operation, which this Kermit will do
+   when exiting.  SET PHONE XMODE 4 for all result codes, and use the HAYES
+   modem type (SET MODEM HAYES).  Note that because this modem restores its
+   time-out (S7) when reset it is set to 20 secs for answering which allows
+   for a more timely response following a failed call.  If using MNP modems
+   on the same system, S7 should be set to 40 seconds.  If you have the MNP
+   model of this modem, stick with the HAYES definition as there is not any
+   provision for locking the DTE speed.
+
+   Configuration switches:
+
+   1 - as req'd, ON for RJ-12/13 busy support
+   2 - ON   DCD/DSR follow detected carrier signal
+   3 - ON   DTR from the computer controls modem (manual says OFF, in error..)
+   4 - OFF  remote digital loopback
+   5 - OFF  enables command recognition by modem
+   6 - OFF  no CTS support
+   7 - unused
+   8 - unused
+
+3 Hayes-MNP
+
+ This is provided for use with Hayes style MNP modems which need the
+ DTE speed locked to support same.  As almost every one is different
+ no specific modem configuration data are listed here.  Hayes-MNP is
+ intended for use when it is NOT desired to change speed in response
+ to a CONNECT nnnn message, or for any other reason.
+
+3 Telebit-T2500
+
+ Three Telebit T2500 definitions are provided.  T2500 is intended for
+ use without MNP or V.42 LAP-M error correction.  It uses the modem's
+ connect messages to match the DTE speed to that of the data path and
+ that requires using either the CL or KM handler.  Set up the T2500's
+ default profile in the "enhanced" command mode as shown below:
+
+ E0 F1 M0 Q3 T V1 W1 X3 Y0 &P0 &T5     Version GF7.00-T2500SA
+ S00:001 S01=000 S02:128 S03=013 S04=010 S05=008 S06=002 S07=040 S08=002
+ S09=006
+ S10=007 S11:050 S12=050 S18=000 S25=005 S26=000 S38=000
+ S41=000 S45=000 S47=004 S48:001 S49=000
+ S50=000 S51=255 S52:002 S54:002 S55=000 S56=017 S57=019 S58=003 S59=000
+ S61=150 S62=003 S63=001 S64=000 S65=000 S66=000 S67=000 S68=255 S69=000
+ S90=000 S91=000 S92=000 S93=008 S94=001 S95=000 S96=001 S97=000 S98=003
+ S100=000 S101=000 S102=000 S104=000 S105=001 S106=000 S107=020
+ S110=255 S111=255 S112=001
+ S121=000 S130=002 S131:001
+ S150=000 S151=004 S152=001 S153=001 S154=000 S155=000 S157=000 S158=000
+ S160=010 S161=020 S162=002 S163=003 S164=007 S169=000 S255=000
+
+ Then, when MNP operation is desired, set the DTE port (via SET SPEED
+ if using TSX's CL handler) to 9600 or 19.2kb if your cpu can keep up
+ with it, then SET MODEM T2500MNP.  This enables MNP only as attempts
+ at a V.42 connection first with some MNP modems appear to leave them
+ in a state where nothing following works.  When an MNP link can't be
+ established operation falls back to the normal mode.
+
+ V.42 and LAP-M facilities are enabled by setting the modem T2500V.42
+ which operation is just like that of the MNP only above, except V.42
+ is tried first, then MNP, and then normal operation if an error free
+ path can not be established.  Negotiation of these protocols can add
+ considerably to the time needed to connect.
+
+ All of this should be done on the same  default  profile with which
+ the modem will  automatically  answer  incoming calls to ensure the
+ modem will be properly reset to  its auto-answer state when exiting
+ Kermit-11 to the monitor.  The "enhanced" command mode is suggested
+ because the "conventional" mode does not allow XOFF flow control in
+ its command mode.  While this is not normally a problem with result
+ messages it does make listing the modem's status impossible at high
+ speeds.
+
+ Under RT-11 either the T2500MNP to T2500V.42 definitions may be used
+ to work around XL/XC's inability to modify its speed as is necessary
+ for the T2500.  Both will connect normally if error correction isn't
+ supported by the remote system.  The KM handler may also be used.
+
+ SET PHONE XMODE 3 to enable all possible result messages, or use 14
+ to force display of the carrier speed and protocol in all cases ala
+ a real Hayes modem.
+
+ If by accident the modem is sent something at an unwanted speed and
+ becomes stuck there, toggle DTR (HANGUP or SET DTR) to reset it.
+
+ If you are using PEP/MNP/V.42 Telebit's Kermit protocol spoofing is
+ the fastest of all possible options even though it only uses normal
+ 94 byte packets between modems.  It is set in the above to run when
+ requested by the other end.  To force it on first SHO LINE to check
+ the DTE speed (if a fallback speed is shown then one must first SET
+ SPEED 9600 or 19200 if using a mode where the DTE speed is locked),
+ then CONNECT and issue the command ATS111=n, when "n" is one of:
+
+	0    No protocol supported
+	10   Kermit protocol with no parity
+	11   Kermit and odd parity
+	12   Kermit and even parity
+	13   Kermit and mark parity
+	14   Kermit and space parity
+	20   XMODEM/YMODEM protocol
+	255  Use protocol specified by other end
+
+ Then, disable long packets (SET NOLONG will suffice), so the modems
+ run most efficiently, and proceed with the transaction.
+
+3 Telebit-T3000
+
+ Three Telebit T3000 definitions are provided.  T3000 is for disabling
+ MNP/V.42 error correction.  It checks the modem's connect messages to
+ match the DTE speed to that of the carrier.  T3000V.42 enables V.42 &
+ MNP modes and locks the speed.  Set up the T3000's defaults as listed
+ below.  This definition  (T3000V.42)  is for use with hardware  (RTS)
+ flow control.  This is ONLY available under the KM handler, where you
+ have an option to SET FLOW-CONTROL RTS before setting the modem-type.
+
+ WorldBlazer - SA - Version LA5.00W- Configuration A
+  B1  E0  L1  M0  Q1  T   V1  X12  Y0
+ &C1 &D2 &G0 &J0 &L0 &Q0 &R3 &S0 &T5 &X0
+ S000=0   S001=0   S002:0   S003=13  S004=10  S005=8   S006=2   S007:255
+ S008=2   S009=6   S010=14  S011=70  S012=50  S018=0   S025=5   S026=1
+ S038=0   S041=0   S045=0   S046=0   S047=4   S048:1   S050=0   S051=255
+ S056=17  S057=19  S058:2   S059:15  S060=0   S061:0   S062=15  S063:1
+ S064=0   S068=255 S069=0   S090=0   S092=0   S093=8   S094=1   S100=0
+ S104=0   S105=1   S111=255 S112=1   S151=4   S155=0   S180=2   S181=1
+ S183=25  S190=1   S191=7   S253=10
+
+ The T3000 does NOT do XOFF flow control in the command mode even when
+ it's enabled and functioning for data between modems unless S48=0 and
+ this of course kills an 8-bit data path.  A third modem definition is
+ provided (T3000X.42) which enables XOFF rtesraint - Kermit quotes the
+ 8-bit counterparts of XOFF and XON so this will only be a problem for
+ binary data transfers using the Xmodem protocol.  This defintion will
+ force S48 to 0 and enable XOFF restraint when initializing the modem.
+
+ See HELP INSTALL MODEMS Telebit-T2500 for more info on Telebit modems.
+
+3 US-Robotics
+
+ US Robotics "Courier" 2400/2400e:
+
+   C1  E0  F1  M1  Q1  V1  X6
+   BAUD=02400  PARITY=N  WORDLEN=8
+   DIAL=HUNT   ON HOOK  TIMER
+
+   &A1  &B0  &H0  &I0  &M0
+   &N0  &R1  &S0  &Y1
+
+   S00=001  S01=000  S02=043  S03=013
+   S04=010  S05=008  S06=002  S07=030
+   S08=002  S09=006  S10=007  S11=070
+   S12=050  S13=032  S14=252  S15=000
+   S16=000  S17=000  S18=000  S19=000
+   S20=000
+
+   Configuration switches:
+
+    1 - UP    DTR controls modem
+    2 - UP    verbal result messages
+    3 - UP    quiet mode, for auto-answer
+    4 - DOWN  don't echo local commands, for auto-answer
+    5 - UP    enable auto-answer, modem answers on the first ring
+    6 - UP    DCD on pin 8 follows action of received carrier
+    7 - as req'd, DOWN for RJ-12/13 busy support
+    8 - UP    to recognize "AT" command set
+    9 - UP    drop phone connection when escape code received
+   10 - UP    load power-on defaults from NVRAM
+   QUAD - as req'd for your system and modem cable..
+
+ Use the Hayes modem type (SET MODEM HAYES).  Set the "&" registers per
+ the above and save them with AT&W.  The "S" registers aren't preserved
+ so ONTIM and TIMIN must = 60. (TSGEN.MAC)  if incoming calls are being
+ accepted (auto-answer enabled) under TSX-Plus.  If wish to use the MNP
+ version, lock the DTE speed as desired to at least 4800 (AT&B5&W) then
+ SET MODEM Hayes-MNP.
+
+ US Robotics modems such as the Courier 2400 or 2400e will occasionally
+ glitch when answering the phone and start a TSX port at 19.2kb instead
+ of 2400.  This is more likely to happen when the modem is not properly
+ cooled.  Replacing its rubber feet with some that hold it higher above
+ the surface on which it resides may help.  Setting the modem to answer
+ after the first ring (that is, on the second) may also help.  Starting
+ with TSX V6.5, 2400 is tried first, before 19200, which also may help.
+
+ SET PHONE XMODE 6 enables all possible result messages from the modem.
+
+2 RT-11
+
+ The RT-11 FB,XB,XM,ZB,ZM monitors must include .SPCPS support if you want
+ ^C to abort anything in the program without actually stopping the program
+ itself.  If KRT is not the only job running it should be FRUNed to ensure
+ it will be able to process incoming data from the remote system.  RT-11SB
+ and SJ must be sysgenned for .mrkt and .twait (TIMER) support.
+
+ If you are using RT-11 V4, the ONLY monitor which can run KRT is RT-11FB.
+
+ SET USR SWAP if it is not already there, this program needs the space.
+
+ RT-11 multi-terminal support has been pulled to keep the size reasonable.
+ Only a handler, or the controlling terminal line, may be used to exchange
+ files with the outside world.  Use XL with RT-11, XC with PRO/RT.  KM may
+ be used with either, it adds speed fallback and support for TSX functions
+ that make life with Kermit more enjoyable.
+
+ As distributed KRTTSX has just enough buffer to load the KM handler built
+ for a DLV11-E in a PDP-11 system.  This may be altered by the extend size
+ (octal number of bytes) specified in KRTLNK.COM:
+
+ krttsx,krttsx=krtxm/t/e:3010//	! APR0, the root   extending HNBUFF
+
+ WARNING:   Because it's impossible to bomb an outstanding read completion
+ routine once KM/XC/XL has been assigned the link the only way to deassign
+ it is to exit Kermit.
+
+ WARNING:   Any SET from KMON on KM/XC/XL while its interrupts are enabled
+ will OVERWRITE THE QUEUE and hose any data then in it.
+
+ Note XC/XL is NOT an eight-bit device thus Kermit's parity will be forced
+ to SPACE under RT-11.  If you have hacked it into handling 8-bits you may
+ SET PARITY NONE either in the init file or from the keyboard after Kermit
+ is running and AFTER you have SET LINE XL or XC.
+
+ HANGUP (DTR control) isn't available unless XL is from RT-11 V5.2 and up,
+ or the KM handler is used.
+
+				= = = = =
+
+   To operate properly at high speeds (2400 and up) and with Kermits
+   not supporting XOFF flow control the XL or XC device handler MUST
+   be modified to increase the internal buffer size and repress XOFF
+   transmission within a packet.  This is very easy to do.
+
+   First copy XM.MAC, XL.MAC, XM.ANS, SYSGEN.COM and for the PRO/300
+   series XC.MAC from the RT-11  distribution  to DK, ASSIGN DK SRC,
+   and then in the copy of the file XL.MAC change the line:
+
+	from:	BUFSIZ	= 64.
+	to:	BUFSIZ	= 256.
+
+   Then IND SYSGEN and tell it to use the saved answer file XM.ANS.
+   When SYSGEN exits, it  will  have created, among other things, a
+   file called XM.CND which is needed for the driver assembly.  For
+   the PRO/300 series substitute XC for XL in the following command
+   procedure to build the handler:
+
+	.COPY SY:XLX.SYS SY:XLX.OLD		! save a copy
+	.REN/NOPRO SY:XLX.SYS SY:XLX.SYS	! unprotect file
+	.UNLOAD XL				! unload handler
+	.REMOVE XL				! and remove it
+	.MACRO/OBJ:XLX (XM,XM.CND,XL)		! assemble new
+	.LINK/EXE:SY:XLX.SYS XLX		! RT V4, handler on SY
+	.LINK/NOBIT/EXE:SY:XLX.SYS XLX		! if RT V5, do this
+	.INSTALL XL				! install it and
+	.LOAD XL				! load into memory
+
+				= = = = =
+
+ To use a handler, you must have an DL-11/DLV-11 interface (in addition to
+ the console interface).  The XL handler supports two DCL commands:
+
+        .SET XL CSR=n
+        .SET XL VECTOR=m
+
+ Where "n" is the address of the CSR (control status register)  and "m" is
+ the  interrupt  vector address.  The defaults are 176500 for the CSR, and
+ 300 for the interrupt vector.  The DLV-11 speed is set with wire wrapping
+ and it's not settable on the XL handler.  If you have a DLV-11E XL may be
+ built with XL$DVE=1 and the speed set from KMON as with XC.
+
+ The XC handler is a special version of XL for the PRO/300 series, its CSR
+ is 173300 and vector is 210(8).  You must SET XC SPEED=nn from KMON prior
+ to running  Kermit  to  change XC's 1200 baud default.  You may also need
+ to UNLOAD XC before Kermit can be FRUN:
+
+	.UNLOAD XC
+	.FRUN KRTTSX.SAV/PAUSE
+	.LOAD XC=KRTTSX
+	.RESUME
+
+ Also, when running in the foreground
+
+        Kermit-11>SET TT QUIET
+
+ allows one to work in the background during file transfers.
+
+ Last, but not least, if there is no way to get an  additional  interface
+ into your system (perhaps you have a four slot Q-bus backplane), you can
+ force Kermit to use the console.  This implies, of course, that it won't
+ be possible to dial out from the RT-11 system - it may only be used with
+ the remote Kermit connected via the console port.  Kermit-11 defaults to
+ TT as its link device and sets the packet length to 60 bytes.  Otherwise
+ the command
+
+        Kermit-11>SET LINE TT
+
+ does the same thing.  You may increase the packet size if larger packets
+ will work, or modify RT-11's default SPACE parity, AFTER the SET LINE is
+ done.
+
+2 TSX-Plus
+
+ One may communicate via TT when calling in,  and  use CL0 to CL7, KM or XL
+ when calling out.  The CL handler is suggested as it's more efficient with
+ TSX-Plus.  See HELP SET CL for details.   On PRO-300 series systems Kermit
+ will try to assign CL0 or CL1 to TSX Line #3 at startup.
+
+ If there is any chance of swapping on your system use TSX's MEMLOCK option
+ when running the program.  This is easily done via the INSTALL facility.
+
+ WARNING:  If you build XL with XL$DVE (set speed) enabled be advised under
+   TSX-Plus (as of V6.5) the KMON command SET XL SPEED=nnnn will modify the
+   hardware port which XL is serving instead of the handler itself and thus
+   fail to produce the expected result.  And regardless, if you must use XL
+   see HELP INSTALL RT-11 regarding this handler's limitations.  Mapping it
+   is recommended to save low memory.
+
+ KRTTSX uses  217.  blocks  in the  TSX  PLAS  swap file.  The TSGEN/TSXMOD
+ parameter  determining  its size is SEGBLK.  If modified, TSX must then be
+ restarted to create the new swap file.
+
+ In the CONNECT mode 11.  activation  characters  are declared so the TSGEN
+ parameter MXSPAC must be => 11.
+
+ Under TSX one must SET IO ABORT so errors won't cause waits for the I/O to
+ rundown.  In  TSGEN  this may be accomplished by making IOABT = 1.  It may
+ also be done as a keyboard command.
+
+ XOFF operation without dropping characters in the CONNECT mode at 2400 and
+ up may require enlarging TSX's silo and input buffer on lines to which the
+ CL units are attached.
+
+	BUFSIZ	1024.,1024.
+	SILO	255.,64.,16.
+
+ in the LINDEF does the job though this is a bit big if 2400 is the fastest
+ speed used.  Kermit also can raise its priority when actually talking to a
+ CL unit so as not to drop chars at high speeds, see HELP SET CL.
+
+ The above also applies to file transfers via the controlling terminal line
+ (TT).   When sending to a TSX system you may also need to set its priority
+ below any other interactive job and use TSX's /HIGHEFF switch when running
+ Kermit-11 to avoid excessive degradation of response time for other users.
+ This is due to the overhead involved in processing input by TSX's terminal
+ handler, and is not a problem when sending output from a TSX system.  Note
+ this only concerns I/O via TT - comm handlers (CL, XL, etc) are no problem
+ in either direction.
+
+ Binary file transfers  via  TT  might require you to SET TT 8BIT.  You may
+ also need to SET TT BITS=8 but this is a hardware function and thus should
+ ONLY be done from a primary line first, before any subprocess that may run
+ Kermit is spawned.  Setting this via a subprocess may write garbage in the
+ line-parameters word.
+
+ TERMINAL privilege is required to assign a CL unit to a time-sharing line.
+
+				= = = = =
+
+ Modem control is an extremely significant system security issue under TSX.
+ The problem is if a dial-in user's phone connection fails that job must be
+ killed before a following call can be answered and connected to it, and to
+ the still-logged-on session of the previous caller.
+
+ Beginning with V6.4 TSX was given improved modem control, with which these
+ "tailgating" incidents are easily prevented.  The following parameters are
+ suggested for MNP/V.42 auto-answer operation (modem time-out = 40 secs):
+
+ .SH MODEM
+ PHONE=1    Other modem control parameters (in 0.5 sec):
+  ONTIM=80 OFFTIM=1 TIMIN=80 TIMLOC=1 TIMOUT=1
+
+ When no error correction is in use, ONTIM and TIMIN may be halved, and the
+ modem's wait time for carrier (S7 register in Hayes-style units) set to 20
+ seconds.  If the modem's wait time is not settable such that it's restored
+ when reset (ala ATZ), then ONTIM and TIMIN must be set to match the modem.
+ OFFTIM, TIMLOC and TIMOUT must = 1 (the minimum, don't use zero) to ensure
+ the job is logged off immediately.  The $PHONE flag must be defined in the
+ LINDEF (in TSGEN.MAC) for any line connected to an auto-answer modem.  And
+ above all, the modem MUST be configured to hang up when DTR is dropped for
+ any of this to be effective.
+
+ One then includes this in the start-up command files for "phone" lines:
+
+ SET ERROR FATAL
+ !ACCESS SY:CLEAR.COM/READ		! add if other access limited here
+ SET LOGOFF FILE=SY:CLEAR.COM		! add this..
+ SET TT 8BIT,BITS=8			! ..and this for Kermit
+ ...					! other necessary items
+ R LOGON
+
+ and CLEAR.COM contains:
+
+ SET ERROR NONE
+ SET PRIO 70				! be sure this runs before next call
+ SET TT NOPAGE,NODTR,PHONE,AUTO,XON
+ ...					! anything else needed should follow
+
+ This may seem a bit extreme on the SET TT end of things, but it definitely
+ gets the job done, even after in and out buffers are overflowed, XOFF'd in
+ both directions (deadlocked) and the caller has to hang up.  The rationale
+ for the various options used above is:
+
+	NOPAGE	ensures possible noise induced XOFF on DTR drop is harmless
+	NODTR	resets the modem
+	PHONE	ensures port is not in local mode, just in case..
+	AUTO	ensures port not stuck at any particular speed
+	XON	resets any XOFF which may have snuck through..
+
+ Note that TERMINAL privilege is required for the above to drop DTR.  As of
+ TSX V6.5 installing a .COM file with TERM privilege doesn't work, the user
+ must be given it or DTR will not be dropped and the phone line may not get
+ hung up.
+
+ If your version of TSX-Plus is earlier than 6.4 and you must allow dial-in
+ operation there is a program named NOTAIL which runs as a detached job and
+ provides the same protection against tailgating.  See KRTAIL.MAC, included
+ with this Kermit's distribution.
+
+ It's also a good idea when using a Hayes-style modem to disable its escape
+ character means of invoking the modem's command mode.  If one phones in to
+ a TSX system and then uses another line on it to call out or talks to some
+ one such that the other person's data are going into the modem (the one at
+ the TSX system, to which your local system is connected) via its DCE port,
+ there's no other way to prevent someone from using the escape sequence and
+ taking control of that modem, after which they've got your phone line..
+
+1 Introduction
+
+ The Kermit file transfer protocol is  intended  for  use  in  an
+ environment where there may be a diverse mixture of computers --
+ micros, personal computers, workstations, laboratory  computers,
+ timesharing  systems  --  from  a variety of manufacturers.  All
+ these systems need have in common is the ability to  communicate
+ in ASCII over ordinary serial telecommunication lines.
+
+ Kermit was originally designed at Columbia  University  to  meet
+ the need for  file  transfer  between their DECSYSTEM-20 and IBM
+ 370-series mainframes and various microcomputers.  It turned out
+ that the diverse characteristics of these three kinds of systems
+ resulted in a design that was general enough to fit  almost  any
+ system.   The  IBM mainframe, in particular, strains most common
+ assumptions about how computers communicate.
+
+ The   Kermit   protocol    is    specifically    designed    for
+ character-oriented  transmission  over  serial telecommunication
+ lines.  The design allows for the restrictions and peculiarities
+ of the medium and the requirements of diverse operating environ-
+ ments -- buffering, duplex, parity, character set, file  organi-
+ zation,  etc.  The protocol is carried out by Kermit programs on
+ each end of the serial connection  sending  "packets"  back  and
+ forth:  the  sender  transmits file names, contents, and control
+ information and the receiver acknowledges (either positively  or
+ negatively) each packet.
+
+ The packets have a layered design, in keeping with the ANSI  and
+ ISO  philosophies,  with  the  outermost fields used by the data
+ link layer to verify data integrity, the  next  by  the  session
+ layer  to verify continuity, and the data itself at the applica-
+ tion level.
+
+ Connections between systems  are  established  by  the  ordinary
+ user.    In   a   typical  case,  the  user  runs  Kermit  on  a
+ microcomputer, enters a terminal emulation, connects to a remote
+ host  computer  (perhaps by dialing it), logs in, runs Kermit on
+ the remote host, and then issues  commands  to  that  Kermit  to
+ start  a  file transfer, "escapes" back to the micro, and issues
+ commands to that Kermit to start its side of the file  transfer.
+ Files may be transferred individually or in groups.
+
+ Basic Kermit provides only file transfer, and that  is  provided
+ for sequential files only, though the protocol attempts to allow
+ for various types of sequential files.  Microcomputer  implemen-
+ tations  of  Kermit are also expected to provide terminal emula-
+ tion, to facilitate the initial connection.
+
+ More advanced implementations simplify the user interface  some-
+ what  by  allowing  the  Kermit  on  the remote host to run as a
+ "server," which can transfer  files  in  either  direction  upon
+ command from  the  local  "client"  Kermit.  The server can also
+ provide  additional  functionality,  such  as  file  management,
+ messages,  mail,  and  so  forth.   Other optional features also
+ exist, including a variety of block check types, a mechanism for
+ passing  8-bit data through a 7-bit communication path, a way to
+ compress a sequence of repeated characters, and so forth.
+
+ As local area networks become  more  popular,  inexpensive,  and
+ standardized,  the  demand  for Kermit and similar protocols may
+ dwindle, but will never wither away entirely.  Unlike  hardwired
+ networks,  Kermit gives the ordinary user the power to establish
+ reliable error-free connections between any two computers.  This
+ may always be necessary for one-shot or long-haul connections.
+
+ Recommended reading:
+
+ "Kermit, A File Transfer Protocol"  by Frank da Cruz, 1987
+ Digital Press, order number: EY-6705E-DP  (in USA phone: 800 343-8321)
+ DP ISBN 0-932376-88-6, PH ISBN 0-13-514753-0
+
+1 Local-vs-Remote
+
+ Kermit-11 by default assumes that all file transfers will be done over
+ the terminal line you are currently logged in on (TT).  This is called
+ the  REMOTE  mode (the PDP-11 is the remote system) and is the desired
+ case if you are running Kermit on a microcomputer and using the PDP-11
+ through it.  However, if you want to call out from the PDP-11, perhaps
+ on an auto-dial modem, you'll need something besides TT to communicate
+ with the modem.  This is called the LOCAL mode since the PDP-11 is now
+ the local system.  The link device with which Kermit talks to the out-
+ side world is modified with the SET LINE command.
+
+ An implicit SET LINE CL will be done on the PRO-series under TSX-Plus
+ if the handler is found when Kermit is started.
+
+     Under TSX-Plus attaching a CL unit to a line requires TERMINAL
+     privilege, and ALLOCATE privilege is necessary for use of a CL
+     line in any case.  You may have to talk to your system manager
+     to get access to an outgoing terminal line.
+
+     Once you're connected to another system by a modem, some means
+     must exist for the phone connection to be broken if the remote
+     doesn't drop it when logging out.  If your line provides modem
+     control (DLV-11E, DZV-11, etc) the HANGUP command may be used,
+     otherwise your connection may not be hung up, and could run up
+     a tidy phone bill.
+
+1 LOGFILE
+
+ Creates the debug and session logging file.  One may optionally specify
+ a debug mode as an additional argument following the desired file name,
+ or must later select something to be written into the file, such as SET
+ DEBUG CONSOLE to log a session with a remote system.  When a logfile is
+ closed all disk based debug modes are reset (turned off).  If file size
+ is a consideration it may be specified via SET FILE CREATE-SIZE or with
+ the syntax FILENAME[siz] where "siz" is the desired size expressed as a
+ decimal number of blocks.
+
+	Kermit-11>LOG TMP CON     ; default type is .LOG, logs CONNECT
+	Kermit-11>LOG ABC[99] CON ; ABC.LOG will be 99 blocks
+	Kermit-11>LOG LP: ALL     ; LP MUST be spooled, or very fast..
+	Kermit-11>LOG             ; close file, off disk based debugging
+
+ Check HELP Debug for a brief list or HELP SET DEBUG for detailed
+ descriptions of debugging modes.  See HELP PRINT for info on use
+ of other print devices.
+
+1 LOGOUT
+
+ Tells a remote server to log out your process on the remote system.
+ If the remote doesn't hang up the phone the HANGUP command will, if
+ the interface permits, cause the line to be dropped.
+
+1 Long-Packets
+
+ Kermit-11 supports the use of packet lengths greater than 94.  This is
+ particularly useful in file transfers over links with delays exceeding
+ one second,  or whenever transmission errors are sufficiently low that
+ time saved in ACK packets (as opposed to time lost in resending longer
+ data packets) improves efficiency.  The main restriction on the packet
+ size is the link, a given circuit may not pass a given number of chars
+ in a single packet.  Also, BOTH Kermits must support this extension to
+ the protocol, it is always negotiated before any file transfer.
+
+ Long packets are enabled by setting the  receive  packet length on the
+ Kermit which will be receiving the transfer:
+
+	Kermit>SET RECEIVE PACKET-LENGTH nnnn	; use max packets
+	Kermit>SET BLO 3			; CRC error checking
+
+ Here the above may also be accomplished in one command with:
+
+	Kermit-11>SET LONG ON		; max packets, CRC error tests
+
+ It is highly recommended you use the CRC block check,  as the default
+ type one checksum is inadequate for such packet lengths.  Please note
+ it may be necessary to preset this on both sides, before invoking the
+ server.  The maximum packet size possible here may be determined with
+ SHOW PARAMETERS.
+
+ You may disable long packets at this end via SET NOLONG.
+
+ When talking to VMS Kermit or C-Kermit you will probably need to
+ also SET SEN PAC nnnn on them before long packets will function.
+
+1 MILNET-TAC
+
+ The following conditions must be met to successfully use Kermit-11 on
+ a MILNET Terminal Access Controller.
+
+2 Binary-Files
+
+ The TAC (which implements the DDN Telnet Protocol) normally provides
+ just a 7-bit path.  To pass 8-bit data enable the binary mode in the
+ TAC:
+
+	@Binary Input Start    (@b i s)
+	@Binary Output Start   (@b o s)
+
+ Some hosts allow engaging the binary mode from the host.  The binary
+ mode has the side effects of disabling the intercept character means
+ of controlling the TAC, and XOFF flow control.  Refer to HELP MILNET
+ Flow-Control for additional info.
+
+ Eight-bit prefixing in Kermit may also be used to move 8-bit data in
+ a 7-bit path.  This is enabled via SET PARITY SPACE on both Kermits.
+
+2 Flow-Control
+
+ The buffer size (a configurable parameter) for a terminal port on a TAC
+ is typically about 64 bytes.  Since the default packet length in Kermit
+ is usually 94 bytes it is quite likely that buffer overflow will occur.
+ There are two possible solutions.
+
+ 1.  Enable flow control on the TAC by giving it these commands:
+
+	@Flow Input Start      (@f i s)
+	@Flow Output Start     (@f o s)
+
+ Note flow control isn't compatible with binary mode.  It is possible to
+ set binary mode in only one direction.  For example you can set Inbound
+ binary and retain flow control in the opposite direction.  You probably
+ won't need Outbound (input to Kermit-11) flow control at 2400 or below.
+
+ 2.  Make the Kermit packet length small enough to not overflow the TAC:
+
+	Kermit-11>SET REC PAC 60
+
+ You will  probably  get  the best throughput for ASCII files by keeping
+ the packet size as large as possible and using flow control.
+
+ This Kermit also provides a means to wake up the TAC by sending two ^Qs
+ to it when the CONNECT command is given:
+
+	Kermit-11>SET CONSOLE [NO]MILNET
+
+2 Intercept-Character
+
+ The default TAC intercept character is "@", which is also used by Kermit,
+ so one of the following must be done or Kermit packets won't pass through
+ the TAC.
+
+ 1. Change the TAC's intercept character:
+
+	@Intercept <decimal-ASCII-value>
+
+ For example, "@I 6" sets the intercept character to ^F.
+
+ 2.  Use the TAC's Binary mode, which has the side effect of disabling the
+ intercept character.
+
+2 Time-Outs
+
+ When going through satellite hops or multiple gateways the occasional very
+ long delay may result in Kermit timing out waiting for a packet.  See HELP
+ SET REC TIME-OUT or HELP SET SEND TIME-OUT as appropriate.
+
+1 Modems
+
+ Check HELP SET MODEM for pre-defined modem types and HELP SET DIAL
+ for information about entering your own USER-DEFINED modem type.
+
+ SET MODEM ? provides a brief list of pre-defined modems.  See HELP
+ Install Modems for hardware and cabling information.
+
+1 MOUNT
+
+ Logical disks are used to partition a physical device into smaller
+ units which can  themselves  be  treated  as  directory structured
+ devices.  To access the contents of a logical disk, one must first
+ mount it:
+
+	Kermit-11>MOU LDn file       ; .DSK,.DEV are default types
+	Kermit-11>MOU LDn dev:file   ; file is not on DK (default)
+	Kermit-11>MOU LDn file DK    ; makes LDn the default disk
+
+ It's then referred to by its logical name LDn: where n=unit number.
+ Up to eight (LD0-LD7) logical disks may be mounted at any one time.
+ Any new mount overwrites an existing mount for any particular unit.
+ Nested logical disks can  only  be mounted in ascending unit number
+ order.  The only logical assignment supported is DK (default disk).
+
+ MOUNT within Kermit is only available under TSX-Plus V6.2 and up.
+
+1 Parity
+
+ Sometimes what appears to be valid packet is constantly rejected.
+ This usually happens when the requesting Kermit asks a server for
+ a file and then rejects the server's first packet until the retry
+ limit is reached.  This may  be caused by parity being introduced
+ somewhere, as when a modem is generating parity,  or by a private
+ or public net.  If the  communications  link is at fault a simple
+ fix is to SET PARITY SPACE on each Kermit, forcing removal of bit
+ seven from the incoming data.  Normally this will not stop binary
+ transfers since most Kermits can do eight bit prefixing, a method
+ of sending  eight  bit  data over a seven bit link.  You MUST use
+ parity (even if MARK or SPACE)  when using Kermit-11 with the IBM
+ CMS Series/1 or 7171 3270 emulator.  See HELP SET PARITY for info
+ about specific options.
+
+ If you are calling into a TSX+ system, you may need to:
+
+	.SET TT 8BIT
+
+ to be able to transfer binary files to your local system  without
+ incurring the overhead of the Kermit protocol known as  eight bit
+ prefixing.  You may also need to SET TT BITS=8, however this is a
+ hardware function and should  ONLY  be  done from a primary line,
+ otherwise garbage might be written into the line-parameters word,
+ rendering it useless.
+
+ If this isn't a solution because something in the path or the far
+ end requires parity, then SET PARITY SPACE on both Kermits.
+
+ Under RT-11 parity will default to SPACE.  If need be you may SET
+ PARITY NONE in the init file or from the keyboard after Kermit is
+ running and AFTER a link device has been set.
+
+1 PRINT
+
+ Copies a single (non-wildcarded) file to LP.  This device name is
+ hard-coded in Kermit, but you may assign anythng you'd like as LP
+ from the monitor before starting Kermit.  Attempting to print via
+ any other device direct (such as LS) may cause Kermit to hang, so
+ you should ASSIGN xxx LP (where xxx is the desired print handler)
+ from RT-11 or TSX first.  LP is the only print device name Kermit
+ supports.
+
+1 PWD
+
+ Displays the current default device (DK), home directory and, if
+ running under TSX-Plus V6.2 or above, mounted logical disks.
+
+1 QUIT
+
+ Synonym for EXIT.
+
+1 RECEIVE
+
+ The RECEIVE command tells Kermit-11 to receive a file  or  file  group
+ from  the  other  system.  File names are taken from the incoming file
+ headers - that is, files to be sent are specified  on the other system
+ with its SEND command (wildcarding may be used if sender supports it):
+
+	Kermit>SEND afile	; a single file
+	Kermit>SEND *.MAC	; all .MAC files
+
+ Then one escapes back to one's local machine and initiates receive:
+
+	Kermit-11>RECEIVE	; note no file name argument is used
+
+ As files are created, their names will be displayed on your screen.
+
+ If a file arrives that you don't really want, you can try to cancel it
+ by typing Ctrl-X which sends the request to the remote Kermit.  If the
+ remote understands it (some Kermits may not) it will comply, otherwise
+ it will continue to send.  If a file group is being sent, you can bomb
+ the entire group by typing Ctrl-Z.  These control chars are checked at
+ the end of each DATA packet.  Use Ctrl-C to abort when the need arises
+ before receiving the beginning of the first file.
+
+ If the first file arrives too soon, use SET DELAY on the sending side.
+
+ If an incoming file has the same name as an existing file Kermit-11 by
+ default will create a new file.  To preserve existing files check HELP
+ SET FILE PROTECT.
+
+ When receiving text files from a non RT-11 system this Kermit will add
+ 25% to the received file size as record terminators are often excluded
+ from what is reported, or are of a different size (Unix).  Files close
+ to the maximum free space may be accommodated by SET FILE CREATE-SIZE,
+ which overrides any passed size attribute.
+
+ If you are trying to receive binary files from a Kermit which does not
+ support attribute transmission SET FILE TYPE FIXED and SET BLOCK-CHECK
+ on BOTH ends first, or the transmission may appear fine while all high
+ bits are actually being tossed.
+
+ Normally it is much easier to run the remote Kermit as a SERVER.  When
+ that isn't possible, the RECEIVE command is useful.
+
+1 REDIAL
+
+ After having dialed a number, if the phone you're calling is busy,
+ doesn't answer or whatever the problem, you may REDIAL n where "n"
+ is the number of retries desired, up to 65,535 - which is also the
+ default when "n" is omitted.  When the call succeeds your terminal
+ will be connected to the remote system automatically.  REDIAL only
+ acts on the last phone number DIALed.  This number may be seen via
+ SHOW PHONE (if it exists).
+
+ Dialing may be aborted by striking  any  key after the process has
+ begun, as long as that's before actually connecting to the remote.
+
+ SET DIAL TIME-OUT n (in seconds) determines the time spent waiting
+ for a response before assuming the call has failed.  It is usually
+ set 30 to 45 seconds in the modem definition.  On modems which can
+ detect a busy signal, retries will occur as fast as it's reported.
+
+ The generic Hayes modem definition here supports extended response
+ modes, see HELP SET PHONE XMODE.   Please  note these are the only
+ parameters  settable for pre-defined modem types (those selectable
+ by SET MODEM as opposed to SET DIAL) as well as the USER-DEFINED.
+
+1 Release-Notes
+
+ Kermit-11 for RT-11/TSX-Plus  V03.63  27-Sep-1997
+
+ The following work was done primarily to support the use of Kermit-11 on
+ a public bulletin board system under TSX-Plus, and then expanded to make
+ a reliable, general purpose comm program.  Numerous bugs have been fixed
+ and several new routines added.  All major differences between this work
+ and Kermit-11 V3.62 are listed by module in the following extracts, from
+ the edit history in KRTCMD.MAC.  Check HELP Binary-Files for information
+ regarding compatibility with previous Kermit-11s and other Kermits.  See
+ KRTHIS.DOC for an in-depth narrative of modifications made.
+
+2 KRTCDF.MAC
+
+ modify optional prompt arg to use address of prompt string
+ allows longer strings to be used and eliminates redundancy
+ drop $CMGLOBAL
+
+2 KRTCMD.MAC
+
+ convert "-" to "_" in getcm0
+ move most of SHO VER here so the server can call it too..
+ call INCSTA on ^C abort of file xfr so stats don't blow up
+
+2 KRTCM1.MAC
+
+ moved sph$xmode after set$modem so it will prevail..
+ fixed problem caused by using errtxt buffer to store desired xmode
+ where a "?" in a error message acted like SET PHONE XMODE ?
+
+2 KRTCOM.MAC
+
+ consolidate local data..
+ add DAYTIME
+ allow CD, CWD and REMOTE CD, CWD to operate without an argument
+
+2 KRTCON.MAC
+
+ marktime (scheduler) completion routines are now more efficient
+ fix SET CON 8 test for emulator command chars
+
+2 KRTCVT.MAC
+
+ fixfil now fixes unix leading dot ".file" names, also ".x.", etc.
+ cleaned up chkext
+ move unfmts to KRTSUB so KRTMDM can use this overlay ...
+
+2 KRTDAT.MAC
+
+ add rem.ack
+ dpmumber conformed to its current 16-bit max value
+
+2 KRTDIA.MAC
+
+ use opentt in place of ttyini to set linksts flag
+ move the modem definitions to a separate module KRTMDM.MAC
+ SET$DTR and SET$MODEM back here from KRTDSP
+
+2 KRTDIR.MAC
+
+ buffil back to root (KRTPAK), for speed and room now available
+ add support for SET WILDCARDS
+
+2 KRTEDI.MAC
+
+ fixed all possible sign extension problems now the LN$MAX > 127.
+ but keep it under 255. or you'll have to fix some other stuff!
+
+2 KRTERM.MAC
+
+ use hi-efficiency print emt in T.BINWRITE under TSX
+
+2 KRTERR.MAC
+
+ strip trailing blank from prompt string when making error message
+ add er$wpe (write past EOF), er$dna (bad device name)
+
+2 KRTHLP.MAC
+
+ translate "_" to "-" which searching for topics
+ move index data to separate file KRTIDX.MAC solving a size problem
+ increase text line and terminal input buffers to 132. bytes
+
+2 KRTIDX.MAC
+
+ moved help index into a module of its own as KRTHLP was > 4096. words
+
+2 KRTKM.MAC
+
+ Add SPFUNs to support Xmodem compatibly with the TSX CL handler:
+
+	CLSET	<250>	Set CL options (binin and binout only)
+	CLRSET	<251>	Clear CL options (binin and binout only)
+	CLIPND	<261>	Get number of input chars pending
+	CLWBYT	<263>	Write with byte count
+	CLCHAR	<266>	Get CL characteristics (options flags only)
+
+ Enabling binin or binout does not in itself bypass XOFF flow control
+ processing in the input or output routines here, one must explicitly
+ set RTS/CTS flow control as well, or uncomment the appropriate lines
+ in the kiint (binin) and kmint/koint (binout) routines.
+
+ This driver does not currrently support "no flow control" -- RTS/CTS
+ must be enabled when binin or binout is used.  Flow control may then
+ be ignored if desired by using a cable that doesn't connect pins 4 &
+ 5.
+
+ Added .br macro for clarity.
+
+2 KRTMAC.MAC
+
+ add support for SET ATTRIBUTES
+ add flag to suspend logging to a disk file
+ make $LN$MAX 132. bytes for EIS assembly
+ pulled message macro, no longer used..
+
+2 KRTMDM.MAC
+
+ created this module as KRTDIA had become too large
+ there are now 1793. words free in which more modems may be defined
+ defined T3000X.42 modem (it's the T3000V.42 but with XOFF restraint)
+ convert T3000 (DTE falls back to DCE) definition to XOFF flow control
+
+2 KRTOSI.MAC
+
+ fix test for running LTC to accomodate QED's fast PDP-11s
+
+2 KRTPAK.MAC
+
+ make .TOGO = 16, fixing a (harmless) typo (was 26)..
+ dump ^A = restart a packet for SET CONTROL UNPREFIX 1 operation
+ BUFFIL back to root (KRTPAK), for speed and room now available
+ ERROR: now sends error packet when link is open and xfr in progress
+ modify BUFFIL to do BUFPAK too, for repeated char encoding
+
+2 KRTREC.MAC
+
+ support gets to LP
+ display file size in "created file" messages
+ fix unpopped stack on error exit from bufemp
+ display file type in file create message
+ display file name sent back by remote Kermit
+
+2 KRTRMS.MAC
+
+ add support for SET WILDCARDS
+ add support for specifying file size as in "file.nam[siz]"
+ use er$wpe (write past EOF) instead of er$eof for .writw error reporting
+ move getnxt, getcr0, tgetcr here from KRTPAK
+ add REWIND routine
+
+2 KRTSEN.MAC
+
+ sdat$$ now rewinds instead of close/reopen to get back to top of file
+ undo repeated char encoding before dispaying remote ACK packet
+ display file size and type in "sending file" messages
+ display contents of SEND FILE ACK packet, if any..
+ redo data packet at sdat$$ when resizing due to first one failing
+ so the next retry is actually done with the smaller sized packet
+
+2 KRTSER.MAC
+
+ disallow gets to TT
+ gen.h now displays the real version data ala SHO VER
+ clean up remote command response code, display reasons for retries
+ move C$BYE and REMFIN into now improved REMOTE command processor
+ on error resend REMOTE command packet before listening again
+ dump BUFPAK, use BUFFIL instead for repeated char encoding
+
+2 KRTSHO.MAC
+
+ enhanced SHOW CL
+ individually display attributes, ala C-Kermit
+ add SHOW CONTROL-CHARACTER
+ add SHOW WILDCARDS
+ moved SHO VERSION to KRTCMD so the server can also call it..
+ add SHO DAYTIME
+ SHO ALL now shows all, moved to KRTCMD so it can call everything
+
+2 KRTSTD.MAC
+
+ consolidate local data..
+ add SET WILDCARDS
+
+2 KRTST0.MAC
+
+ add SET CONTROL-CHARACTER
+ consolidate local data..
+ add file name to when logging to LP so later OS versions are happy
+
+2 KRTST1.MAC
+
+ allow attributes to be individually set, ala C-Kermit
+ modify SET FLOW XON to force quoting of XOFF and XON chars
+ consolidate local data..
+ add SET FILE WILDCARDS
+ cd with no arg defaults to home dir, shows default after executing
+
+ /E64/	05-May-96  John Santos
+
+ Fix bug in SET TERM which always set NOSCOPE
+
+2 KRTSUB.MAC
+
+ move unfmts here so KRTMDM can live in KRTCVT's overlay ...
+
+2 KRTXMO.MAC
+
+ disallow sends from TT (not supported, makes Kermit hang)..
+
+1 REMOTE
+
+ Send the specified command to a Kermit server.  If the server can not
+ execute the command (these are all optional features of Kermit) it'll
+ reply with a error message, otherwise the returned data are displayed
+ on your screen.
+
+ Note that any arguments given will be converted to upper case or left
+ as input according to the state of SET FILE NAMING [NO]LOWER-CASE.
+
+	Kermit-11>REM command [argument(s)]
+
+2 CD
+
+ Makes the specified directory the default for the remote server.
+ If no device/directory is given some Kermits, including this one
+ and C-Kermit, will default to the home (login) directory.
+
+2 COPY
+
+ The server is asked to make a copy of the specified file within its
+ own system.  Both file specs must be correct for the remote system.
+ Kermit-11 doesn't parse or validate the file names.  Leading spaces
+ will be stripped.  Case conversion is controlled by SET FILE NAMING
+ [NO]LOWER-CASE.  Wildcards are unsupported under RT-11 or TSX-Plus.
+
+ Note this command  simply  provides  for  copying a file within the
+ server's system - it does not cause a file to be transferred.
+
+	Kermit-11>REM COPY filespec newfilespec
+
+2 CWD
+
+ Synonym for REMOTE CD.
+
+2 DELETE
+
+ Tells the server to delete the specified file.
+ The entire command name "DELETE" must be given
+ as some small protection against accidents.
+
+2 DIRECTORY
+
+ The names of the files that match a given file specification
+ will be displayed on your screen, perhaps with size and date
+ info for each.   If no file specification is given all files
+ in the current directory will be listed.
+
+	Kermit-11>REM DIR *.MAC
+
+2 HELP
+
+ List commands the server can execute.
+
+2 HOST
+
+ Pass the given command to the server's  host  command  processor,
+ and  display the resulting output on your screen.  Not all Kermit
+ servers support this function.  In the case of Kermit-11 only the
+ RSTS/E server can execute a REMOTE HOST command.
+
+2 LOGIN
+
+ Ask a remote server to log into a different account or username.
+ The support  for  this  command  is  rarely  implemented as many
+ systems layer  login/logout  support over the executive.  Of the
+ various PDP-11 operating systems only RSTS/E V9.0 or above makes
+ the necessary system calls available.
+
+	Kermit-11>REM LOG username [optional-password]
+
+2 RENAME
+
+ Renames a file on the remote system.  Both file specifications
+ must be valid on the remote system, they are not checked here.
+
+	Kermit-11>REM RENAME oldname newname
+
+2 SPACE
+
+ Returns a summary of the amounts of space available and in use
+ on the remote host.  A device or files argument is optional.
+
+2 TYPE
+
+ Types a file from a remote Kermit server.  This Kermit doesn't
+ support wildcards for this method of typing files.
+
+	Kermit-11>REM TY FUBAR.MAC
+
+2 WHO
+
+ Returns a list of who's logged on the remote system.  Arguments
+ are passed to the remote and may be used if the remote supports
+ them.
+
+1 RENAME
+
+ Renames a single, local (only) file.
+
+	Kermit-11>RENAME oldname newname
+
+1 SEND
+
+ Sends a file or group of files to the other system.   Wildcards may be
+ used, in which case files are sent in order of their directory entries
+ in the device containing them.  If you're SENDing on Kermit-11 running
+ in its remote mode,  SET DELAY governs the time allowed to escape back
+ to one's local Kermit to initiate the RECEIVE mode (default = 6 secs).
+ If you miss the first packet Kermit will retry it after timing out.
+
+ If you're running Kermit-11 locally, for instance dialing out from the
+ PDP-11 to another system, you must first run Kermit on the remote then
+ issue either a RECEIVE or SERVER command and escape back to Kermit-11.
+ Once you give the SEND command the name of each file will be displayed
+ on your screen as its transfer begins.  As  the transaction progresses
+ packet statistics are updated and displayed.  See the SET TERMINAL and
+ SET UPDATE commands for more information.
+
+ Once the actual data transfer has begun, you may type Ctrl-X to cancel
+ the current file, Ctrl-Z to  bomb  the  whole file group, or Ctrl-E to
+ abort the transfer by sending an  "error"  packet to the other Kermit.
+ If you have a problem BEFORE the first data packet can be sent, Ctrl-C
+ is the only abort possible.
+
+ If the automatic binary file select is on (SET FILE AUTO, the default)
+ the transmission mode is determined by searching the binary types list
+ for each file.   If it is not possible to exchange attributes you will
+ need to SET FILE TYPE  and  SET BLOCK-CHECK  as required on both sides
+ before starting.
+
+ If parity is in use (see HELP SET PARITY) Kermit-11 will ask the other
+ Kermit to use a special kind of "prefixing" notation for binary files.
+ This is an advanced feature and not all Kermits have it.  If the other
+ Kermit can't accommodate this feature,  binary  files  can not be sent
+ correctly.  This includes executable programs, object modules, and any
+ text file containing characters with the high bit set.
+
+ Kermit-11 will also check the other side for a special prefix encoding
+ for repeated characters.  If supported, files with long strings of the
+ same character will be transmitted very  efficiently.   Columnar data,
+ highly indented text and binary files are the primary beneficiaries of
+ this technique.
+
+			SEND Command Summary:
+
+    Sends files to another Kermit.  If that Kermit isn't a server the
+    transmission begins after the number of seconds  specified by SET
+    DELAY.  This allows  time to escape back to your local Kermit and
+    issue a receive command.  The server is far easier to use, unless
+    your Kermit can't do remote commands.  Wildcarded renaming is not
+    supported, except an optional output device (only) may be used to
+    place a single file where desired.
+
+	Kermit-11>SEND *.MAC
+	Kermit-11>SEND afile dev:	; put afile on dev:
+	Kermit-11>SEND afile asfile	; rename to asfile
+	Kermit-11>SEND afile,b*,cfile	; comma delimits file names
+
+1 SERVER
+
+ The SERVER command puts a remote Kermit into a server mode, so that it
+ expects further commands as packets from your own local client Kermit,
+ allowing various things to be done at the remote without the bother of
+ first connecting back to it.  This Kermit-11 when run as a server will
+ handle these commands:  BYE, CD, COPY, DELETE, DIRECTORY, FINISH, GET,
+ HELP, RENAME, SEND, SPACE and TYPE.
+
+ If Kermit-11 is in the local mode, the server will connect to the comm
+ handler.  The speed will be the last used, including possible fallback
+ to accommodate a called system.  However, Kermit-11 doesn't attempt to
+ determine if such a session remains active before starting the server.
+ If the speed reported is not what you need you must exit and reset it.
+ Upon exiting, the server returns control to the terminal which ran it.
+ Under TSX-Plus access and privileges will be those of the job starting
+ Kermit-11.  The normal logon security is NOT present, and care must be
+ taken regarding who can access the other end of the line.
+
+ Kermit-11 will use the client's block check scheme,  packet length and
+ such as long as nothing affecting any of that has been shut off before
+ invoking the server.  The BINARY-TYPE list will be used to select text
+ or image mode when sending unless specific file type has been set.  If
+ your local Kermit doesn't support exchanging attributes, SET FILE TYPE
+ and SET BLOCK-CHECK as needed on BOTH ends before running the server.
+
+ When running in local mode, Kermit-11 allows you to send a broad range
+ of commands to a remote Kermit server.  There is no guarantee that the
+ remote server can process them, since they are all  optional  features
+ of the protocol.  Commands for servers include the standard SEND, GET,
+ BYE and FINISH as well as REMOTE versions of many local commands.  See
+ HELP REMOTE for details.
+
+		SERVER Command Summary:
+
+	BYE		Logs  off  the  system
+	REMOTE COPY	Copy a file to another
+	REMOTE CWD	Changes server default
+	REMOTE DELETE	Erases specified  file
+	REMOTE DIR	Prints   a   directory
+	FINISH		Exit server, reconnect
+	GET		Send file(s) to remote
+	REMOTE HELP	Prints this  help text
+	REMOTE RENAME	Rename old file to new
+	SEND		Send file(s) to server
+	REMOTE SPACE	Shows blocks used/free
+	REMOTE TYPE	Types a specified file
+
+1 SET
+
+ The SET command is used to modify various parameters in Kermit.
+ Multiple arguments, including spaces between them, for the same
+ parameter may be delimited with commas.
+
+	Kermit-11>SET parameter keyword[, key words-1, keyword-2, ..]
+
+2 ATTRIBUTES
+
+ Part of the  Kermit  protocol  is  the  support  of  file  attributes.
+ Connected Kermits that support this can send information to each other
+ about size, date/time of creation, protection and other useful things.
+
+ Due to potential problems with incompatible implementations attributes
+ may be disabled.  In this case, Kermit will not send them, even though
+ the receiver may have indicated that it supports them.  The default is
+ attributes enabled.
+
+	Kermit-11>SET ATTR OFF
+	Kermit-11>SET ATTR ON
+
+ You may also exercise control over each attribute individually, all of
+ which are documented in the following subtopics.  For example:
+
+	Kermit-11>SET ATTR TYPE OFF
+	Kermit-11>SET ATTR TYPE ON
+
+ ATTRIBUTES (overall control) must be set ON (the default), regardless
+ of their individual settings, before anything is actually processed.
+
+ Note the determination of whether to send a file in the image mode is
+ by the state of SET FILE, and it may be necessary to select something
+ specific (besides AUTO, which defaults to text) for it when disabling
+ ATTRIBUTES processing.
+
+ When receiving text files from a non RT-11 system this Kermit will add
+ 25% to the received file size as record terminators are often excluded
+ from what is reported, or are of a different size (Unix).  Files close
+ to the maximum free space may be accommodated by SET FILE CREATE-SIZE,
+ which overrides any passed size attribute.
+
+3 ALL
+
+ Provides simultaneous control of the DATE, EXACT-LENGTH, LENGTH,
+ PROTECTION, SYSTEM-ID, SYSTEM-INFO and TYPE attributes.
+
+3 DATE
+
+ The "#" (oct 43) date attribute.  Creation dates from 1972 to 2099 only.
+ Versions of RT-11 prior to V5.5 limit the maximum date to 2034, or 1999.
+ Under TSX the time is included, which is truncated to TSX's three second
+ resolution.
+
+3 EXACT-LENGTH
+
+ The "1" (oct 61) exact file length in bytes attribute.  Useful to move
+ a file of an odd number of blocks length in a hole of exactly the same
+ size.
+
+3 LENGTH
+
+ The "!" (oct 41) file length in 1kb blocks attribute.
+
+3 OFF
+
+ Disables all attribute processing regardless of each's individual status.
+ Does not alter the state of any individual attribute control flag.
+
+3 ON
+
+ Enables attribute processing for those which have been individually selected.
+ Does not alter the state of any individual attribute control flag.
+
+3 PROTECTION
+
+ The "-" (oct 55) file protection attribute.  Used here within RT-11's
+ limits.  That is, a file is considered protected when it has no write,
+ append or delete access.
+
+3 SYSTEM-ID
+
+ The "." (oct 56) machine and operating system of origin attribute.
+
+3 SYSTEM-INFO
+
+ The "0" (oct 60) special system-dependent parameters attribute.
+ Here this carries the '"' (oct 42) file type attribute extended
+ to include DEC-Multinational (8-bit text) files.
+
+3 TYPE
+
+ The '"' (oct 42) file type (ASCII, Binary, Image) attribute.
+
+2 BAUD
+
+ Synonym for SET SPEED.
+
+2 BINARY-TYPE
+
+ Kermit-11 maintains a list of file types that's scanned to decide
+ if a file should be sent in the binary mode.   This list includes
+ commonly used binary file types, may be displayed with SHO BINARY
+ and appended up to 31 total types, one type per command line.
+
+	Kermit-11>SET BIN xyz
+
+ The state of SET FILE determines whether the binary list test will
+ be used to control the transmission mode for files.  Use SHOW FILE
+ to display it.
+
+2 BLOCK-CHECK-TYPE
+
+ Determines the block checking scheme to be used during transmission to
+ to detect errors.  There are three types available:  the one character
+ checksum (default), the two character checksum and the three character
+ CRC (cyclic redundancy check).   Both Kermits involved in the transfer
+ must agree on the block check type.   Kermit-11 will request the block
+ check set by this command be used for a transfer.  If the other Kermit
+ can't recover this from the init packet then the block check type must
+ be manually set on BOTH sides, otherwise the single character checksum
+ will be used.  Binary files should be sent with CRC block checking.
+
+	Kermit-11>SET BLO 1	; one char checksum
+	Kermit-11>SET BLO 2	; two char checksum
+	Kermit-11>SET BLO 3	; three char CRC
+
+2 CL:
+
+ You may attach a CL unit to a port known to TSX-Plus using the
+ same syntax as when doing it from the monitor:
+
+	Kermit-11>SET CL1 LINE 12
+
+ Here this also allocates the device and assigns it as the link
+ used for file transfers (as if you SET LINE CL1).  If the line
+ has an auto-answer modem on it, one should SET SPEED if needed
+ and SET MODEM immediately afterwards  to make sure an incoming
+ call is not answered when TSX can't respond.  The CL handler's
+ default speed is 9600.
+
+ Under TSX when data are actually passing though the CL handler
+ priority may be raised to avoid dropping chars by performing a
+ SET CL PRIORITY nn command from within Kermit.  This is better
+ than from the monitor as priority is only elevated when really
+ necessary, and is otherwise restored to its original value.  A
+ suggested starting point is 71 for 9600 on a moderately loaded
+ system.  Be aware placing Kermit into the real-time mode isn't
+ nice to other users, nor should it ever be needed (80 or above
+ when using TSX's defaults).
+
+ The cross-connection may be released, the TSX line restored to
+ its normal state and the CL unit deallocated by:
+
+	Kermit-11>SET CL1 LINE 0
+
+ This includes placing the modem on said port back in its idle,
+ auto-answer state if you had SET MODEM earlier (taking it off-
+ line) in the session.  After assigning a CL unit to a TSX line
+ the above and SET LINE TT are functionally equivalent, and any
+ other line assignment made from within Kermit resets any prior
+ arrangement if it's successful, with the exception that if you
+ did not attach to a TSX port from Kermit then that will not be
+ dropped.  The device is deallocated in all cases.
+
+ Under TSX on a PRO/3xx Kermit-11 will try to assign CL0 or CL1
+ to Line 3.  On other hardware you may define lists of CL units
+ and ports then have Kermit scan through them seeking the first
+ available combination:
+
+	Kermit-11>SET CL PORTS 11 9 8 7 6
+	Kermit-11>SET CL UNITS 0 1 2
+	Kermit-11>SET CL LINE *		; assign from the above
+
+ Placing it all on the same command line is more efficient when
+ doing this from the initialization (KRT.INI) file:
+
+	Kermit-11>SET CL POR 11 9 8 7 6,UNI 0 1 2,LIN *
+
+ Port (TSX time-sharing and/or CL line) numbers may be 2 to 40.
+ Only CL units 0 to 7 are supported here.
+
+ Additionally, one may specify a SPEED, MODEM-TYPE and XMODE to
+ be set for each port, should one be successfully acquired:
+
+	Example>> SET CL PORTS TSX-LINE#/SPEED/MODEM-TYPE/XMODE
+	Kermit-11>SET CL PORTS 9/19200/T25/3 11/2400/H/6,UNI ..
+
+ Here as parameters are nested, each requires everything before
+ it, though everything after any particular item (to its right)
+ may be omitted.   The "/" is used as a parameter delimiter and
+ space separates the individual argument for each port.  Speeds
+ and Hayes-style extended result code option (XMODE, the number
+ following "X" in its command string) values must be entered in
+ full.  Modems need specify only the minimum chars necessary to
+ render the string non-ambiguous.  See HELP SET MODEM, HELP SET
+ PHONE XMODE and HELP SET SPEED for detailed info about exactly
+ what is currently supported by this Kermit.
+
+ This is best done in a system-wide init file, allowing several
+ users to access modems without any worry about details such as
+ which  are  currently  in use.  If KRT.INI can't be shared the
+ individual initialization files may include the above.  With a
+ rotary (hunt group) the PORTS are usually best done in reverse
+ order of how incoming calls are handled, and dialing done from
+ a TAKE file wherein the line is set just before dialing.  This
+ minimizes  the potential for an incoming call arriving between
+ grabbing the port and actually going off-hook.
+
+ Ports and units are tried in the order specified.  Up to eight
+ CL units and 128 bytes of PORTS data may be defined.  SHOW  CL
+ displays the current contents of these strings.
+
+ A complete reset of everything engaged from within Kermit will
+ be done when exiting the program, except the CL unit is always
+ deallocated regardless of how or when it was allocated.
+
+ SHOW LINE displays the current status of CL, when it's in use.
+
+2 CONSOLE
+
+ This pertains to Kermit's terminal emulator (the CONNECT mode).
+ Use SET TERMINAL to alter your terminal parameters.
+
+ SHOW CONSOLE to display the status of all these except priority,
+ which is part of SHOW LINE.
+
+3 7-BIT
+
+ The default mode is 7-bit unless the terminal is detected or set
+ as a VT-200, in which case one may need to set the 7-bit mode to
+ avoid displaying extraneous hi-bit data.
+
+	Kermit-11>SET CON 7	; strips hi bits
+
+3 8-BIT
+
+ Useful only under TSX-Plus or with the KM handler.
+
+	Kermit-11>SET CON 8	; pass data with hi bits intact
+
+3 BREAK
+
+ Break length may be set SHORT (.283 sec, the default) or LONG (3 secs).
+
+3 MILNET
+
+ If you are working with a MILNET Terminal Access Controller or
+ other device which needs XONs to wake it up, Kermit may be set
+ to send a couple automatically when CONNECTing:
+
+	Kermit-11>SET CON MILNET  ; send wakeup XONs
+	Kermit-11>SET CON NOMIL   ; don't XON, the default
+
+3 PRIORITY
+
+ Under TSX when data are actually passing though a non-multiplexed
+ serial line interface (one which generates an interrupt for every
+ character) priority may be raised to avoid dropping characters by
+ using KRT's SET CONSOLE PRIORITY nn command.  This is better than
+ doing it from the keyboard monitor as KRT's priority will only be
+ elevated when actually necessary and otherwise is returned to its
+ original value.
+
+ A suggested starting point is 65 for 9600 and a moderately loaded
+ system (if the normal priority remains the default 50).  Be aware
+ placing Kermit into the real-time mode isn't nice to other users,
+ nor is it ever necessary for this type of problem.
+
+2 CONTROL-CHARACTER
+
+ The purpose of the SET CONTROL UNPREFIX command is to UNILATERALLY configure
+ Kermit  to  skip  prefixing  and  printable  encoding  of  selected  control
+ characters to achieve  higher  performance when sending files.  This feature
+ takes advantage of the fact that  most  Kermit programs  will accept control
+ characters within packet data-fields literally, provided they get through at
+ all, and provided they don't have a special meaning to the receiving Kermit.
+
+ There is no automatic negotiation between Kermits to determine a safe set of
+ control characters because often some of the info needed won't be available.
+ For example, there might be a terminal server or PAD between  them  that  is
+ sensitive to a particular control character, even though the two Kermits are
+ not.
+
+ If you SET CONTROL UNPREFIXED one or more control characters that are unsafe
+ any of several things may happen:
+
+  1. Transfer of any file containing these characters will fail.
+
+  2. The receiving Kermit program might be interrupted or halted.
+
+  3. Your connection might become hung, stuck or broken.  For instance
+     a particular control character might cause a PAD, terminal server
+     or similar device to go from its on-line mode to a command mode.
+
+ The set of safe control characters depends on the two Kermit programs,  their
+ settings,  the  host  operating systems and their settings, communication and
+ flow control methods, and all the devices,  drivers,  and  protocols that lie
+ between  the  two  Kermit  programs.  The optimal safe set must be determined
+ experimentally.  Create a short file containing  all  256  possible  bytes in
+ in sequence and also in pairs,  as well as several text strings surrounded by
+ CR-LF pairs - for example, run the following BASIC program:
+
+ 1 OPEN "DK:KRTTST.DAT" FOR OUTPUT AS FILE #1
+ 2 PRINT #1,"256-byte singles test pattern:"
+ 3 FOR X=0 TO 255 \ PRINT #1,CHR$(X); \ NEXT X
+ 4 PRINT #1,"256-byte doubles test pattern:"
+ 5 FOR X=0 TO 255 \ PRINT #1,CHR$(X)+CHR$(X); \ NEXT X
+ 6 PRINT #1,"End of test patterns" \ CLOSE #1
+
+ To send the test file to MS-DOS Kermit from KRT the following chars are the
+ minimum requiring prefixing - you may need to add to this:
+
+	Kermit-11>SET CONT UNP ALL   ; Off all prefixing but NULL, XOFF/XON
+	Kermit-11>SET CONT PRE 1     ; Turn it back on for packet-start char
+	Kermit-11>SET CONT PRE 129   ; and 8-bit version thereof
+
+ Or to send the test file to KRT Kermit, the other Kermit must at least:
+
+	Kermit>SET CON U ALL         ; Turn prefixing off for all chars
+	Kermit>SET CON P 0           ; If NUL was off'd, turn it back on
+	Kermit>SET CON P 3           ; and for Ctrl-C
+	Kermit>SET CON P 131         ; as well as Ctrl-C + parity bit
+
+  Note well that all character values for the SET CONTROL-CHAR command must
+  be specified as DECIMAL numbers (delimited by spaces) or the word ALL may
+  be used to specify the entire range of values (1-31, 127-159, 255).
+
+ Try to send the test file in the BINARY mode.  If it works, fine.  If not try
+ prefixing some of the other likely control characters (see below).  Some care
+ is necessary if you are running the KRT server from an RT-11 system's console
+ port, as it is not possible to disable special character processing, but this
+ is no problem under TSX-Plus.   Once you've found the minimum set of prefixed
+ control characters for the test file, it's likely they will also work for any
+ other file.  Try sending a large binary file to confirm all is well.
+
+ If the mininum set doesn't work, this list of control characters and problems
+ they are apt to cause may help to more efficiently determine what's possible:
+
+ set con p 0   ; Ctrl-@ = NUL, internal string terminator in Kermit
+               ;          Also, often discarded as padding
+ set con p 1   ; Ctrl-A = Packet-start character
+ set con p 3   ; Ctrl-C = Packet breakout for remote-mode C-Kermit, MS-Kermit
+               ;          and above all, for KRT Kermit too!
+ set con p 13  ; Ctrl-M = Carriage return, always prefix on TELNET connections
+ set con p 14  ; Ctrl-N = Shift Out of graphics mode
+ set con p 15  ; Ctrl-O = Shift In to graphics mode, or abort TT output
+ set con p 16  ; Ctrl-P = Commonly-used X.25/X.3 PAD escape character
+ set con p 17  ; Ctrl-Q = XON   ) must prefix with
+ set con p 19  ; Ctrl-S = XOFF  ) XOFF flow control
+ set con p 27  ; Ctrl-[ = ESC, prefix if transiting some kind of ANSI device
+ set con p 28  ; Ctrl-\ = CONNECT-mode escape for KRT Kermit
+ set con p 29  ; Ctrl-] = CONNECT-mode escape for Unix TELNET
+ set con p 30  ; Ctrl-^ = Cisco terminal server escape, MultiNet telnet escape
+ set con p 127 ; Ctrl-? = DEL, often discarded as padding
+               ;          Also becomes TELNET IAC if parity bit is added
+ set con p 128 ; NUL    + 128  }
+ set con p 129 ; Ctrl-A + 128  } these four should track
+ set con p 131 ; Ctrl-C + 128  } their 7-bit counterparts
+ set con p 141 ; CR     + 128  }
+ set con p 145 ; XON    + 128  ) must prefix with
+ set con p 147 ; XOFF   + 128  ) XOFF flow control
+ set con p 255 ; TELNET IAC, prefix on TCP/IP TELNET connections
+
+ NOTES:  1 and 129 need not be prefixed when sending files to KRT Kermit,  but
+ must be prefixed when sending files to MS-DOS Kermit.  13 normally needn't be
+ prefixed when sending files to either C-Kermit or MS-DOS Kermit,  except on a
+ TELNET connection (because TELNET servers are likely to change CR-LF into CR)
+ or with VMS where C-Kermit can not be made to ignore CR as the EOL character.
+
+ Kermit  will  not  let you unprefix  XON (17),  XOFF (19),  XON+128 (145), or
+ XOFF+128 (147)  if  its  FLOW-CONTROL  setting  is  XOFF/XON.  If you want to
+ unprefix these, make sure  *both*  Kermits have been told to SET FLOW RTS/CTS
+ (or NONE) and  that  XOFF  flow  control  is not in effect anywhere along the
+ communication path between the two Kermits.  NUL (0) should always prefixed.
+
+ When sending files to C-Kermit,  you should normally SET CONTROL PREFIX 3 131
+ because C-Kermit (by default) takes two Ctrl-Cs in a row as a cancellation of
+ packet-mode.  You can  UNPREFIX  these if the files to be sent do not contain
+ two Ctrl-Cs in a row.  Or, you may tell C-Kermit to SET TRANSFER CANCELLATION
+ OFF,  or SET TRANSFER CANCELLATION ON <char> <numb> when you know that <numb>
+ copies of <char> do not occur in a row in the data.
+
+3 PREFIXED
+
+ Use to restore prefixing for the control characters specified or the argument
+ ALL may be used.  Multiple arguments must be delimited by spaces.  By default
+ all control characters (0-31, 127-159, and 255) are prefixed.
+
+ See HELP SET CONTROL-CHARACTER for detailed information.
+
+3 UNPREFIXED
+
+ Causes Kermit to transmit the specified control characters literally, without
+ the usual prefixing and translation to a printable value.  Characters must be
+ speficied as decimal numbers separated by spaces (1-31, 127-159, 255 or ALL).
+
+	Kermit-11>SET CONTROL UNPREFIXED ALL
+	Kermit-11>SET CONTROL UNPREFIXED 2 4 5 18 20
+
+ See HELP SET CONTROL-CHARACTER for detailed instructions and information.
+
+2 DEBUG
+
+ Used to specify the type and level of debugging written to a disk
+ file, which must first have been created via the LOGFILE command,
+ or may be optionally specified as an additional argument for this
+ command.  There are also options to display debugging data on the
+ terminal with or without writing to a disk file.   When a logfile
+ is closed all disk based debug modes are reset (turned off).
+
+	Kermit-11>SET DEBUG mode [logfile]
+
+3 ALL
+
+ Synonym for SET DEBUG ON.
+
+3 CONSOLE
+
+ Turns on logging for input received from the remote in the
+ CONNECT mode to the disk file specified by LOGFILE.  While
+ you're actually CONNECTed logging may be controlled by the
+ escape character followed by Q to suspend, or R to enable.
+ Cancels any other disk based debug option(s) then in use.
+
+3 CONNECT
+
+ Synonym for SET DEBUG CONSOLE.
+
+3 NONE
+
+ Turns off ALL debugging, including TT, RPACK and disk based,
+ and closes the logfile.   Individual items are controlled by
+ SET DEBUG ON, CONSOLE, PACKET, RAW, OFF, [NO]RPACK, [NO]TT.
+
+3 NORPACK
+
+ Turns off the display of received packet chars on the terminal.
+ Note this is a completely separate function from DEBUG's PACKET
+ routine, which delivers a similar display but with headers.  It
+ is also independent of SET DEBUG TT.
+
+3 NOTERMINAL
+
+ Turns off debugging display on the terminal.  This is completely
+ separate from any disk based logging, as well as received packet
+ data displayed via the RPACK option.
+
+3 NOTT:
+
+ Synonym for SET DEBUG NOTERMINAL.
+
+3 OFF
+
+ Turns off all disk based debugging,  and closes the logfile.
+ To turn off RPACK logging SET DEBUG NORPACK.  Debugging sent
+ to TT may be offed via SET DEBUG NOTT.   The entire world of
+ debugging may be dumped with SET DEBUG NONE.
+
+3 ON
+
+ Enables CONSOLE and PACKET logging to the disk file specified
+ by the LOGFILE command.
+
+3 PACKET
+
+ Logs all packets sent and received to the file specified with LOGFILE
+ using headers indicating packet number, type and length.  An asterisk
+ "*" displayed as the packet type indicates a received checksum error.
+ If the type itself is bad (not A-Z) a "?" is substituted.  The packet
+ data are saved to the logfile as-is, that is for binary files or when
+ control chars are unprefixed a text editor may be more convenient for
+ viewing the result.
+
+ REC.SW = STA.DAT  Data
+ <<< RPACK - Paknum  54    Type  *    Length    82
+     40!100!200>,curatr; hose bits 0,2,5 and unused biuc 6,7#M#J#Ibeq#I10$#M#
+     J#Iclr#Ipr
+ BAD Checksum: RCV,CALC =  24670,  3312
+ >>> SPACK - Paknum  54    Type  N    Length     0
+ TOD 18:53:07.05  60Hz   Elapsed-Time: 00:00:00.33
+
+ Numeric overflow is indicated by a "*" (in the most significant digit's
+ column) preceding the remainder of the value,  which is also displayed.
+ Received and calculated values of bad checksums are displayed following
+ any data present in the packet.  The current time of day along with the
+ time used to process the packet is included at the end of the entry for
+ each in hours, minutes, seconds and ticks.
+
+ Severe telephone line noise and/or retraining of modems may cause a bad
+ packet length value, in which case data logged are truncated to fit the
+ maximum available ($ALLSIZ-2) buffer space.
+
+ Selecting this option cancels any other disk based debug option(s) then
+ in use.
+
+3 RAW
+
+ Logs all packet chars received and sent as 8-bit data to a binary logfile.
+ This option is mutually exclusive of all other disk based debug functions.
+
+3 RPACK
+
+ Dumps each received packet character to the local terminal,
+ independently of all other debug functions.  May be enabled
+ while anything or even everything else is selected but it's
+ best used on its own.  All chars except the current SOH and
+ EOL (and TSLICH if running TSX+) are passed directly to the
+ terminal.  TIMOUTs are also displayed as they occur.
+
+ SET DEBUG NORPACK turns this off.
+
+ Note that SET DEBUG TT is a different routine, if both are
+ used at the same time packets will be displayed twice.
+
+ RPACK types out each character to your terminal immediately
+ as received.  PACKET decodes the SEQ, TYP and LEN then adds
+ a newline after each 72. bytes of packet data displayed.
+
+3 TERMINAL
+
+ Enables display on the terminal of the PACKET option.  It  is
+ not necessary to open a logfile first unless one wishes these
+ same data saved in one, in which case it'll also be necessary
+ to SET DEBUG PACKET.
+
+  SET DEB NOTERM to turn off this debugging display.  This is
+  completely separate from any disk based logging, as well as
+  received packet data displayed via the RPACK option.
+
+3 TT:
+
+ Synonym for SET DEBUG TERMINAL.
+
+2 DEFAULT
+
+ Makes the specified device the default disk, directing to it
+ file operations for which no device is explicitly specified.
+
+2 DELAY
+
+ Sets the number of seconds to wait before beginning sending a file
+ while in the remote mode.  This is the time allowed to escape back
+ to your local Kermit and issue a RECEIVE command.
+
+	Kermit-11>SET DELAY number-of-seconds
+
+2 DIAL
+
+ Kermit-11 contains operating parameters for several of the more common
+ auto-dial modems.  To find out if your modem is directly supported use
+ the SET MODEM ? command.  If it is not, you'll need to use SET DIAL to
+ load the data used to control the modem and implement the various DIAL
+ routines.  These involve formatting commands to the modem, and what to
+ expect in the way of modem responses.  As an example the Vadic VA212PA
+ modem is awakened from an idle state by the character sequence (octal)
+
+	005 015
+
+ which is Ctrl-E followed by carriage return.  The modem responds with
+
+	HELLO: I'M READY
+	*
+
+ Thus Kermit needs to know when it sends the wakeup sequence it should
+ wait for the asterisk to be returned by the modem, after which it may
+ presumed the modem is awaiting further commands, such as that to dial
+ a phone number.
+
+ Suppose we had to tell Kermit about the Racal Vadic VA212PA (though in
+ reality Kermit already knows this modem).  Checking the owner's manual
+ for it, we find that:
+
+     To wake the modem up, we type a Ctrl-E followed by a return.
+
+     To dial a number, we type the letter D  followed by a return.  At
+     this point, the modem prints a NUMBER? prompt and we then type in
+     the desired number.  The number  is  then reprinted and the modem
+     waits for a return from us to confirm it's correct.
+
+     When it completes dialing it will print "ON LINE" or "ONLINE" for
+     a successful call, otherwise it may return "BUSY", "FAILED CALL",
+     "NO DIAL",  "VOICE"  or  "TIME OUT".  While it is waiting for its
+     call to be answered it may print the line "RINGING" several times
+     to tell you it's working on the call.
+
+ The Kermit commands required would be:
+
+	Kermit-11>SET DIAL WAKE-STRING \005\015
+	Kermit-11>SET DIAL ECHO
+	Kermit-11>SET DIAL WAKE-ACK *
+	Kermit-11>SET DIAL INITIATE D\015
+	Kermit-11>SET DIAL FORMAT %P%S\015
+	Kermit-11>SET DIAL DIAL-PAUSE 9K
+	Kermit-11>SET DIAL CONFIRM \015
+	Kermit-11>SET DIAL SUCCESS ONLINE
+	Kermit-11>SET DIAL SUCCESS ON LINE
+	Kermit-11>SET DIAL RINGING RINGING
+	Kermit-11>SET DIAL FAILURE BUSY
+	Kermit-11>SET DIAL FAILURE FAILED CALL
+	Kermit-11>SET DIAL FAILURE NO DIAL
+	Kermit-11>SET DIAL FAILURE TIME OUT
+	Kermit-11>SET DIAL FAILURE VOICE
+
+ The notation "\005\015" indicates a Ctrl-E followed by a return.  5 is
+ octal for Ctrl-E,  15 is octal for return.   Octal numbers may also be
+ specified by placing the value inside of  inequality  characters as in
+ SET DIAL WAKE <005><015> though the former is preferred.  Octal values
+ may be obtained from HELP ASCII.  If for any reason you need to pass a
+ "\" or "<" to your modem, simply prefix the character with another "\"
+ or "<" as in "\\" or "<<".
+
+ "%P%S\015" indicates the phone number from the  DIAL  command is to be
+ followed by a return.  "%S" is  a format effector for the phone number
+ string itself,  which causes it to be inserted in the dial string sent
+ to the modem.   "%P" inserts the dial pause string, as in this case we
+ need to dial 9 and wait for a second dial tone.  The "K" is the  Racal
+ Vadic  code to get the modem to pause.  If you are dialing on a direct
+ line or your modem supports pausing via something embedded in the dial
+ string itself, the DIAL-PAUSE command is unneeded.
+
+ Many modems require only WAKEUP, WAKE-ACK, FORMAT and result strings.
+ The Digital DF112 is a good example.  Its definition would look like:
+
+	Kermit-11>SET DIAL WAKEUP \002
+	Kermit-11>SET DIAL WAKE-ACK READY
+	Kermit-11>SET DIAL FORMAT %S#
+	Kermit-11>SET DIAL SUCCESS ATTACHED
+	Kermit-11>SET DIAL FAILURE BUSY
+	Kermit-11>SET DIAL FAILURE DISCONNECTED
+	Kermit-11>SET DIAL FAILURE ERROR
+	Kermit-11>SET DIAL FAILURE NO ANSWER
+
+ Any undefined result string is considered informational only thus this
+ class of response does not need to be expressly defined.
+
+ If you are using a "Hayes" style modem, its extended response mode may
+ be set by using the %X format effector in the WAKE-STRING.  The number
+ desired is then specified by SET PHONE XMODE n, where n is 0 to 14, or
+ "OFF" to disable it.  %X may also be used in the FORMAT (dial) string,
+ allowing modification without re-initializing the modem.
+
+ Here's a sample Hayes definition:
+
+	Kermit-11>SET PHONE TONE,XMODE 4
+	Kermit-11>SET DIAL COMMENT Generic Hayes Command Set
+	Kermit-11>SET DIAL TIME-OUT 45
+	Kermit-11>SET DIAL WAKE-ACK OK
+	Kermit-11>SET DIAL WAKE-STRING AT E1 Q0 V1 S0=0 S7=255 %X \015
+	Kermit-11>SET DIAL ECHO
+	Kermit-11>SET DIAL INIT-ONCE
+	Kermit-11>SET DIAL FORMAT AT %X %A D%M %S \015
+	Kermit-11>SET DIAL ABORT \015
+	Kermit-11>SET DIAL CON19200 CONNECT 19200
+	Kermit-11>SET DIAL CON19200 CONNECT 14400
+	Kermit-11>SET DIAL CON9600 CONNECT 9600    ; fallback only works with
+	Kermit-11>SET DIAL CON4800 CONNECT 4800    ; the CL or KM handlers..
+	Kermit-11>SET DIAL CON2400 CONNECT 2400
+	Kermit-11>SET DIAL CON1200 CONNECT 1200
+	Kermit-11>SET DIAL CON9600 CONNECT FAST
+	Kermit-11>SET DIAL CON300 CONNECT	   ; embedded, must be last!
+	Kermit-11>SET DIAL FAILURE BUSY
+	Kermit-11>SET DIAL FAILURE ERROR
+	Kermit-11>SET DIAL FAILURE NO ANSWER
+	Kermit-11>SET DIAL FAILURE NO CARRIER
+	Kermit-11>SET DIAL FAILURE NO DIALTONE
+	Kermit-11>SET DIAL FAILURE NO DIAL TONE
+	Kermit-11>SET DIAL FAILURE VOICE
+	Kermit-11>SET DIAL RINGING RING		; includes RINGING
+	Kermit-11>SET DIAL RINGING RRING	; Telebit style..
+	Kermit-11>SET DIAL PULSE P
+	Kermit-11>SET DIAL TONE T
+	Kermit-11>SET DIAL ANSWER S0=1
+	Kermit-11>SET DIAL NOANSWER S0=0
+	Kermit-11>SET DIAL IDLE AT Z \015
+
+ Some modems are unable to accept data at the line speed, in which case
+ one must employ SET DIAL WAKERATE and SET DIAL DIAL-RATE.   These two
+ functions accept a delay time in clock ticks,  which  are 1/50 or 1/60
+ second units depending on where in the world this program is running.
+
+ If your modem has a settable timer it should be either disabled or set
+ to the maximum possible (example: the Hayes wakeup string contains S7=
+ 255) to allow Kermit-11's internal TIME-OUT to prevail.
+
+ If your modem hangs, see HELP SET DIAL SETTLE-TIME.  This and TIME-OUT
+ are two special parameters here in that they are global, and used even
+ with Kermit's internal modem definitions.  However, default values are
+ loaded by SET MODEM, thus these must be altered AFTERWARDS, except for
+ the USER-DEFINED modem where what is set BECOMES the default.  This is
+ also the case for SET PHONE XMODE.
+
+ NOTE:  This program toggles DTR to reset the modem thus the modem must
+ have this option enabled in its default configuration.
+
+ If the modem echoes command strings sent to it SET DIAL ECHO to enable
+ display of anything output by it.
+
+ Once all pertinent data have been entered, it is then necessary to SET
+ Kermit's modem-type:
+
+	Kermit-11>SET MODEM USER-DEFINED
+
+ If a line (and speed if necessary) has been previously set this causes
+ Kermit to try initializing the modem, the result of which is reported.
+ If successful, you may then use the DIAL command to call out.
+
+3 ABORT
+
+ Defines a string to force the modem to stop dialing.  This is passed
+ to the modem by the strike-any-key abort function of Kermit-11 while
+ waiting for a dialed  call  to complete.  Non-printing chars must be
+ specified in octal notation.
+
+	Kermit-11>SET DIAL ABORT \003	; use ^C to stop modem
+
+3 ANSWER
+
+ Defines a string the %A format effector will insert in the dial FORMAT
+ string when it contains said %A effector and you have SET PHONE ANSWER
+ to allow answering a call back from a security modem requiring it.
+
+	Kermit-11>SET DIAL ANSWER S0=1	; Hayes does it thusly
+
+ SHOW MODEM to display its current setting and status.
+
+3 BINARY-RESPONSE
+
+ If your modem responds with single character result messages (sans any
+ terminator ala a return) set this so Kermit will as well.  The default
+ may be restored with SET DIAL NOBINARY-RESPONSE, which enables testing
+ of strings of more than one character.
+
+3 BLIND
+
+ Defines a string to force the modem to dial regardless of its detecting
+ a dial tone or recognizing tone dialing capability on the line.  Actual
+ use of this string in dialing is enabled by SET PHONE BLIND.
+
+	Kermit-11>SET DIAL BLIND string
+
+3 COMMENT
+
+ Specifies a brief description of the modem definition which is included
+ in the SHOW MODEM display.  Embedded blanks are ok, but multiple spaces
+ will be reduced to a single blank.
+
+	Kermit-11>SET DIAL COMMENT Hayes-MNP with DTE speed locked
+
+3 CON300
+
+ Define a message from the modem which, as a result of a dialed call
+ will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+ KM handler) to 300 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON300 CONNECT  ; Hayes defaults to 300
+
+3 CON1200
+
+ Define a message from the modem which, as a result of a dialed call
+ will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+ KM handler) to 1200 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON1200 CONNECT 1200
+
+3 CON2400
+
+ Define a message from the modem which, as a result of a dialed call
+ will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+ KM handler) to 2400 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON2400 CONNECT 2400
+
+3 CON4800
+
+ Define a message from the modem which, as a result of a dialed call
+ will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+ KM handler) to 4800 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON4800 CONNECT 4800
+
+3 CON9600
+
+ Define a message from the modem which, as a result of a dialed call
+ will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+ KM handler) to 9600 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON9600 CONNECT 9600	; Hayes
+	Kermit-11>SET DIAL CON9600 CONNECT FAST	; Telebit
+
+3 CON19200
+
+ Define a message from the modem which, as a result of a dialed call
+ will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+ KM handler) to 19,200 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON19200 CONNECT 19200
+	Kermit-11>SET DIAL CON19200 CONNECT 14400
+
+3 CON38400
+
+ Define a message from the modem which, as a result of a dialed call
+ will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+ KM handler) to 38,400 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON38400 CONNECT 38400
+
+3 CONFIRM
+
+ Some modems use a command syntax wherein the number to be dialed is
+ echoed back to the user, after which the user must confirm it is ok
+ by returning an appropriate string:
+
+	Kermit-11>SET DIAL CONFIRM \015   ; usually just a return
+
+3 CONFIRM-ACKNOWLEDGE
+
+ If your modem issues some sort of confirmation to the DIAL CONFIRM
+ sent to it, and there is  some  reason  to  test that in fact said
+ confirmation has actually been received by Kermit, you may specify
+ what to expect thusly:
+
+	Kermit-11>SET DIAL CONFIRM-ACK string
+
+ For example, older Vadic modems would say "DIALING" here.
+
+3 DIAL-ACKNOWLEDGE
+
+ Specifies a string issued by the modem to acknowledge it is dialing.
+ Use of this may be  required  for  error  detection  with some older
+ modems, but it's normally not necessary.
+
+	Kermit-11>SET DIAL DIAL-ACK \015   ; usually just a return
+
+3 DIAL-PAUSE
+
+ Defines the string for dial tone pause, which string is passed to the
+ modem by placing the %P format effector in the actual dialing string,
+ which in turn is defined with the SET DIAL FORMAT command.
+
+	Kermit-11>SET DIAL DIAL-PAUSE string
+
+ If you are dialing on a direct line or your modem supports pausing via
+ something embedded in the dial string itself the DIAL-PAUSE command is
+ unnecessary.  As long as the first char is numeric, commas and similar
+ tokens will be passed to the modem as part of the number from the DIAL
+ command.
+
+3 DIAL-RATE
+
+ Allows pacing of chars in the dial string sent to the modem.  There is
+ an inherent wait of one clock tick (1/50 or 1/60 second, per your LTC)
+ to ensure an echo is not missed.  If this remains too fast for a modem
+ additional delay between each char may be specified in ticks:
+
+	Kermit-11>SET DIAL DIAL-RATE 3
+
+3 ECHO
+
+ If the modem echoes command strings, SET DIAL ECHO causes the display
+ during DIALing to be driven directly from the modem's output.  If the
+ modem doesn't support this, SET DIAL NOECHO forces display of what is
+ sent, regardless of what may be received from the modem.
+
+3 FAILURE
+
+ Define a message from the modem which, as a result of a dialed call,
+ indicates failure to complete the connection.  More than one message
+ may be defined if necessary to include all possibilities.
+
+	Kermit-11>SET DIAL FAILURE BUSY
+	Kermit-11>SET DIAL FAILURE NO ANSWER
+
+3 FORMAT
+
+ This defines the actual DIAL string sent to the modem.  In  addition
+ to specifying the entire thing verbatim several format effectors are
+ provided to make life easier.  Most notable of these is %S, which is
+ the number to dial taken from the argument to the DIAL command.  See
+ HELP SET DIAL Format-effectors for detailed info.
+
+	Kermit-11>SET DIAL FORMAT %P%S\015
+	Kermit-11>SET DIAL FORMAT AT %X D%M %S \015
+
+ Most modems will require %S be the last item in the list (other than
+ the return as an input terminator), as otherwise a following command
+ will be taken as a request to abort dialing.  If blanks are embedded
+ they will be passed to the modem, although contiguous blanks will be
+ reduced to a single space.
+
+3 Format-effectors
+
+ FORMAT (dialing) string format effectors supported:
+
+	%A - SET PHONE [NO]ANSWER string
+	%B - Dial blind
+	%M - Mode, pulse or tone
+	%P - Insert pause string
+	%S - Phone number string, passed by DIAL command
+	%X - Insert Hayes xmode string, unless set off
+
+ WAKE-STRING (initialization) string format effector supported:
+
+	%X - Insert Hayes xmode string, unless set off
+
+ See  HELP SET DIAL ANSWER, NOANSWER PULSE, TONE  and  HELP SET PHONE *
+ for info concerning exactly what each of these does.
+
+ If you are using a "Hayes" style modem, its extended response mode may
+ be set into the init string via SET PHONE XMODE n, where n is a number
+ between 0 and 14, or the word "OFF".  The  format  effector  for XMODE
+ is %X.  It may also be used in the dial string, allowing modifications
+ without re-initializing the modem.
+
+ Strings to be inserted will be displayed in SHOW MODEM when the format
+ effectors (SET PH BLIND,PULSE,TONE,XMODE) for them are enabled, except
+ for the phone number string, which is not built until DIALing.
+
+3 IDLE
+
+ Defines the string used to return the modem to idle state, which is
+ sent to the modem upon exiting Kermit-11 or dropping the connection
+ (ala SET LINE) to it.  If the modem was preset to auto-answer, this
+ restores it to that state.
+
+	Kermit-11>SET DIAL IDLE ATZ \015
+
+3 Important-Notes!
+
+ The SUCCESS, CONnnnn, RINGING  and  FAILURE fields are built as linked
+ lists thus you can have as many as necessary.  At least one SUCCESS or
+ CONnnnn message must be defined or any call is going to fail!
+
+ NOTE: Where a modem response string (SUCCESS, CONN, FAILURE) is a sub-
+ string of another response string the substring MUST FOLLOW the string
+ containing it as the comparison scheme used here ignores the return at
+ the end of the result string from the modem.  Thus, when you are using
+ CONNECT 1200 and CONNECT, "CONNECT 1200" MUST be defined first, BEFORE
+ "CONNECT" on its own.  All tests are done without respect to case.
+
+ Use of CONNECT messages to conform the speed of the DCE port (the one
+ on the PDP-11) to that of the modem (DTE port) is only possible using
+ the CL (TSX-Plus) or KM (RT-11/TSX-Plus) handlers.  These are for use
+ with modems which alter the speed of their data port to the connected
+ (telephone port) speed.  The old speed will be restored when the next
+ call is placed, unless SET otherwise first.  See HELP SET DIAL CONnn,
+ where nn=300 ,1200 ,2400 ,4800 ,9600 ,19200 or 38400.
+
+ Once you have  established  a  working set of parameters for your user
+ defined modem,  you  may  include  them  in  KRT.INI, Kermit's startup
+ initialization command file.  If memory runs out before everything you
+ need can be entered, increase the value of ALSIZE in KRTMAC.MAC.  This
+ same buffer is used to store phone numbers.  Also note malloc as it is
+ here does not deallocate anything, thus while re-entering data updates
+ pointers to them the superseded data's memory is NOT recovered.
+
+ The following pseudo code was extracted from the dialer source module,
+ with the hope of clarifying the functions of and relationships between
+ the seemingly excessive number of parameters available here.  Anything
+ that can modified by SET DIAL is shown in UPPER CASE.  Items listed as
+ optional should only be used when really necessary, or performance may
+ not remain as fast as it could be.
+
+ format_dial_string		; build the modem's dial_command_string
+   using FORMAT string and
+     %B BLIND dial string	; if set phone blind has also been done
+     %M PULSE or TONE string	; set phone pulse,tone selects which
+     %P DIAL-PAUSE string	; used if defined
+     %S the_phone_number	; as passed by the dial command
+     %X XMODE			; depending on set phone xmode
+
+ call tty_initialize		; open the link device
+ call fix_speed			; restore set speed (b4speed) if need be
+
+ test INIT-ONCE			; need to re-init modem?
+   if <>, goto do_dial
+	send WAKE-STRING	; ya, send it an init string
+	pace WAKE-RATE ticks	; pause between chars if <>
+	call check_abort	; check strike any key to abort loop
+	wait_for WAKE-PROMPT	; now wait 2 secs for an ack
+     on error, loop a maximum of three times then give up
+
+ do_dial:			; try to dial a number
+	; these two are optional and only for modems which need them
+	send INITIATE		; dump the string to initiate dialing out
+	wait_for INITIATE-PROMPT; if defined, wait up to 4 secs for a response
+   send dial_command_string	; this is from FORMAT, et.al. above
+   pace DIAL-RATE ticks		; pause between chars if not zero
+   test DIAL-ECHO		; does it echo?  if not, Kermit will do it
+   call check_abort		; strike any key to abort loop
+	; these three are optional and only for modems which need them
+	wait_for DIAL-ACK	; wait up to 4 secs for numb to echo perhaps
+	send CONFIRM		; stuff a confirm
+	wait_for CONFIRM-ACK	; if defined, wait up to 5 secs for the string
+
+ get_response:			; get the modem's response
+   wait_for SUCCESS ,RINGING ,FAILED ,CON300..CON19200
+   test BINARY-RESPONSE		; exit loop on a single character?
+   call check_abort		; strike any key to abort loop
+   wait_until TIME-OUT secs
+
+ call_fails_or_was_aborted:
+   send ABORT			; get the modem to STOP
+   wait SETTLE			; let modem recover from abort!
+
+ call_succeeds:
+	; if under TSX-Plus with CL handler and a CONnnnn result message
+	call b4speed		; save speed before fallback..
+	call set_speed		; then set it to what modem wants it to be
+   jump c$connect		; and connect automatically..
+
+3 INITIATE
+
+ Some modems use a command syntax wherein the number to be dialed must be
+ preceded by a command to first initiate the dial mode itself.   Normally
+ these modems will also require using a DIAL CONFIRM string after sending
+ the number string.
+
+	Kermit-11>SET DIAL INITIATE D\015
+
+3 INITIATE-PROMPT
+
+ If after use of the DIAL INITIATE option for some obscure reason you
+ find it necessary to check for proper response to it from your modem
+ the desired string may be specified thusly:
+
+	Kermit-11>SET DIAL INITIATE-PROMPT string
+
+3 INIT-ONCE
+
+ If once initialized your modem remains in that state (some such as the
+ Concord 224 will time out and return to an idle mode) you may skip any
+ further unnecessary and time consuming inits by calling this function.
+ This is tested when dialing, and will speed up the redial looping time
+ if your modem allows its use.
+
+	Kermit-11>SET DIAL INIT-ONCE
+
+ To restore Kermit-11's default operation where the modem is re-initted
+ before trying anything and everything else SET DIAL NOINIT-ONCE.
+
+3 NOANSWER
+
+ Defines a string the %A format effector will insert in the dial FORMAT
+ string when it contains said %A effector and you've SET PHONE NOANSWER
+ to disable the modem from answering an incomming call.
+
+	Kermit-11>SET DIAL NOANSWER S0=0  ; Hayes does it thusly
+
+ SHOW MODEM to display its current setting and status.
+
+3 NOBINARY-RESPONSE
+
+ Enables testing modem result messages consisting of strings greater than
+ one character.  If your modem responds via single character result codes
+ SET DIAL BINARY-RESPONSE so Kermit will as well.
+
+3 NOECHO
+
+ If the modem echoes command strings, SET DIAL ECHO causes the display
+ during DIALing to be driven directly from the modem's output.  If the
+ modem doesn't echo, SET DIAL NOECHO will force Kermit to display what
+ is sent to the modem in place of what would be echoed back.
+
+3 NOINIT-ONCE
+
+ If your modem, once initialized for dialing out, doesn't remain in such
+ a state, particularly after a dial out call fails, SET DIAL NOINIT-ONCE
+ will force Kermit-11 to re-initialize the modem before each dial/redial
+ attempt.  This is the default operation.
+
+3 PULSE
+
+ Defines a string to force the modem to use pulse dialing regardless of its
+ recognizing tone dialing capability on the line.  This string is passed to
+ the modem by the %M format effector (which must in the DIAL FORMAT string)
+ when one has SET PHONE PULSE to enable it.
+
+	Kermit-11>SET DIAL PULSE P	; "Hayes" uses this
+
+3 RINGING
+
+ Defines a ring response, as returned by the modem to report the status of
+ a call in progress.  Kermit-11 maintains a count of received RINGS, after
+ seven of which the call will be considered failed due to no reply.
+
+	Kermit-11>SET DIAL RINGING RING   ; "RING" includes "RINGING"
+	Kermit-11>SET DIAL RINGING RRING  ; Telebit style..
+
+ Multiple messages may be defined as required to cover all possibilities.
+
+3 SETTLE-TIME
+
+ Allows modifying the delay between sending a reset string to a modem and
+ dumping the handler connected to it, which also drops DTR.  If the modem
+ doesn't recover in time to resume its auto-answer mode, increase this to
+ something beyond the 20 tick default by setting a new value as a decimal
+ number of ticks.  One tick is 1/50 or 1/60 second (hardware dependent).
+
+	Kermit-11>SET DIAL SETTLE 30
+
+ IMPORTANT NOTE:  This is a global function effective for ANY modem type,
+ not just USER-DEFINED, but for KRT's built-in modem types this will only
+ prevail when this is done AFTER setting the MODEM-TYPE.
+
+3 SUCCESS
+
+ Define a message from the modem which, as a result of a dialed call,
+ indicates successful completion and a data path has been established
+ between modems, and which will force Kermit to CONNECT your terminal
+ to it.  More than one message may be defined if necessary to include
+ all possible responses.
+
+	Kermit-11>SET DIAL SUCCESS CONNECT
+	Kermit-11>SET DIAL SUCCESS ON LINE
+
+  NOTE:  This particular function neither checks nor changes speed.
+  If this is something you need, see HELP SET DIAL Important-Notes.
+
+3 TIME-OUT
+
+ Defines the period in seconds after which if there is no conclusive
+ response (excluding informational messages) from the modem the call
+ will be considered to have failed.
+
+	Kermit-11>SET DIAL TIME-OUT 60	; for overseas calling..
+
+ IMPORTANT NOTE:  This is a global function effective for ANY modem type,
+ not just USER-DEFINED, but for KRT's built-in modem types this will only
+ prevail when done AFTER setting the MODEM-TYPE, and the modem's internal
+ time out is set to something greater than the desired time period here.
+
+3 TONE
+
+ Defines a string to enable the modem to use tone dialing regardless of its
+ recognizing tone dialing capability on the line.  This string is passed to
+ the modem by the %M format effector (which must in the DIAL FORMAT string)
+ when one has SET PHONE TONE to enable it.
+
+	Kermit-11>SET DIAL TONE T	; "Hayes" uses this
+
+3 WAKE-ACKNOWLEDGE
+
+ Defines the expected response to the WAKE-STRING (initialization to dial
+ out) sent to the modem.  This is tested three times over a period of six
+ seconds, after which the init will be considered to have failed.
+
+	Kermit-11>SET DIAL WAKE-ACK *
+	Kermit-11>SET DIAL WAKE-ACK OK
+
+3 WAKE-RATE
+
+ Allows pacing of chars in the init string sent to the modem.  There is
+ an inherent wait of one clock tick (1/50 or 1/60 second, per your LTC)
+ to ensure an echo is not missed.  If this remains too fast for a modem
+ additional delay between each char may be specified in ticks:
+
+	Kermit-11>SET DIAL WAKE-RATE 5
+
+3 WAKE-STRING
+
+ Defines the wakeup (initialization) string sent to the modem to place
+ it in the ready-to-dial-out state:
+
+	Kermit-11>SET DIAL WAKE-STRING \005\015
+	Kermit-11>SET DIAL WAKE-STRING AT E1 Q0 S0=0 S7=255 V1 %X \015
+
+2 DTR
+
+ Synonym for HANGUP.  May also be used to raise DTR.
+
+2 DUPLEX
+
+ Permits local echo in the CONNECT mode, which is useful when the system
+ to which you're connected doesn't return what's typed at it (not likely
+ in the present era).  The options here are HALF (local echo on) or FULL
+ (echo from the remote, the default).  SHOW CONSOLE displays its status.
+
+2 END-OF-LINE
+
+ The END-OF-LINE parameter is the ASCII character used as a
+ line terminator for all packets sent to and  received from
+ the other Kermit.  This is normally not changed.  See HELP
+ ASCII for octal values.
+
+	Kermit-11>SET END octal-value-of-char
+
+2 EOF
+
+ Determines action taken at the end of a command file, or when an error
+ occurs after Kermit-11 has been run with UCL.  SET EOF EXIT terminates
+ Kermit-11 and exits to the monitor, and NOEXIT (the default) keeps the
+ program active.  SET EOF is ignored for the init (KRT.INI) file.
+
+2 ESCAPE
+
+ This sets the escape character used to prefix commands while in the
+ CONNECT mode.  The default is Ctrl-\ (octal 34).  It is a good idea
+ to set this to something which is not used (at least not very much)
+ on the system to which you'll be connecting.  Check  HELP ASCII for
+ a list of octal values.
+
+	Kermit-11>SET ESC octal-value-of-char
+
+2 FILE-TYPE
+
+ When it's started Kermit-11 defaults to automatically getting a file
+ type from the BINARY-TYPE list when sending  or  incoming attributes
+ if receiving.   Some Kermits may not accommodate this, in which case
+ it's necessary to manually SET a particular FILE-TYPE, and match the
+ BLOCK-CHECK as well, on both Kermits before continuing.
+
+ The file type ASCII should be used to for text files which are to be
+ used as text files.  The file type BINARY should  be used for binary
+ files, such as save images, in which bit 7 must not be stripped when
+ transferred.  The file type  DEC-Multinational  may be used for text
+ files containing 8-bit chars if it is supported on the other end.
+
+ RT-11 text uses the <cr><lf> line terminator which makes it possible
+ to set the binary mode on KRT and text mode on the foreign Kermit so
+ 8-bit text may be exchanged.  A file with unexpected 8-bit data will
+ make itself known when the first packet containing it is NAKed until
+ the transfer fails.
+
+ HELP Binary-Files contains additional useful info of a more general
+ nature.
+
+ Once a FILE-TYPE is SET that aspect of exchanging file attributes is
+ superseded by the designated type  regardless of whatever remains on
+ with the rest of attribute processing.  SET FILE AUTO to restore the
+ default.  SHOW FILE displays the current type.
+
+	Kermit-11>SET FILE ASCII
+	Kermit-11>SET FILE BINARY
+	Kermit-11>SET FILE DEC-MULTINATIONAL
+	Kermit-11>SET FILE AUTO
+
+3 ASCII
+
+ Force the file type to ASCII, for 7-bit text files.  For
+ text files containing 8-bit chars use DEC-MULTINATIONAL,
+ if supported by the other Kermit, or if not, use BINARY.
+ You must explicitly set the text mode on the other end.
+
+ SET FILE AUTO restores automatic ASCII/Binary selection.
+
+3 AUTO
+
+ Decide if a file should be sent in the binary mode as determined
+ from an internal list of binary file types and use any type data
+ found in an incoming file's attributes.
+
+ Setting the FILE-TYPE to any particular value overrides both the
+ send and receive automatic type selection.
+
+3 BINARY
+
+ Force the file type to BINARY, for non-text files.  If parity is set to
+ anything besides NONE, the other Kermit must support eight bit quoting.
+
+ SET FILE AUTO restores automatic ASCII/Binary selection.
+
+3 CREATE-SIZE
+
+ The largest file RT-11 can open without specifying a particular size
+ is half the biggest piece of contiguous free space.  When talking to
+ a Kermit that doesn't support passing the file size with attributes,
+ SET CREATE-SIZE may be used to get a file that otherwise wouldn't be
+ possible.  If your largest free space is 3000 blocks and you need to
+ get a 2499 block file:
+
+	Kermit-11>SET FIL CRE 2499
+
+ Note that a SET size supersedes a received attribute value.
+
+	Kermit-11>SET FIL CRE 0    ; default, restores size attribute
+
+ This parameter is cleared (reset to its default) after the next open
+ (.enter) of ANY kind, and thus may also be used to set the size of a
+ log file.  Conversely, if meant to be used otherwise it shouldn't be
+ be set until AFTER a log file has been opened.
+
+ One may also explicitly specify a size via the FILENAME[size] syntax
+ where "size" is expressed as a decimal number of blocks.  This takes
+ precedence over a SET FILE CREATE value, which will still be cleared
+ on the next open regardless if it is then ignored because the CSISPC
+ parameter was passed and used instead.
+
+	Kermit-11>LOG TST[77] PACK   ; allocates 77 blocks to TST.LOG
+
+3 CSI-PARSING
+
+ Determines whether multiple file specs provided to the local GET and
+ SEND commands delimited by commas are parsed by the real CSISPC call
+ (limit is six arguments) or by a software emulation (limited only by
+ command line length) useful when the other Kermit chokes on commas.
+
+	Kermit-11>SET FILE CSI EMULATED
+	Kermit-11>SET FILE CSI REAL	; the default
+
+ Directory listings and remote file name strings are always parsed by
+ the real RT-11 Command String Interpreter.
+
+3 DEC-MULTINATIONAL
+
+ Under RT-11 this is functionally the same as the BINARY type, and is
+ provided here for compatibility with other systems where it serves a
+ useful purpose.  DEC-Multinational is for text files (using carriage
+ control) with 8-bit records.
+
+ SET FILE AUTO restores automatic ASCII/Binary selection.
+
+3 FIXED
+
+ Synonym for SET FILE BINARY.
+
+3 IMAGE
+
+ Synonym for SET FILE BINARY under RT-11.
+
+3 NAMING
+
+ Determines the action taken on received and sent file names with
+ respect to node names, devices and directories contained in them.
+ This includes upper case conversion for REMOTE command arguments.
+
+4 CONVERTED
+
+ Allows removal of node names, devices and directories from file names
+ so as not to bomb when receiving files from VMS, Unix, networks, etc,
+ and also strips the same from a name sent.  This is the default.
+
+4 FULL
+
+ Pass entire file specification, including node names and directories.
+ It's not a good idea to use this mode when connected to a VMS or Unix
+ system due to the relatively limited nature of RT-11 file names.
+
+4 LOWER-CASE
+
+ Pass file names to the remote system exactly as typed, sans conversion
+ of alphabetic characters to upper case only, including  REMOTE command
+ arguments.  This is most useful when it's Unix on the other end.
+
+4 NOLOWER-CASE
+
+ Convert all alphabetic characters in file names passed to the called
+ system to upper case (the default).  This is provided to restore the
+ default operation after having SET FILE NAMING LOWER-CASE.  Includes
+ arguments to REMOTE commands.
+
+3 NOPROTECT
+
+ Allows Kermit-11 to accept files regardless if the file then exists
+ on the receiving system, the default.  See HELP SET FILE PROTECT if
+ you wish to retain existing files.  In no case will Kermit ever zap
+ a file protected via PIP (rename/protect).
+
+3 NOREPLACE
+
+ Synonym for SET FILE PROTECT.
+
+3 NOVOLUME-VERIFY
+
+ Normally Kermit-11 checks the directory header of a disk to verify it
+ most likely contains a valid file structure before trying to read the
+ directory.  If for some reason your disk doesn't contain the standard
+ data at offset 760 in the header, Kermit will not read the directory.
+ SET FILE NOVOL bypasses this test.
+
+3 PROTECT
+
+ Forces Kermit-11 to bomb a incoming file  when one of the same name
+ then exists.   The main use of this is to resume getting a group of
+ files (as in KRT*.*) having lost the connection  after transferring
+ some of them.  If protection is set, any files already gotten won't
+ be again.  This assumes the sending Kermit can reject a single file
+ in a possible group.  When using long packets be advised the create
+ is not attempted until the first data packet has been received, and
+ this may take several seconds at slower speeds.  Files protected by
+ PIP (ren/prot) can not be deleted by Kermit.
+
+ SHOW FILE displays the status of Kermit's file protection.
+
+3 REPLACE
+
+ Synonym for SET FILE NOPROTECT.
+
+3 TEXT
+
+ Synonym for SET FILE ASCII.
+
+3 TYPE
+
+ SET FILE TYPE xxx is the same as the SET FILE xxx, the keyword TYPE
+ is ignored but provides compatibility with other implementations of
+ Kermit.
+
+3 VOLUME-VERIFY
+
+ Check the directory header of a disk to verify that it contains a
+ valid RT-11 file structure before trying to read it (the default).
+ DECRT11 and DECVMSEX are acceptable headers, otherwise you may SET
+ FILE NOVOL to disable this check (for "foreign" floppies).
+
+3 WILDCARDS
+
+ This does not alter the operating system parameter of the same name,
+ but does control how Kermit evaluates file names, and is provided to
+ allow getting files having names with a leading dot as are common in
+ Unix.  In particular this permits renaming such files, by specifying
+ an output file name in the GET command.  Example -
+
+	Kermit-11>GET .bash_profile bash.pro
+	?KERMIT-11-E-Multiple files or wildcarding not supported here
+	?KERMIT-11-E-Syntax is GET file.typ [dev:][asfile.new]
+	Kermit-11>SET WILDCARDS EXPLICIT
+	Kermit-11>GET .bash_profile bash.pro
+	Kermit: X.BASH_PROFILE renamed to BASH.PRO
+	[...]
+	Kermit-11>SET WILDCARDS IMPLICIT  ; restore the default
+
+2 FLOW-CONTROL
+
+ Ordinarily RT-11 does not support hardware flow control, however it
+ has been added to (and is available ONLY with) the KM handler.  You
+ then have two choices:
+
+	Kermit-11>SET FLOW-CONTROL RTS/CTS	; do it in hardware
+	Kermit-11>SET FLOW-CONTROL XOFF		; do it in software
+	Kermit-11>SHOW LINE			; display what it is
+
+ Selecting software flow control forces on control character quoting
+ for ^Q, ^S and their 8-bit counterparts.
+
+ Note: Your modem, port and cable must all accommodate AND be set up
+ to actually use which ever type of flow control is selected.
+
+2 HANDSHAKE
+
+ One may use a quoted literal character, as in SET HAN '?
+ or SET HAN "?,  or select one of the following options.
+
+ See HELP SEND XON if you need to prefix outgoing packets
+ with a ^Q.
+
+3 CR
+
+ Use the carriage return as the handshaking character.
+
+3 NONE
+
+ Cancels any active handshaking.
+
+2 HOME
+
+ Modifies the home directory name to the specified device.
+
+2 INCOMPLETE-FILE-DISPOSITION
+
+ Allows determination of what is done with a file that is not completely
+ received.  If the disposition is KEEP, all files received will be kept,
+ even if only some fraction of the file is received.  If the disposition
+ is DISCARD (the default) anything not completely received is discarded.
+ If the other Kermit supports the  "D"  (discard)  byte in the "Z" (EOF)
+ packet, a file skipped or aborted when sending from this Kermit will be
+ treated according to this parameter as SET on the OTHER Kermit.
+
+	Kermit-11>SET INCOMPLETE-FILE-DISPOSITION action
+
+ Where 'action' is either DISCARD or KEEP.
+
+2 LD:
+
+ The only option available is SET LD EMPTY, which dismounts all
+ mounted logical disks, under TSX-Plus V6.3 and above only.
+
+2 LINE
+
+ Selects a default device for transfers and CONNECT.  SET LINE TT
+ places Kermit-11 in its Remote Mode where packet I/O will be via
+ the controlling terminal line.
+
+ Besides TT only the following physical devices or an assigned or
+ equivalent logical name, such as CL vs. CL0, are supported:
+
+  CL0, CL1, CL2, CL3, CL4, CL5, CL6, CL7, KM, XC, XL
+
+ Under RT-11 you should LOAD the handler before running Kermit.
+
+ WARNING:  It is impossible to bomb a KM, XC or XL read completion
+ routine, so once it has been assigned as the link the only way to
+ deassign KM, XC or XL is to exit Kermit.
+
+ The PRO/3xx with TSX-Plus attempts to attach CL0 or CL1 to Line 3
+ when Kermit is started.
+
+ Check HELP SET CL for a detailed description of using CL units on
+ other hardware, particularly in a multi-user environment.
+
+ If you intend to use a modem on the line you should SET SPEED and
+ SET MODEM immediately afterwards so as to init the modem and stop
+ it from answering a possible incoming call.   It will be restored
+ to its idle state when exiting Kermit or modifying the line.
+
+2 LOCAL-ECHO
+
+ Synonym for SET DUPLEX.  You may SET LOCAL-ECHO ON if the
+ remote system won't echo what you type while CONNECTed to
+ it.  SET LOCAL-ECHO OFF restores the default operation.
+
+2 LOGFILE
+
+ Synonym for the LOGFILE command.
+
+2 LONG-PACKETS
+
+ Options are ON, OFF, or you may SET NOLONG-PACKETS.  This  may be used
+ to disable use of long packets regardless of packet length set locally
+ or received  from  a remote system.  Setting the packet length greater
+ than 94 on this end restores long packet operation if set off via this
+ command.
+
+ In the past, SET LONG ON merely restored use of long packets if they'd
+ first been enabled by SET REC PAC nnn, and wouldn't in itself actually
+ alter the packet length.  Here, it has been enhanced to accomplish and
+ is equivalent to this:
+
+	Kermit-11>SET BLOCK-CHECK-TYPE 3
+	You may need to SET BLO 3 on the other Kermit
+	Kermit-11>SET RECEIVE PACKET-LENGTH max-possible
+
+ See HELP Long-Packets for more info.  SHOW PACKET to check the maximum
+ available buffer length.
+
+2 MODEM-TYPE
+
+ The SET MODEM command is used to establish the type of modem you are
+ using for the DIAL command.  Enter SET MODEM ? for a current list of
+ of pre-defined modem types.  See HELP SET DIAL for information about
+ entering a USER-DEFINED modem structure.
+
+ If a link device has been set first Kermit-11 will try to initialize
+ the modem, taking it out of the auto-answer mode so it remains ready
+ for calling out whilst Kermit is running.  This may involve a slight
+ delay if the init string is long and/or the speed is slow, up to six
+ seconds spanning three retries after which it times out.  If for any
+ reason DTR is dropped while a modem is on-line Kermit-11 will reinit
+ the modem immediately afterwards (except in the CONNECT mode when it
+ waits until exiting) to preclude answering a possible incoming call.
+
+2 NOATTRIBUTES
+
+ Disables automatic exchange of file attributes during transfers.
+ Does not alter the state of any individual attribute control flag.
+
+2 NODEBUG
+
+ Turns off all disk based debugging,  and closes the logfile.
+ To turn off RPACK logging SET DEBUG NORPACK.  Debugging sent
+ to TT may be offed via SET DEBUG NOTT.
+
+ SET DEBUG NONE dumps ALL debugging.
+
+2 NOLONG-PACKETS
+
+ Disables use of packets longer than 94 bytes.
+
+2 NOREPEAT-QUOTING
+
+ Disables compression of repeated characters during file transfers.
+
+2 NOUPDATE
+
+ Disables displaying packet statistics during transfers.  You'll
+ need to do this if you've FRUNed Kermit and want do to any work
+ in the background during file transfers.
+
+2 PARITY
+
+ Specifies the type of parity on the remote link.  It  defaults to
+ NONE and can also be ODD, EVEN, MARK or SPACE.  Parity generation
+ is  done  via  software,  no  special hardware is used.  Software
+ parity generation is restricted to 8-bit links only.  The format,
+ if parity is set to anything besides NONE, will be 7 bits of data
+ with the high bit set or cleared per the parity scheme in use.
+
+ SPACE parity is essentially nothing in the hi bit and thus may be
+ used to work around bottlenecks such as XL (a 7-bit handler).
+
+ When parity (other than NONE) is used Kermit-11 will be forced to
+ use 8-bit prefixing for binary files,  which  increases  transfer
+ time.  This modified Kermit checks the need to prefix before each
+ transaction, so one need not exit the program to turn it off.
+
+ See HELP Parity for application info.
+
+2 PAUSE
+
+ Specifies number of seconds to wait before each packet is sent.
+ This may be useful under situations of heavy system load.
+
+2 PHONE
+
+ Sets various parameters concerning dialing out via a modem.
+ SHOW MODEM to display parameters other than phone numbers.
+
+3 ANSWER
+
+ Causes the %A format effector to insert in the dial FORMAT string
+ the command string to cause the modem to answer an incomming call
+ as is required when call back security is in use at the remote.
+
+ %A is included in the Hayes and Telebit modem definitions and may
+ be used in the USER-DEFINED modem along with SET DIAL [NO]ANSWER.
+ The other pre-defined modems here either revert to the idle state
+ when carrier is lost, or the idle command must be issued manually
+ from the terminal emulator (it can't be preset).
+
+ When done SET PHONE NOASNWER will restore the default and prevent
+ Kermit from inadvertently answering an incomming call.
+
+3 BLIND
+
+ May be used if an appropriate dial formatting string and character
+ sequence for selecting BLIND dialing are present in the definition
+ for the modem in use.  The format effector for BLIND is %B.  Check
+ SHOW MODEM to see if it's present.  This is cleared when the modem
+ type is set, and thus must be (re-)enabled AFTERWARDS.
+
+3 NOANSWER
+
+ Causes the %A format effector to insert in the dial FORMAT string
+ a command string to prevent the modem from answering an incomming
+ call.  Use to restore this default after having SET PHONE ANSWER.
+
+ If you have a modem on-line when issuing this command Kermit will
+ then re-initialize the modem so it actually becomes effective.
+
+3 NUMBER
+
+ The SET PHONE NUMBER command allows you to associate a phone number
+ with a symbolic name  for  later  use with the DIAL command.  These
+ definitions may be placed in KRT.INI, and then referenced later:
+
+	Kermit-11>SET PHONE NUMBER WORK 537-4411
+
+ This allows Kermit to associate a tag name with a phone number for
+ the DIAL command, as in the above example:
+
+	Kermit-11>DIAL WORK
+
+ This would cause Kermit to translate WORK to 537-4411, then dial it.
+ Tag names must not begin with a 0 to 9 digit.  The  number buffer is
+ shared with the USER-DEFINED modem.   If memory is insufficient, the
+ value of ALSIZE in KRTMAC.MAC may be increased.
+
+ SHOW PHONE displays a list of numbers set with this command.
+
+3 PULSE
+
+ May be used if the required dial formatting effector and character
+ sequence for selecting PULSE dialing are present in the definition
+ for the modem in use.  The  format effector  for PULSE/TONE is %M.
+ Check SHOW MODEM to determine its status.  SET MODEM-TYPE will NOT
+ alter this (as it's expected this depends on the site) but it must
+ be also included in the modem's definition or for the USER-DEFINED
+ specified via SET DIAL PULSE <string>.
+
+3 TONE
+
+ May be used if the required dial formatting effector and character
+ sequence for selecting TONE dialing are  present in the definition
+ for the modem in use.  The  format effector  for PULSE/TONE is %M.
+ Check SHOW MODEM to determine its status.  SET MODEM-TYPE will NOT
+ alter this (as it's expected this depends on the site) but it must
+ be also included in the modem's definition or for the USER-DEFINED
+ specified via SET DIAL TONE <string>.
+
+3 XMODE
+
+ If you are using a "Hayes" style modem, its extended response mode may
+ be altered or disabled via SET PHONE XMODE n, where n is a number from
+ 0 to 14 (or the word OFF), corresponding to the extended mode desired.
+ The format effector for XMODE is %X.  SHOW  MODEM displays its current
+ status if enabled.
+
+ IMPORTANT NOTE:  This is a global function effective for ANY modem type
+ but for the built-in modem types (as opposed to USER-DEFINED) this will
+ only prevail when done AFTER setting the MODEM-TYPE.
+
+2 PROMPT
+
+ Useful if you are using two Kermit-11s to talk to each other.
+ By using the SET PROMPT command, you can change the prompt on
+ either or both Kermits to something indicative of the systems
+ in use.  The prompt string also prefixes error messages, sans
+ the last byte if it is a ">".  Prompts may be up to 30 chars.
+
+ A trailing space may be embedded by quoting the prompt string.
+
+	Kermit-11>SET PROMPT "Kermit-11> "
+
+2 RANDOM
+
+ Allows Kermit-11 to randomly generate checksum errors for testing
+ error recovery of an attached Kermit.  SET SEED value  is used to
+ start  the  pseudo  random number generator at a different point.
+ This is used for debugging only.
+
+	Kermit-11>SET SEED 1234
+	Kermit-11>SET RANDOM ON
+	Kermit-11>SET RANDOM OFF
+
+2 RECEIVE
+
+ Alters various parameters concerning receiving packets.
+
+	Kermit-11>SET REC parameter value
+
+3 PACKET-LENGTH
+
+ This serves two purposes.  The first is to reduce incoming packet length
+ in the event normal sized Kermit packets can  not  be passed through the
+ communications circuit.  There could be, perhaps, some "black box" some-
+ where in the link that has a very small buffer size.  This command would
+ be used to reduce the size that the SENDING Kermit will use.
+
+ Long-packets are also enabled by setting the receive packet length.  See
+ HELP LONG-PACKETS for specific operational information.
+
+3 START-OF-PACKET
+
+ Modifies the character used for the RECEIVE (only) start of packet
+ to the specified octal-value from the default Ctrl-A.  Both  sides
+ must support the new value as it can't be negotiated in transfers.
+
+ The only reasons this should ever be changed are some piece of gear
+ somewhere between the two Kermit programs will not pass through the
+ Ctrl-A, or something similarly placed is echoing its input.  In the
+ latter case, the  recipient  can  change the packet outbound packet
+ prefix to be different from that of arriving  packets  so  the echo
+ will be ignored.  See HELP ASCII for octal values.
+
+3 TIME-OUT
+
+ This is the wait in seconds for a packet from the other Kermit, after
+ which it will be considered missing and appropriate action taken.  If
+ system loads are high or you are using a MNP protocol you may need to
+ increase this (and the SEND TIME-OUT on the other Kermit).
+
+ To disable SET RECEIVE TIME-OUT 0 (actually 65535. ticks).
+
+2 REPEAT-QUOTING
+
+ One may SET REPEAT OFF or ON (default) to control character compression
+ during packet transmission.  This might be necessary with older Kermits
+ that do not support this part of the protocol.
+
+2 RETRY
+
+ Sets the maximum number of times Kermit will try to send specific
+ packets.  There are  two  retry  parameters,  one for the initial
+ connection (the SEND-INIT or REC-INIT), the other comes into play
+ after this init succeeds, governing all further data packets.
+
+ The default value for the initial connection is 5, and 16 for all
+ other packets.
+
+	Kermit-11>SET RETRY type nn
+
+ Where "type" is either INITIAL-CONNECTION (for initial connection
+ packet) or PACKET (for all other packets), and "nn" is the number
+ of retries (decimal) to attempt.  Legal values are 3 to 30.  SHOW
+ RETRY to check the current settings.
+
+2 SEED
+
+ Seeds a random number generator used to create packet errors for debugging.
+
+	Kermit-11>SET SEED 4321  ; decimal number from 1 to 32767
+
+2 SEND
+
+ Alter various parameters concerning packets sent.
+
+	Kermit-11>SET SEND parameter value
+
+3 NOXON
+
+ Disables prefixing packets with a ^Q (the default).
+
+3 PACKET-LENGTH
+
+ This command may be used to reduce packet lengths in the event that
+ normal sized Kermit packets will not pass through the data circuit.
+ When Kermit-11 is started it defaults to the maximum possible size.
+ Once set, it limits sent packets to the specified length regardless
+ of what the other Kermit may request.  SHOW PACKET displays its SET
+ or default value.
+
+ LONG-PACKET operation is a completely separate function and must be
+ enabled at and requested by the receiving Kermit.  More information
+ is available via HELP LONG-PACKETS.
+
+3 PADCHARACTER
+
+ The character used to delay the beginning of actual packet data.
+ See also SET SEND PADDING.  See HELP ASCII for octal values.
+
+	Kermit-11>SET SEN PADCHAR <octal-value>
+
+3 PADDING
+
+ The number of pad characters used to delay the beginning of each
+ packet sent.  One must first SET SEN PADCHAR <octal-value>.
+
+	Kermit-11>SET SEN PADDING <decimal-#-of-pad-chars>
+
+3 START-OF-PACKET
+
+ Modifies the character used for the SEND (only) start of packet to
+ the specified  octal-value  from the default Ctrl-A.  Both Kermits
+ must support the new value as it can't be negotiated in transfers.
+
+ The only reasons this should ever be changed are some piece of gear
+ somewhere between the two Kermit programs will not pass through the
+ Ctrl-A, or something similarly placed is echoing its input.  In the
+ latter case, the  recipient  can  change the packet outbound packet
+ prefix to be different from that of arriving  packets  so  the echo
+ will be ignored.  See HELP ASCII for octal values.
+
+3 TIME-OUT
+
+ This is the wait in seconds for a result from the other Kermit, after
+ which it will be considered missing and appropriate action taken.  If
+ system loads are high or you are using a MNP protocol you may need to
+ increase this (and the RECEIVE TIME-OUT on the other Kermit).  When a
+ slow speed and long packets are in use be aware that the timer starts
+ after the write is queued, which may be a few seconds before the last
+ byte of data is actually shipped out.  A longer time-out value should
+ be used if this presents a problem.
+
+ To disable SET SEND TIME-OUT 0 (actually 65535. ticks).
+
+3 XON
+
+ Prefixes packets with ^Q.  SET SEN NOXON returns to non-prefixed operation.
+
+2 SERVER
+
+ Controls the period at which an idle server times out and sends a NAK.
+
+	Kermit-11>SET SER TIME-OUT secs	; default is 60 secs, max is 1092
+	Kermit-11>SET SER NOTIME-OUT	; the max, 21.8/18.2 mins at 50/60Hz
+
+2 SL
+
+ Allows control of the Single-Line Editor:
+
+	Kermit-11>SET SL ON,KED	; turns SL on, enables Keypad mode
+	Kermit-11>SET SL NOKED	; offs Keypad mode
+	Kermit-11>SET SL OFF	; turns SL off
+
+ See HELP SL-Editor for operational details.
+
+2 SPEED
+
+ Sets the line speed for the device specified with the SET LINE command if
+ the hardware allows it, but is supported only via the CL and KM handlers.
+ If a modem is on-line when the speed is altered,  Kermit will then try to
+ re-initialize the modem at the new speed, unless a carrier is present, in
+ which case no further action is taken.
+
+ Supported speeds (hardware dependent): 75, 110, 134 ,150, 300 ,600, 1200,
+ 1800, 2000, 2400, 3600, 4800, 7200, 9600, 19200, 38400.
+
+	Kermit-11>SET SPEED 2400
+
+2 START-OF-PACKET
+
+ Modifies the start-of-packet to the specified octal-value from the
+ default Ctrl-A for BOTH send and receive operations.  Both Kermits
+ must support the new value as it can't be negotiated in transfers.
+ Send and receive SOHs may also be SET individually.
+
+2 TERMINAL
+
+ Controls display formatting.  Kermit checks RT-11 for its SET TT
+ [NO]SCOPE status or TSX-Plus for a terminal type and uses it for
+ the default terminal.  This may be changed from Kermit's command
+ line:
+
+	Kermit-11>SET TT NOSCOPE  ; printing terminal
+	Kermit-11>SET TT TTY	  ; tube terminal, but not a VT-xxx
+	Kermit-11>SET TT VT100	  ; itself
+	Kermit-11>SET TT SCOPE	  ; here same as VT100
+	Kermit-11>SET TT VT200	  ; itself
+
+ SET CONSOLE alters terminal emulator (the CONNECT mode) parameters.
+
+ Informational messages may be offed by SET TERM QUIET.  The default
+ is NOQUIET, allowing everything to be displayed.  See also HELP SET
+ UPDATE.
+
+ An init file is not usually echoed.  Check HELP INSTALL if you wish
+ to change this.
+
+2 TT:
+
+ Synonym for SET TERMINAL.
+
+2 UPDATE
+
+ Controls the frequency at which the packet count display is updated.
+ The default is 1, displaying each packet.  SET UPDATE 0 will disable
+ all packet count logging, whereas  SET UPDATE n  updates the display
+ every "n" packets.  SET NOUPDATE is a synonym for SET UPDATE 0.  Use
+ this when Kermit is FRUNed and you want to work in the background.
+
+2 VLSWCH
+
+ Determines the operation of ^W during the CONNECT mode under TSX-Plus.
+ SET VLSWCH LOCAL to control one's own machine (the default), or REMOTE
+ to pass ^W as a normal character, and suspend local window processing.
+ The TSX-Plus print window key (^B) will track the operation of ^W.
+
+1 SHOW
+
+ The SHOW command will display the parameters Kermit uses to interpret
+ and process commands and data, some of which are modifiable with SET.
+
+	Kermit-11>SHOW parameter
+	Kermit-11>SHOW		; defaults to "SHOW ASSIGNS"
+
+2 ALL
+
+ As the name implies, displays everything that can be shown.
+
+2 ASSIGNS
+
+ Displays the current home directory and default device.
+
+2 ATTRIBUTES
+
+ Displays the current status of attribute packet processing.
+ Note that ATTRIBUTES must be set ON (default) regardless of
+ the individual status of each before they will be processed
+ by this program, including their display here.
+
+2 BAUD
+
+ Synonym for SHOW LINE, which includes the baud rate when available.
+
+2 BINARY-TYPE
+
+ Lists file types which are considered to be binary (8-bit).
+
+2 BLOCK-CHECK-TYPE
+
+ Displays the type of checksum in use.
+
+2 CL:
+
+ Displays current contents of PORTS and UNITS strings.
+ SHOW LINE displays the current status of CL, if it is
+ then in use.
+
+2 CONSOLE
+
+ Displays parameters asscoiated with Kermit's terminal emulator
+ (the CONNECT mode).  Use  SHOW  TERMINAL  to see your terminal
+ parameters.
+
+2 CONTROL-PREFIXING
+
+ Displays the current control prefix and a table of all control-character
+ values showing 1 for each that will be prefixed and 0 for each that will
+ not.
+
+2 DATE
+
+ Displays today's date.  This program supports dates through 31-Dec-2099.
+
+2 DAYTIME
+
+ Displays the current date and time.
+
+2 DEBUG
+
+ Shows debugging and logging status, and random error generation parameters.
+
+2 DEFAULT
+
+ Displays the default disk device.
+
+2 DELAY
+
+ Displays the number of seconds delay before
+ SEND begins when invoked in the remote mode.
+
+2 DIAL
+
+ Displays the modem type selected and its associated parameters.
+ Unused or unset options aren't listed which renders the display
+ easier to behold.
+
+ Dial or wakeup string format effectors may be included, current
+ strings for which (if enabled) are displayable via SHO MODEM:
+
+	%A - SET PHONE [NO]ANSWER string
+	%B - Dial blind
+	%M - Mode, pulse or tone
+	%P - Insert pause string
+	%S - Phone number string, passed by DIAL command
+	%X - Insert Hayes xmode string, unless set off
+
+2 DTR
+
+ Synonym for SHOW LINE, which includes DTR status when available.
+
+2 DUPLEX
+
+ Synonym for SHOW CONSOLE, which includes local echo status.
+
+2 END-OF-LINE
+
+ Synonym for SHOW PARAMETERS, which includes the EOL chars.
+
+2 EOF
+
+ Displays action taken at the end of a command file, or when an error
+ occurs after Kermit-11 has been run with UCL.  HELP SET EOF explains
+ the available options.
+
+2 ESCAPE
+
+ Shows the escape character used to prefix commands when in the CONNECT mode.
+
+2 FILE-TYPE
+
+ Show the current file mode (ASCII, AUTO or BINARY) and various file options.
+
+2 FLOW-CONTROL
+
+ Synonym for SHOW LINE, which includes the flow control type when available.
+
+2 HANDSHAKE
+
+ Displays the current handshaking character.
+
+2 HOME
+
+ Synonym for SHOW DEFAULTS, which includes the home disk.
+
+2 INCOMPLETE-FILE-DISPOSITION
+
+ Shows what will be done with an arriving file when the transfer fails
+ before finishing.  When this Kermit is the remote your  local  Kermit
+ must support the "D" (discard) byte in the "Z" (EOF) packet if a file
+ skipped or aborted there is to be actually discarded when this is set
+ to discard here.
+
+2 LD:
+
+ Synonym for SHOW SUBMOUNTS (TSX-Plus V6.2 and up only).
+
+2 LINE
+
+ Displays operating parameters for the current link device.
+ If the current SET speed has been modified (as might occur
+ via fallback) it's listed as CURRENT/SET, as in 2400/9600.
+ The SET speed is restored if another call is initiated.
+
+2 LOCAL-ECHO
+
+ Synonym for SHOW CONSOLE, which includes the local echo status.
+
+2 LOGFILE
+
+ Synonym for SHOW DEBUG, which includes the log file status.
+
+2 LONG-PACKETS
+
+ Synonym for SHOW PACKETS, which includes long packets parameters.
+
+2 MEMORY
+
+ Display amount of memory free to load handlers under RT-11.
+
+2 MODEM-TYPE
+
+ Synonym for SHOW DIAL.  Note that SET DIAL is for a USER-DEFINED
+ modem type, and SET MODEM selects from a pre-defined database.
+
+2 PACKETS
+
+ Displays current SOH, EOL and packet lengths.
+
+2 PARAMETERS
+
+ Displays various send, receive and packet parameters.
+
+2 PARITY
+
+ Shows the software parity scheme in use.
+
+2 PAUSE
+
+ Displays the pause time before sending each packet.
+
+2 PHONE
+
+ Displays the current list of numbers entered via SET PHONE NUMBER,
+ and the last number dialed (if one exists).
+
+ Other SET PHONE parameters may be displayed via SHOW DIAL, as they
+ are all modem-related.
+
+2 RANDOM
+
+ Synonym for SHOW DEBUG, which includes the random error generator status.
+
+2 RECEIVE
+
+ Synonym for SHOW PARAMETERS, which includes receive data.
+
+2 REPEAT-QUOTING
+
+ Displays the current status of repeated character quoting.
+
+2 RETRY
+
+ Lists the current INITIAL-CONNECTION and PACKET retry limits.
+
+2 SEED
+
+ Synonym for SHOW DEBUG, which includes the 16-bit seed.
+
+2 SEND
+
+ Synonym for SHOW PARAMETERS, which includes send data.
+
+2 SERVER
+
+ Displays the current server time-out.
+
+2 SL
+
+ Displays the SL (Single Line, the command line) editor status.
+
+2 SPEED
+
+ Synonym for SHOW LINE, which includes the speed when available.
+
+2 START-OF-PACKET
+
+ Displays the current SOH (start-of-packet) character.
+
+2 SUBMOUNTS
+
+ Lists currently mounted logical devices, under TSX-Plus V6.2 and up only.
+
+2 TERMINAL
+
+ Displays the current Kermit terminal type and associated parameters.
+ Use SHOW CONSOLE for terminal emulator (CONNECT mode) details.
+
+2 TIME
+
+ Displays the current time of day as hours, minutes, seconds and ticks past
+ midnight.  This program supports either 50Hz or 60Hz clock rates, and will
+ include which it thinks is in use immediately following the time.
+
+2 TIME-OUTS
+
+ Displays the current packet time-out in seconds.
+
+2 TT:
+
+ Synonym for SHOW TERMINAL.
+
+2 UPDATE
+
+ Displays number of packets between display updates of counts of same.
+
+2 VERSION
+
+ Displays current version and edit of this program.
+
+2 VLSWCH
+
+ Displays the operation of ^W during the CONNECT mode under TSX-Plus.
+ See HELP SET VLSWCH for details of its use.
+
+1 SL-Editor
+
+ A basic Single Line Editor is available at the command line.  Most
+ operations require a VT-100 terminal, although  SL  may be enabled
+ regardless of terminal type.
+
+	Kermit-11>SET SL ON,KED	; turns SL on, enables Keypad mode
+	Kermit-11>SET SL NOKED	; offs Keypad mode
+	Kermit-11>SET SL OFF	; turns SL off
+
+ The last 10 command lines are stored.  This editor flips direction
+ when hitting either end of the line.  Note the  undelete-word  and
+ undelete-line routines share a common buffer, and with the non-EIS
+ assembly the number of stored commands is limited to 3.
+
+ A list of currently defined function keys is available at any time
+ during entry of a command via  the  PF2  key,  and the contents of
+ your command line buffer will be restored and retyped afterwards.
+
+2 Function-Keys
+
+	Left arrow   =	cursor left
+	Right arrow  =	cursor right
+	Up arrow     =	recall previous command lines
+	Down arrow   =	move back after up arrow use
+	Delete	     =	delete char to left of cursor
+	Line Feed    =  delete word to left of cursor
+	PF1          =  prefix to undelete char, word, or line
+	PF2          =  prints this list then retypes command line
+	PF4          =  delete line, from cursor to end
+	Ctrl-A       =  toggle insert mode off/on
+	Ctrl-B       =  recall previous command lines
+	Ctrl-C	     =	cancel command
+	Ctrl-D       =  cursor left
+	Ctrl-E       =  recall previous command lines
+	Ctrl-F       =  cursor right
+	Ctrl-R	     =	retype line
+	Ctrl-U	     =	delete line, from top to char left of cursor
+	Ctrl-V       =  move back after up arrow/^B/^E use
+	Ctrl-W       =  retype line
+
+2 KED-Mode-Functions
+
+	Left arrow   =	cursor left
+	Right arrow  =	cursor right
+	Up arrow     =	recall previous command lines
+	Down arrow   =	move back after up arrow use
+	Tab	     =	toggle insert mode off/on
+	Backspace    =	delete char to left of cursor
+	Delete	     =	delete char to left of cursor
+	Keypad Enter =	return
+	Keypad 0     =	goto start of line
+	Keypad 1     =  move one word
+	Keypad 2     =	goto end of line
+	Keypad 3     =  move one char
+	Keypad 4     =  set ADVANCE mode
+	Keypad 5     =  set BACKUP mode (default)
+	Keypad ,     =  delete char
+	Keypad -     =  delete word starting from cursor
+	Line Feed    =  delete word to left of cursor
+	PF1          =  prefix to undelete char, word, or line
+	PF2          =  prints this list then retypes command line
+	PF4          =  delete line, from cursor to end
+	Ctrl-C	     =	resets recall pointer
+	Ctrl-R	     =	retype line
+	Ctrl-U	     =	delete line, from top to char left of cursor
+
+1 SPACE
+
+ Shows a summary of used and free disk space available.
+ A device or files argument is optional.
+
+1 STATUS
+
+ Displays packet transaction statistics.  Packet types are -
+
+ A = Attributes                     K = Kermit (remote) command
+ B = Break transmission (EOT)       N = Negative acknowledgment (NAK)
+ C = Host (remote) command          R = Receive file init
+ D = Data packet                    S = Send file init
+ E = Error                          T = Time out (internal)
+ F = File header (name)             X = Extended reply
+ G = Generic (remote) command       Y = Acknowledgment (ACK)
+ I = Server init                    Z = End of file (EOF)
+
+1 TAKE
+
+ The TAKE command tells Kermit-11 to execute commands from the specified
+ file.  The RT-11 syntax "@file" may also be used:
+
+	Kermit-11>TAKE file
+	Kermit-11>@file
+
+ "File" is any normal RT-11 file specification.  The default type is .COM
+ and if no device is given the logicals TAK, KRT, DK and SY will be tried
+ in that order.  "!" or ";" may prefix comments in Kermit TAKE files, and
+ all commands except control characters are supported.   Maximum  command
+ line length is 132. bytes.
+
+1 TIME
+
+ Displays the current time of day as hours, minutes, seconds and ticks past
+ midnight.  This program supports either 50Hz or 60Hz clock rates, and will
+ include which it thinks is in use immediately following the time.
+
+1 TRANSMIT
+
+ Sends a file sans any protocol byte by byte, and echoes response to each.
+ Speed is locked at 1 byte/tick.  This is useful to upload text files into
+ a called  system's  message  editor.  Line feeds (which cause an unwanted
+ newline as most systems append one to a return) are not sent.  When done,
+ if the file was successfully transmitted Kermit reconnects to the remote,
+ at which time the bell sounds but CONNECT's sign-on message is suppressed
+ in order to leave the display and cursor position intact.
+
+1 TYPE
+
+ Types files to your terminal.  Switches (/opt) are not implemented.
+ When typing a binary file most non-printing characters are filtered
+ to prevent  possible  interference  with one's terminal attributes.
+ If the terminal type is VT100 or lower, the hi bit will be stripped
+ from everything typed.  Use VT200 to see all eight bits.
+
+	Kermit-11>TY GUIDE   ; default type is .LST
+	Kermit-11>TY .MAC    ; type all .MAC files
+	Kermit-11>TY *	     ; type all .LST files
+	Kermit-11>TY *.*     ; types the world..
+
+1 Upgrades
+
+ This special version of Kermit-11 (for RT-11 and TSX-Plus) may be from
+ time to time updated/upgraded, or various bugs may be found and fixed.
+ New versions may be obtained from kermit.columbia.edu by anonymous ftp
+ (kermit/b/krt*.*) or by calling the system on which the work is done:
+
+    Host:             Billy's Place, Culver City, California, USA
+    Available:        24 hours, 3 lines, immediate access
+    Phone:            +1.310.837.0892
+    Logon (username): 1000
+    Password:         moving_target
+    Modem speeds:     9600 (V.32) and down, or PEP (modems are T-2500s)
+    Protocols:        Kermit, VTCOM/TRANSF, Xmodem
+
+ Access is free other than whatever it costs to place the call.  Any bug
+ found will be fixed, send mail to billy@MIX.COM detailing your problem.
+ Also on-line here are the complete Kermit-11 T3.60 sources along with a
+ massive amount of RT-11 SIG and other public domain/gratis software.  
+
+1 XMODEM
+
+ Xmodem here supports either checksum or CRC error detection, however it
+ only does so one file at a time, using 128 byte blocks, under TSX-Plus.
+ Transmission is presently only on the controlling terminal (this Kermit
+ must be the remote system) and is also SEND-only from here to the other
+ system, because the TSX-Plus terminal handler does not pass nulls (zero
+ bytes) to a running program.
+
+ The Xmodem protocol requires an 8-bit path.  If this isn't the system's
+ default, you must from KMON issue the command SET TT 8BIT,BITS=8 before
+ running Kermit.  "BITS=8" is a hardware parameter and must be done on a
+ primary line only.  Setting it on a subprocess may write garbage in the
+ line-parameters word, rendering the line useless.
+
+ Xmodem doesn't work under RT-11 because RT strips all terminal I/O data
+ of the high order (parity) bit, thus preventing an 8-bit data path from
+ being used.
+

@@ -1,0 +1,416 @@
+	.sbttl	KRTMAC	Various handy constants and macros
+;	.ident	"V03.63"		; this is an .include file
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	add support for SET ATTRIBUTES
+;	add flag to suspend logging to a disk file
+;	make $LN$MAX 132. bytes for EIS assembly
+;	pulled message macro, no longer used..
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	move dispatch macro to KRTSER
+;	move erbfsiz here from KRTPAK
+;	condense logging (debug) modes
+;	increase efficiency of incm64 macro
+;	increase MAXLNG (long-packet size) to 1920.
+;	reduce MAXLNG to 600. for NONEIS assembly, so pgm loads under FB..
+;	ditto for ALSIZE (phone # buffer) and LN$CNT (SL # of lines saved)
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	modified message macro to call .newline instead of saving CR/LF
+;	and null for each new line, knocking 1042. bytes off the size
+;	of this version..  also changed ".print" emulation to wrtall,
+;	for a similar savings in compiled program size.
+;
+;	dump raw I/O logging from log$al (SET DEB ALL) - too confusing
+;	also pulled log$rp out and made it a completely separate item..
+;
+;	added a couple upper case macros
+
+;	include file for Kermit-11
+;
+;	Brian Nelson  01-Dec-83  13:56:12
+
+	.NLIST	BEX
+	.LIST	MEB			; /62/
+
+	KRTINC	=	1		; for .include error checking
+
+
+	.psect	$code	,ro,i,lcl,rel,con ; psect ordering..
+	.psect	$pdata	,ro,d,lcl,rel,con
+
+;	various ascii chars
+	SOH	=   1		; default packet start of header
+	BELL	=   7		; beep
+	BS	=  10		; backspace
+	TAB	=  11		; tab
+	LF	=  12		; line feed
+	FF	=  14		; form feed
+	CR	=  15		; carriage return
+	CTRL$N	=  16		; ^N VT-100 line drawing on
+	CTRL$O	=  17		; ^O VT-100 line drawing off
+	XON	=  'Q&37	; ^Q
+	XOFF	=  'S&37	; ^S
+	ESC	=  33		; escape
+	SPACE	=  40
+	COMMA	=  54
+	DOT	=  56		; /63/
+	SCOLON	=  73		; /63/
+	TILDE	= 176		; /63/
+	DEL	= 177		; delete
+
+;	system data locations
+	JSW	= 44		; job status word
+	ERRBYT	= 52		; emt error byte
+	USERRB	= 53		; /62/ user error byte
+		SUCCS$	=  1	; no error
+		WARN$	=  2	; warning
+		ERROR$	=  4	; error
+		SEVER$	= 10	; sever error
+		FATAL$	= 20	; fatal error
+
+;	byte offsets into SINIT parameter vector
+	P.SPSIZ	= 0		; set packet length
+	P.TIME	= 1		; time-out
+	P.NPAD	= 2		; number of pad chars
+	P.PADC	= 3		; the pad character
+	P.EOL	= 4		; eol char
+	P.QCTL	= 5		; control char quoting
+	P.QBIN	= 6		; 8-bit quote
+	P.CHKT	= 7		; checksum type
+	P.REPT	= 10		; repeated character prefix
+	P.CAPAS	= 11		; capability bitmask
+		CAPA.A	= 10	; attribute handling
+		CAPA.L	= 2	; /42/ long packets
+		CAPA.S	= 4	; /42/ sliding windows
+	P.WINDS	= 12		; /43/ window size, # of packets
+	P.MXL1	= 13		; /43/ high order of long packet size
+	P.MXL2	= 14		; /43/ low order of long packet size
+	P.VEND	= 17		; end of parameter vector
+
+; /62/	bits in doattr (file attribute processing)
+	AT.CDT	=: 1		; create date
+	AT.INF	=: 2		; /63/ system specific info
+	AT.LEN	=: 4		; length
+	AT.PRO	=: 10		; file protection
+	AT.SYS	=: 20		; system ID
+	AT.TYP	=: 40		; file type
+	AT.XLE	=: 100		; exact length in bytes
+	AT.ON	=: 100000	; /63/ do attribute processing
+	AT.ALL	=: AT.CDT!AT.INF!AT.LEN!AT.PRO!AT.SYS!AT.TYP!AT.XLE
+
+;	bits in trace (debug status word)
+	LOG$PA	= 1		; log all packets
+	LOG$CO	= 2		; /62/ CONNECT logging to disk
+	LOG$RP	= 4		; /62/ rpack chars to TT
+	LOG$IO	= 10		; /62/ everything received or sent
+	LOG$DE	= 20		; /62/ debugging to TT
+	LOG$ON	= 40000		; /63/ set to write to disk, clear to suspend
+	LOG$OP	= 100000	; logfile is open
+	LOG$AL	= LOG$PA!LOG$CO	; /62/ ALL
+
+;	parity options
+	PAR$NO	=: 0		; none
+	PAR$OD	=: 1		; odd
+	PAR$EV	=: 2		; even
+	PAR$MA	=: 3		; mark
+	PAR$SP	=: 4		; space
+
+;	file types
+	TERMINAL=: -1		; file to term ala xreply, not to disk
+	TEXT	=:  0		; normal ascii text files
+	BINARY	=:  1		; image mode
+	DECNAT	=:  2		; /52/ 8-bit text files
+
+;	terminal types
+	NOSCOPE	= 0		; /BBS/ hard copy terminal
+	TTY	= 1		; a dumb tube terminal
+	VT100	= 2		; itself
+	VT200	= 3		; ditto..
+
+;	supported CVT$$ cvt_bit_pattern bits
+	C.CRLF	= 4		; discard CR LF FF ESC
+	C.LSPA	= 10		; discard leading spaces and tabs
+	C.SSPA	= 20		; reduce spaces and tabs to a single space
+	C.LCUC	= 40		; lower case to upper case
+	C.TSPA	= 200		; discard trailing spaces and tabs
+
+	CON$ESC	=  '\-100	; default CONNECT escape char
+	ERBFSIZ	=  120.		; /62/ error msg text buff size
+	MAXPAK	=:  94.		; /63/ max_packet_length - max_checksum_length
+
+	.if df	NONEIS		; /62/ using NONEIS for convenience..
+	ALSIZE	=   1000	; /63/ bufsiz for SET DIAL/PHO NUM
+	LN$CNT	=      3.	; /62/ save/recall 3. commands
+	LN$MAX	=     80.	; /63/ max command line length
+	MAXLNG	=    600.	; /63/ so image is small enuff to run
+	.iff
+	ALSIZE	=   2000	; /62/ bufsiz for SET DIAL/PHO NUM
+	LN$CNT	=     10.	; /63/ save/recall 10. commands
+	LN$MAX	=    132.	; /63/ max command line length
+	MAXLNG	=   1920.	; /63/ use max long-packet buff size
+	.endc
+	$ALLSIZ	= <MAXLNG+14>&177776 ; /62/ make it this for safety
+
+
+	.sbttl	Utility macros
+
+	.macro	.br to		; /63/ added
+	.if df	to
+	.if ne	to-.
+	.error	<; not at location to;>
+	.endc
+	.endc
+	.endm	.br
+
+	.macro	.chksp	arg
+	.ntype	$$5	,arg
+	.iif eq <<$$5&7>-6> .error arg <; Illegal use of SP (r6) in call>
+	.endm	.chksp
+
+	.macro	calls	name	,arglst
+;	subroutine call with arguments passed in an area pointed to by r5
+;	(as with F4 and BP2).  all args are pushed onto the stack in the
+;	order specified.  r5 points to the sp before the call and is saved
+;	and restored.
+	$$ = 0				; init # of args count
+	  .irp x ,<arglst>		; count up # of args passed
+	  $$ = $$+1			; one at a time
+	  .endr				; got it
+	.if eq $$			; no args present?
+	jsr	pc	,name		; if so, substitute a simple call
+	.iff				; at least one arg in <arglst>
+	mov	r5	,-(sp)		; /63/ will be used to point to arg(s)
+	  .if eq $$-1			; is it one or more than one arg?
+	  .chksp	arglst		; one arg, check for legal SP modes
+	  mov	arglst	,-(sp)		; doing it thusly generates less code
+	  mov	sp	,r5		; set pointer to argument list
+	  jsr	pc	,name		; call the subroutine
+	  tst	(sp)+			; pop parameter list from stack
+	  mov	(sp)+	,r5		; /63/ restore r5
+	  .iff				; arg_count > 1
+	  $$2 = $$			; extract the args in
+	    .rept	$$		; reverse order so that
+	    $$1 = 0			; we might save a little
+	      .irp x ,<arglst>		; core (four words)
+	      $$1 = $$1+1		; scan the arg list until we come to
+	        .if eq $$2-$$1		; the last one before one we just did
+	        .chksp	x		; check for SP addressing mode
+	        mov	x	,-(sp)	; push it
+	        .mexit			; and exit the .irp
+	        .endc
+	      .endr
+	    $$2 = $$2-1			; backwards to previous arg
+	    .endr
+	  mov	sp	,r5		; set up the argument list pointer
+	  jsr	pc	,name		; and go to the routine
+	  .iif eq <$$-2>  cmp	(sp)+	,(sp)+	; two args
+	  .iif gt <$$-2>  add	#$$*2	,sp	; gen "add 2*argnum ,sp"
+	  mov	(sp)+	,r5		; /63/ restore r5
+	  .endc
+	.endc
+	.endm	calls
+
+	.macro	ctl	src ,dst
+	clr	-(sp)
+	bisb	src	,@sp
+	call	l$xor
+	movb	(sp)+	,dst
+	.endm	ctl
+
+	.macro	copyz	from ,to ,maxlen
+	.if  b	<maxlen>
+	clr	-(sp)
+	.iff
+	mov	maxlen	,-(sp)
+	.endc
+	mov	from	,-(sp)
+	mov	to	,-(sp)
+	call	copyz$
+	.endm	copyz
+
+	.macro	deccvt	val ,buf ,width
+	mov	r5	,-(sp)
+	.if  b	<width>
+	clr	-(sp)
+	.iff
+	mov	width	,-(sp)
+	.endc
+	mov	val	,-(sp)
+	mov	buf	,-(sp)
+	mov	sp	,r5
+	call	l$cvtnum
+	add	#6	,sp
+	mov	(sp)+	,r5
+	.endm	deccvt
+
+	.macro	decout	val
+	mov	r5	,-(sp)
+	mov	val	,-(sp)		; /62/ l$wrdec pops this buffer
+	mov	sp	,r5
+	call	l$wrdec
+	mov	(sp)+	,r5
+	.endm	decout
+
+	.macro	direrr	val
+	mov	val	,-(sp)
+	call	direr$
+	.endm	direrr
+
+	.macro	incm64	val
+	inc	val
+	bic	#^c<77>	,val		; /62/ faster
+	.endm	incm64
+
+	.macro	indexm	reg		; check for auto increment/decrement
+	.ntype	$$$0	,reg		; modes for macros that can't have..
+	.if  ne	$$$0-27			; always allow pc autoincrement
+	$$$0 =	<$$$0&177770>/10	; ..these modes in their arg list
+	.ift				; get the mode into 0..7
+	  .if  ge $$$0-2		; if mode >=2 and mode <=5 then error
+	  .iif ge <5-$$$0> .error      <; Can't use auto inc/dec mode here>
+	  .endc
+	.endc
+	.endm	indexm
+
+	.macro	ixor	reg ,dst
+;	get around the mode restrictions for the hardware XOR instruction
+;	and fix for RT-11 systems that don't have the EIS chip option
+	.chksp	reg			; can't allow sp args
+	.chksp	dst			; in either register
+	indexm	reg			; check for allowed
+	indexm	dst			; addressing mode
+	mov	reg	,-(sp)		; it's much simpler to do this
+	bic	dst	,@sp		; for all RT-11 systems rather
+	bic	reg	,dst		; than to be selective
+	bis	(sp)+	,dst		; done
+	.endm	ixor
+
+	.macro	.newline		; print CR/LF on TT
+	call	l$pcrlf
+	.endm	.newline
+
+	.macro	octout	val
+	calls	l$wroct	,<val>
+	.endm	octout
+
+	.macro	prsbuf	dst
+	mov	dst	,r0
+	call	prsarg
+	.endm	prsbuf
+
+	.macro	rpack	len.a ,pakn.a ,msg.a ,max.len	; /62/
+	sub	#10	,sp
+	mov	sp	,r1
+	calls	rpack$	,<msg.a,r1,max.len>
+	mov	(r1)+	,len.a
+	mov	(r1)+	,pakn.a
+	mov	@r1	,r1
+	add	#10	,sp
+	.endm	rpack
+
+	.macro	save	list
+	.if  b	<list>
+	 save	<r0,r1,r2,r3,r4,r5>
+	.iff
+	.irp	x ,<list>
+	 mov	x	,-(sp)
+	.endr
+	.endc
+	.endm	save
+
+	.macro	scan	ch ,str
+	mov	str	,-(sp)
+	clr	-(sp)
+	bisb	ch	,@sp
+	call	scanch
+	.endm	scan
+
+	.macro	setpar	src ,dst
+	movb	src	,-(sp)
+	call	dopari
+	movb	(sp)+	,dst
+	.endm	setpar
+
+	.macro	spack	type ,pnum ,len ,msg
+	.if  b	<len>
+	.iif nb	<msg>	.error	<; bad call to SPACK macro>
+	calls	spack$	,<type,pnum,#0,#null>
+	.iff
+	calls	spack$	,<type,pnum,len,msg>
+	.endc
+	.endm	spack
+
+	.macro	strcat	dst ,src
+	mov	src	,-(sp)
+	mov	dst	,-(sp)
+	jsr	pc	,strcat
+	.endm	strcat
+
+	.macro	strcpy	dst ,src
+	mov	src	,-(sp)
+	mov	dst	,-(sp)
+	jsr	pc	,strcpy
+	.endm	strcpy
+
+	.macro	strlen	string
+	mov	string	,r0
+	call	l$len
+	.endm	strlen
+
+	.macro	textsrc	text
+	.if  b	<text>
+	clr	getcroutine		; /62/ reset to file I/O
+	clr	tgetaddr
+	.iff
+	mov	#tgetcr0,getcroutine
+	mov	text	,tgetaddr
+	.endc
+	.endm	textsrc
+
+	.macro	tochar	src ,dst
+	clr	-(sp)
+	bisb	src	,@sp
+	add	#40	,@sp
+	movb	(sp)+	,dst
+	.endm	tochar
+
+	.macro	unchar	src ,dst
+	clr	-(sp)
+	bisb	src	,@sp
+	sub	#40	,@sp
+	movb	(sp)+	,dst
+	.endm	unchar
+
+	.macro	unsave	list
+	.if b <list>
+	unsave	<r5,r4,r3,r2,r1,r0>
+	.iff
+	.irp	x ,<list>
+	 mov	(sp)+	,x
+	.endr
+	.endc
+	.endm	unsave
+
+	.macro	upcase	s		; /BBS/ added ..
+	mov	s	,r0
+	call	upcase			; /BBS/ upcase until null terminator
+	.endm	upcase
+
+	.macro	upone	s		; /BBS/ added ..
+	mov	s	,r0
+	call	upone			; /BBS/ upcase only to next delimiter
+	.endm	upone
+
+	.macro	wrtall	arg		; IO.WAL for an .asciz string
+	mov	arg	,-(sp)		; pass the address
+	call	wrtall			; do it
+	.endm	wrtall
+
+	.macro	xor	reg ,dst
+	ixor	reg	,dst
+	.endm	xor

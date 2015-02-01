@@ -1,0 +1,2171 @@
+
+
+
+
+
+	 K E R M I T - 1 1   f o r   R T - 1 1 / T S X - P L U S
+
+
+	       N A R R A T I V E   E D I T   H I S T O R Y
+
+
+		V  0  3 . 6  3      2 7 - S E P - 1 9 9 7
+
+
+
+
+
+
+The following updates/fixes have been made to Kermit-11 for RT-11/TSX-Plus
+since my edit of 10-Jul-90 and are included in this revision of 27-Sep-97.
+
+Numerous changes were made before this list was begun, please refer to the
+top  of  the  edit  history  in  KRTCMD.MAC  for  a  detailed  list of all
+differences between this program and Kermit-11 T3.60.
+
+To view the most recent changes search for the first occurence of V03.63
+and start reading from there.
+
+
+	Billy Youdelman				billy@MIX.COM
+	PO Box 1207
+	Culver City, California  90232-1207
+	USA
+
+
+Narrative Edit History	KRT V03.61
+
+			BBS Edit: (3.61)
+
+
+From edit of 10-Sep-90:
+
+1.  The long packet maximum size was increased to 1024. bytes.
+
+2.  KERMIT.INI is no longer echo'd - instead the name of the file being read
+is briefly displayed.  This provides a cleaner, more direct sign-on.
+
+3.  TSX+ window processing is now suspended when TT is init'd for data xfrs
+and then restored when TT is deassigned.  This allows the program to be run
+without the /NOWINDOW switch (previously done to avoid windowing overhead on
+packets).
+
+4.  An addressing bug in the EXAMINE (K11DEB) module causing incorrect values
+to sometimes be displayed for integer (word) data was fixed.
+
+5.  The help text file (K11HLP.HLP) has been thoroughly updated by reading
+through the sources to make sure all but the most obvious functions are
+covered.
+
+6.  The escape sequence to exit the CONNECT mode is now displayed when
+entering same.
+
+7.  It is now possible to specify only a device as the output file name in
+order to place a single (unambiguous) file being transferred on a device other
+than the default.  When sending a file the receiving Kermit must not strip the
+device from the file name (SET FILE NAM FULL).  All other wildcarded renaming
+remains unsupported.
+
+8.  The handling of extremely long VMS-type file names, up to and including
+the max possible under VMS, is now done without writing past the end of any of
+the various buffers involved.  Unix and pc subdirectory delimiter parsing has
+been included too.  Owing to the rather limited nature of RT-11 file names,
+it is strongly recommended the default file naming conversion not be off'd
+when talking to such foreign systems.
+
+9. The recpkt buffer size was increased from 130. bytes to accommodate a full
+size long packet, which can be encountered when things get out of sync.  This
+was causing a trap to 4 when the end of the buffer was reached, and was also a
+problem when a burst of line noise inadvertently forced an incoming ACK/NAK
+packet's size beyond 130. bytes as rpack$ checks overflow against MAXLNG.
+
+10. The link command file has been modified to combine segments where possible
+for the sake of reducing memory and mapping requirements.
+
+
+Narrative Edit History	KRT V03.61
+
+
+11. The need for eight-bit quoting is now tested during the initialization for
+each transaction.  Thus, once it has been used it may be off'd without exiting
+the program by setting parity on BOTH sides (if the other Kermit accommodates
+reseting eight-bit quoting once it has been invoked) to none.  This presumes
+the problem in the path which made parity necessary has been resolved, or one
+has selected a new path/system to call.  A warning message is now displayed at
+the beginning of each transaction if eight-bit quoting has been forced on, as
+its use increases the time required to transfer a file.
+
+12. Comment delimiters ";" and "!" may now be used anywhere in a command file
+text line.  In the past, their use was limited to the first column only.  From
+the keyboard these remain treated as normal chars for the sake of VMS version
+numbers and the like.
+
+13. The help file index routine was modified to accommodate topic names longer
+than 18. bytes, ala VMS help.  The "?" function as used to display the various
+command dispatch name tables was similarly modified, thus preventing the list
+scrolling off screen before one has adequate time to stop it.
+
+14. The ccast (^C abort) was modified to send an error packet if called amidst
+exchanging packets, and to reset the default block checking.  This makes it
+fairly robust, though ^E is still preferable as it waits for the packet in
+progress to complete before the abort.
+
+15. A bug in setting the tsxcl flag, which caused DTR to be dropped when
+exiting the CONNECT mode when using CL4 through CL7, has been fixed.
+
+16. Several other small bugs, errors, omissions and typos have been fixed.
+Some commands with duplicate functions, a few of which could be misleading
+(ex: SET TIME-OUT, SET SEND TIME-OUT and SET RECEIVE TIME-OUT all did the
+same thing because there are no separate send and receive registers) have
+been pulled (only SET TIME-OUT remains).
+
+From edit of 2-Oct-90:
+
+1.  Handling of TSX's VLSWCH char (^W) during the CONNECT mode is selectable
+by SET VLSWCH LOCAL (windowing remains on if in use and ^W will switch between
+processes on the local machine) or REMOTE (the default, in which ^W is treated
+as any other normal character and window buffering is, if in use, suspended).
+SHOW VLSWCH may be used to determine its current status.
+
+2.  TTYOUT is now used to echo received data in K11TRA.  Calling writ1char
+would sometimes cause chars to be lost..
+
+From edit of 7-Oct-90:
+
+1.  Fixed TRANSMIT (in K11TRA) to display last char(s) echo'd from the
+remote after the EOF is reached.  This introduces a small (1/4 sec) delay
+just before returning to Kermit's command line to ensure nothing is missed.
+
+2.  Packet size display in log files will now accommodate four digit numbers,
+as the maximum packet length is now 1024. bytes.
+
+
+Narrative Edit History	KRT V03.61
+
+
+3.  The logical INI is now tested for KERMIT.INI, before DK and SY.
+
+From edit of 9-Oct-90:
+
+1.  Action of ^B under TSX in the CONNECT mode now tracks ^W, allowing one
+to print the appropriate window.
+
+From edit of 11-Oct-90:
+
+1.  Indexing was added to the help text file read routines (K11HLP.MAC).
+This makes the response as fast as the first block needed can be read in off
+the disk, regardless of its position in the file.  If the help file is edited
+one will then need to conform K11HLP.MAC to the new file.  Please refer to
+it for a description of the procedure involved.  A short BASIC program is
+included which will do it all for you..
+
+From edit of 19-Oct-90:
+
+1.  Disallow typing TSX lead-in char to TT when running under TSX in CONNECT
+and xreply modes.  TYPE already provides this protection.
+
+2.  K11HLP.HLP (help text) received a massive update, and K11TSX.DOC was
+created.
+
+3.  Modified action of TRANSMIT on EOF to reconnect to the remote system.
+
+From edit of 21-Oct-90:
+
+1.  Cleaned up and clarified the help text file.
+
+2.  Made ".COM" the default TAKE file type.
+
+From edit of 25-Oct-90:
+
+1.  Added %X dial string format effector to insert Hayes style extended mode
+response commands into the dial string, and SET PHONE XMODE n to support same,
+for which the Hayes modem definition is now patched as well.
+
+2.  Cleaned up the K11HLP.HLP and K11TSX.DOC files yet again ..
+
+From edit of 29-Oct-90:
+
+1. Fix an error (of my own) wherein SET NOATTR would also kill long packets.
+
+2. SHOW PARAMETERS modified to indicate if SET NOLONG/SET LONG OFF has been
+done.
+
+3. SET REC PAC > 94. now also sets long packets on (if previously off'd).
+
+From edit of 30-Oct-90:
+
+1.  Added a warning message if long packets are enabled sans CRC block check.
+
+
+Narrative Edit History	KRT V03.61
+
+
+From edit of 23-Nov-90:
+
+1.  Modified SET LONG-PACKETS ON to SET BLO 3 and SET REC PAC 1024, which
+provides an easy way to enable them.  Previously this only reset a flag
+allowing long packets if they were otherwise enabled.
+
+2.  Fix a typo in K11RCO wherein the TSX lead-in char filter was not getting
+same.
+
+3.  Add an error message to the fatal error table (faterr:) to accommodate
+-19. (355) in the error byte returned when trying to do a .lookup on a non-
+initialized device, such as when HELP tries VM first.  Previously this
+returned without an error, unless by chance there was an entry in the first
+word of the rtque buffer.
+
+4.  Allow time-out to be set as low as 1 second.
+
+5.  Ring the bell at the end of RECEIVE, so one will know it's done.
+
+6.  PRINT now works ala RT-11, sends a single (no wildcards) file to LP.
+This shares the COPY code, so you may now also COP FILE DEV: to place a
+single file on the output device while retaining the input file's name.
+
+7.  NAMCVT fixed to not output a "." on a null file name input, then some
+file name parse routines patched to use it (instead of coding the same thing
+over a few times).
+
+8.  Dropped the CONNECT sign-on message when re-connecting after a successful
+transfer via TRANSMIT, which leaves the display and cursor position intact.
+The bell is rung when the EOF is reached.
+
+9.  MOUNT now looks for .DEV extent if it can't default to a .DSK file name.
+
+10. Dump the raw I/O mode from SET DEB ALL, rendering logs files easier to
+read and follow.  Cleaned up all the debug routines, made debugging to TT
+without a disk file open possible, and fixed various small bugs.
+
+11. Added tests for "strike any key" abort during DIAL so it now works even
+before arriving at the point where it's waiting for a response from the called
+system.  A DTR drop was added to the abort after the modem is waiting for a
+response form the remote system to ensure some types of Hayes clones are hung
+up even when aborting just after the dial string has been typed at the modem.
+
+12. Modified DIAL to actually echo from the modem, allowing init error
+messages and other such stuff previously hidden to be seen.
+
+13. Added CONNnnnn (where nnnn=various speeds) to SET DIAL options.  These
+allow falling back to the indicated speed upon connecting, if this is how
+your modem handles that.  Also added SET DIAL ABORT, COMMENT, IDLE and
+RINGING, allowing one to fully specify a user-defined modem.
+
+14. Display the HOME directory in SHOW ASSIGNS.
+
+
+Narrative Edit History	KRT V03.61
+
+
+15. Added a SET FILE NAMING [NO]LOWER-CASE option which allows sending lower
+and mixed case file names to a remote system (Unix) that is case-sensitive.
+The default is NOLOWER-CASE, and its status is included in SHOW FILE.  This
+has the happy side effect of allowing lower case in user-defined modem strings
+and many other useful places.
+
+16. Help text file was again updated, particularly its debug and SET DIAL
+sections.
+
+17.  Various small bugs/errors/etc were found and fixed.
+
+From edit of 27-Nov-90:
+
+1.  Added support for Telebit T2500 modem, including a separate definition
+for PEP/MNP/V.42 operation in which the DTE speed must remain fixed.
+
+2.  SET MODEM now will init the modem, if there is a line assigned on which
+to do so.  This takes it out of the auto-answer mode when attaching a CL
+unit to a line also used for incoming calls.
+
+3.  Connect result messages from modem are now displayed, as the data path
+speed is not necessarily also the DTE speed.
+
+4.  Various small bugs fixed and misc cleanup work done.
+
+From edit of 3-Dec-90:
+
+1.  Fixed display formatting for SHOW PHONE.
+
+2.  Sped up the testing of modem responses whilst trying to connect.
+
+3.  Init.once support for the dialer was added in edit of 27-Nov-90, and
+here in this edit was added to SET DIAL to allow its use in a user-defined
+modem as well.  Make this non-zero in definitions of modems that do not
+require an init string before each retry when dialing out.
+
+From edit of 16-Dec-90:
+
+1.  Sped up CONNECT processing of input from TT by calling ttdone once per
+clock tick instead of 2 ticks.  This started out at 3 ticks..  This makes a
+noticeable difference in the speed at which data may be sent, particularly
+when from a function key generating a long string without any delay between
+chars.  Modified TT input processing to also pass 8-bit chars to the remote
+if SET CONSOLE 8 (default is 7) and no parity is in use.  Sped up exit to the
+command line by skipping TT input routines once the done flag is set.  This
+permits one to type ahead immediately after the escape sequence without any
+of that getting hosed by completion routines that execute before the done
+flag is checked.
+
+2.  Made selection of a VT-200 terminal (during start-up or when set) also
+enable 8-bit CONNECT operation (as if SET CON 8).
+
+
+Narrative Edit History	KRT V03.61
+
+
+3.  In a recent edit a DTR drop was added to the dialer for the strike any key
+abort when done after the modem has dialed and is waiting to connect.  This
+is because some Hayes clones do not reliably hang up from just keyboard input.
+As doing this resets many more of these clones, the modem is re-initialized
+after said DTR drop.  This ensures it doesn't sit in its auto-answer mode
+under TSX when it should be available to Kermit.
+
+4.  The modem's init status is now saved thus the init string (rather long
+for the Telebit definitions) is not sent when dialing unless it's needed.
+The Hayes-style extended mode format effector is now in both the init and
+dial strings, allowing it to be modified without re-initting the modem.
+
+5.  The Telebit MNP (T2500MNP) definition was changed to enable MNP only.
+That is, V.42 LAP-M operation is disabled because some MNP modems get so
+confused by the V.42 stuff nothing else has a chance, even though the
+Telebit grinds through them all..  A third Telebit definition (T2500V.42)
+was added which enables everything possible.
+
+From edit of 19-Dec-90:
+
+1.  Added missing fields to SET DIAL for user-defined modem, and to SHO MODEM
+too.  SHOW MODEM now displays speeds for result messages which change the DTE
+speed to match.
+
+2.  SET TT TTY or VT100 now clears the 8-bit mode in CONNECT.  It may be set
+back on after if desired..
+
+From edit of 25-Dec-90:
+
+1.  Patched SHO MODEM to display format effector values when same have been
+defined and set to be included in the init or dial strings.
+
+2.  Fixed a problem with the modem result message processing where a connect
+message containing the substring "ERROR" would return as an error due to the
+"ERROR" result message also being defined.  Now, the match is only valid when
+it begins at the first byte of the strings tested.
+
+3.  Increased the size of the buffer used to store phone numbers and the
+user-defined modem to 1kb (from 384 bytes), making it possible to fully define
+a modem and store about 25 phone numbers as well..
+
+4.  Cleaned out most unused/obselete/left-over stuff from source modules.
+
+5.  Added fixwild from K11RMS.MAC, operation flipped to translate "?" into "%"
+for RT-11 wildcarding syntax.
+
+From edit of 1-Jan-91:
+
+1.  Added support for file creation date/time and protection (within limits
+of RT-11) attributes.  This uses the "#" attribute, as opposed to 4 16-bit
+words in ascii'd octal, which was never supported under RT-11.  See HELP SET
+ATTRIBUTES for details.  This works with C-Kermit, MS-Kermit.
+
+
+Narrative Edit History	KRT V03.61
+
+
+From edit of 3-Jan-91:
+
+1.  Xmodem size display now uses 32-bit number for RT-11 files >16k blocks.
+
+From edit of 7-Jan-91:
+
+1.  Modified error handling to use code in K11RTE.MAC, which allows init/take
+file failures to be displayed properly, and will make script file support
+possible.
+
+2.  SET [NO]QUIET made SET TT [NO]QUIET to conform with RT-11 syntax, and
+added missing tests for it as needed in the program.
+
+3.  SPACE/REMOTE SPACE now display the device, and file spec if used, with
+which the reported numbers of files and blocks used were calculated.
+
+4.  Shuffled some sub-routines to segments with more room, as some regions
+were getting close to their page boundaries.  DIRER$ moved to the root to
+support above mentioned global error handling.
+
+5.  Disallow running the server unless TT is the link device.  Although
+the server is quite capable of talking through a handler, this can be very
+confusing when the expected path is the connected terminal line, as the
+server is normally run on the remote system (as running it locally leaves
+one with no means of passing commands to it).
+
+6.  Created K11MIN.COM, a link command file to create K11MIN.SAV, which uses
+the minimum possible memory (110kb) by doing the maximum possible swapping of
+segments.  This saves 48kb, at the expense of increased disk I/O..
+
+From edit of 11-Jan-91:
+
+1.  If a modem is on-line via a TSX CL unit, the modem will be reset to its
+idle (auto-answer) state if a new line (link device) is SET.  This is to
+ensure a time sharing line is not unnecessarily kept from handling incoming
+calls.
+
+2.  A TSX CL unit is now set to its default speed (9600) when SET as the
+link device, thus a following SET SPEED command is not needed unless a
+different speed is desired.
+
+From edit of 17-Jan-91:
+
+1.  Modified file date/time creation attribute to be sent under RT-11 too.
+
+From edit of 30-Jan-91:
+
+NOTE:	As of this edit, no .COM file is needed to run Kermit under TSX-Plus.
+	My suggestion is K11TSX.SAV be renamed to K11.SAV when copied to SY.
+	Then, if K11.COM was used by you in the past, it should be deleted,
+	along with the file it called (the old K11TSX.SAV)..
+
+
+Narrative Edit History	KRT V03.61
+
+
+1.  Fix typo in K11RTI so RT-11 init code that checks for available handlers
+(XL or XC) and sets the line accordingly now runs.
+
+2.  Added SET CLn LINE x facilities, including an automatic scan through TSX
+lines (ports) and CL units until an available combination is found, as well
+as specifying a speed and modem-type to try on each possible port.  This
+provides some convenience in a multi-user environment, especially when the
+lines are also used for incoming calls, and in particular when using an odd
+lot of modems.  See HELP SET CL for details and operating instructions.
+
+3.  SET LINE now allocates the device (if it was not before) under TSX.  It's
+deallocated when exiting Kermit or if the line is later set to something else,
+along with restoring what ever else (modem, TSX line, etc) is necessary.
+
+4.  Modified getcdt (get creation date and time) and sn.cdt (its companion
+which writes the appropriate packet) to omit sending create time under RT-11.
+It's determined by using the "misc" word in the directory ala TSX even if
+running under RT-11, thus there is no way to distinguish between "00:00:00"
+(a valid time) and a null entry.
+
+5.  This program is now self-contained, in that no .COM file is necessary as
+Kermit itself now supports all commands needed for its operation which were
+previously only available from the monitor under TSX-Plus.  In addition to the
+above SET CL and SET LINE, a CL assign is released and deallocated on exiting
+or when modifying the line, and the job's priority will be raised to 71 when
+doing I/O through a handler (so as to not drop chars at higher speeds).  This
+assumes the normal default priority is 50 or something close to it.
+
+6.  Fixed BINWRITE so it actually does wait for completion before returning.
+Also patched to XON and retry if it doesn't in 5 secs, as opposed to XON and
+then bailing out.  ^C aborts if need be..  Also dropped appending a LF when
+sending a string terminated with a return.
+
+7.  Went back to calling ttdone in CONNECT once every two ticks because once
+in a great while at high TT speeds a current byte would be output twice, the
+first of which would eat the previous byte..  This was only observed at 19200
+however the best course seems to be better safe than sorry.
+
+From edit of 3-Feb-91:
+
+1.  Fixed a small typo in the help text file, then fixed yet more stuff here..
+
+2.  Fixed bogus error after SET MODEM ? that would also eat the variable
+containing the modem's ready status.
+
+3.  Made SET DEBUG NONE dump ALL (even TT-based) debugging.  SET DEB OFF
+still only closes disk-based logging, without affecting terminal displays.
+
+4.  Made .LOG the default extent for log files and .LST for PRINT.
+
+5.  Added XMODE option to SET CL PORTS/UNITS/* auto assign code.  This allows
+painless use of an odd lot of Hayes-style modems..
+
+6.  Added TSX line #, modem type (if on-line) and its DCD status to sho$line.
+
+
+Narrative Edit History	KRT V03.61
+
+
+From edit of 5-Feb-91:
+
+1.  Dump ascdat in k11rtu and use cvtdat in k11rtd.  The only thing that calls
+ascdat is the DATE/SHO DATE command, from which it doesn't matter what's where
+in the overlays.
+
+2.  Fix various bugs in PRINT, COPY, RENAME and DELETE, and added some
+inadvertently omitted upper case routines to their arguments..
+
+From edit of 7-Feb-91:
+
+1.  Fixed non-initialized repeat count register bug in bufunpack where any
+char repeat-quoted an even number of times would be decoded as rpt_cnt+1.
+This was rendering a file name such as CK~$A.HLP as CKAAAAA.HLP instead of
+the expected CKAAAA.HLP.
+
+2.  Added SET CONSOLE [NO]MILNET enabling which sends a couple XONs when first
+CONNECTing to automatically wake up a MILNET Terminal Access Controller or any
+other hardware needing ^Q.
+
+3.  Fixed problem where calling a take file from the init file would blow up
+due to using the stack for the new file name buffer.
+
+4.  Patched the TSX routines to not drop a CL cross-connection unless it was
+attached from within Kermit.
+
+5.  Dumped the K11MIN version and created K11RT5, a disk overlaid version,
+instead.  This one should run on anything.  It is stressed RT-11SJ MUST be
+sysgenned for .mrkt and .twait support (or, you'll have to use RT-11FB) in
+order to do anything useful.
+
+6.  Fixed "Warning: Parity is possibly being introduced" to only appear once.
+A small glitch setting the hi bit once left it repeating with every packet..
+
+Bug reports are in particular solicited for K11RT5.  I don't often use RT-11
+but will gladly fix anything brought to my attention..
+
+From edit of 10-Feb-91:
+
+1.  Reset the fixed (per above) counter for parity found in the incoming data
+although set NONE on the local Kermit warning message before each transaction.
+
+2.  Shuffled some routines around and forced some psects into the root for the
+disk-overlaid version.  This fixes xmodem and the rem dir display formatting
+and reduces K11RT5's hi limit to 19714. words (including its buffers uses 48kb
+plus whatever the monitor adds) which is hopefully enough.
+
+From edit of 12-Feb-91:
+
+1.  Modified BINWRITE to not wait for completion, but to XON and retry once
+when an error occurs, then give up.  This fixes ^C abort during things sent
+from a server (remote dir being a good example) although ^E remains a better
+choice for such aborts..
+
+
+Narrative Edit History	KRT V03.61
+
+
+2.  Removed a few unused things in the root uncovered in the course of the
+above, and made another pass at cleaning up the source modules.
+
+3.  Restore SET TT [NO]QUIET after a ^C abort, if during something that mutes
+the display..
+
+From edit of 16-Feb-91:
+
+1.  Fixed the "DK" in "assign ld0 dk" to accept lower case "dk" too.
+
+2.  Fixed a couple typos in K11TSX.DOC/K11HLP.HLP ..  Also expanded the
+information on using initialization (KERMIT.INI) files.
+
+3.  Fixed warning messages to distinguish between:
+    A) long packets are off locally but the other Kermit says it can do them
+    B) long packets are on locally but unsupported or off at the other end
+
+4.  Allow init file to be echoed after SET TT NOQ is done in it.  The default
+remains quiet until the init file is closed at which point it becomes noquiet,
+unless set in said file, which overrides the defaults.  If you wish to display
+the entire init process, make SET TT NOQ the first line in KERMIT.INI.  Init
+files may also be tested by running them as command files:
+
+	Kermit-11>@dev:KERMIT.INI	; "dev" default is SY
+
+From edit of 17-Feb-91:
+
+1.  Cleaned up the init code (K11RTI) error handling.
+
+From edit of 19-Feb-91:
+
+1.  Fixed COPY error handling, which included fixing same for the file close
+routine, and did a final clean-up on the whole COP/PRI/REN/DEL collection.
+COPY now passes the file size, and dies immediately if there is not enough
+free space instead of grinding through it all until it can't write any more,
+and will dump an incomplete copy on the output disk if the input file dies..
+
+2.  Fixed BINFIL writing trailing spaces into file extent and sending same
+to the remote where they would be replaced with Xs, making it tough to send
+anything with a type of less than three chars (sorry about this!).
+
+3.  Dropped CONNECTing to a device specified as an argument to that command
+and in general disallow setting a new link device without dropping one that
+may be currently in use first until it's reasonably well debugged.  The idea
+here is to not keep a TSX line unable to answer unless it's actually in use,
+which for now may done with the appropriate keyboard commands and dealing
+with any error when it occurs.  This is completely separate from the reset
+done when exiting the program.
+
+From edit of 21-Feb-91:
+
+1.  Pulled yet more unused stuff from the program.
+
+
+Narrative Edit History	KRT V03.61
+
+
+2.  SOH and EOL chars are now displayed (SHO PARAM) in the same number
+base (octal) with which they may be modified.
+
+From edit of 23-Feb-91:
+
+1.  Fixed trap to 4 for SET CL on any bad parameter name.
+
+2.  Modified sending attributes to do it all in a single packet, ala C-Kermit.
+
+From edit of 25-Feb-91:
+
+1.  Fixed error (of my own) regarding testing RT-11SJ for timer support.
+
+2.  Cleaned up some other odds and ends, such as the error handling for SET
+DTR when no line is set, added a comma between entries for rcv,calc checksums
+in logging errors for them, etc..
+
+3.  Made the LOCAL mode the default for SET VLSWCH.  This is how it's turned
+out to be most used, and it's also less confusing to first time users of this
+program.  Those of you already using this can drop "SET VLSWCH LOCAL" from
+your init/command files..
+
+4.  Added a test when opening the help text file to check for the correct
+version of K11HLP.HLP, and warn if incorrect version(s) found.
+
+5.  Changed the VM logical in the help search path to HLP and added a new
+K11 logical to it and the init path.  Paths are now:
+
+	For HELP (K11HLP.HLP):  HLP, K11, SY, DK
+	For Init (KERMIT.INI):  INI, K11, DK, SY
+
+From edit of 28-Feb-91:
+
+1.  Reset keypad to numeric mode for SET TT TTY if it was previously in the
+application mode.  Also cleaned up display in that nothing will now be over-
+written on a hard copy terminal.
+
+2.  Noted in the docs (HELP INSTALL) a problem and work arounds where using
+the ^>R K11.. option under TSX to force command file input to Kermit causes
+the strike any key test for an abort during dialing to hang.  Dialing may be
+done either from a Kermit take file or by passing a command for it to Kermit
+when it's started.
+
+3.  Added a search path for take files:  TAK, K11, DK, SY
+
+4.  Fixed problem with getting clock rate under SJ/FB.
+
+From edit of 3-Mar-91:
+
+1.  Make take file default type (TAKDEF) a global so it's easily patchable.
+
+
+Narrative Edit History	KRT V03.61
+
+
+2.  Fixed the RT-11 code which clears the CR/LF bit and toggles the PAGE bit
+in $TCFIG so it all actually works as intended, especially under RT-11XM.
+This was then extended to check the status of SET TT [NO]SCOPE (as may have
+been done under RT-11) when the program is started, and if it's SCOPE Kermit
+will call it a VT-100.  Kermit's SET TT was also extended for the [NO]SCOPE
+option (only does it locally, does not affect the monitor setting).  The
+choices now are:
+
+	NOSCOPE	= a printing terminal
+	TTY	= a tube terminal, but not a VT-xxx
+	VT100	= itself
+	VT200	= ditto..
+
+Under TSX the terminal type will be gotten and used per the above.
+
+3.  Fixed a problem with SET ATTR ON concerning sharing long-packets code.
+
+4.  Enhanced the SHO FILE display to include misc items even when at their
+defaults.
+
+5.  Misc other small things fixed or pulled..
+
+From edit of 4-Mar-91:
+
+1.  Added SHO TERMINAL.
+
+2.  Use Kermit's default for DK in the HELP file path.
+
+From edit of 10-Mar-91:
+
+1.  Fixed bug in detecting where comments begin when a "!" preceded a ";"
+in a line in a command (take) file.
+
+2.  Dumped a bit more unused stuff, fixed a help file typo..
+
+From edit of 14-Mar-91:
+
+NOTE:  Under TSX or RT-11SJ for some reason the XL handler does not like to
+.close under this program until it gets a byte of input through the port it is
+serving.  This can be a real pain, as when it's thus hung, there is NO other
+way to un-hang things.  Until this is fixed, avoid such use of the XL handler.
+That is, do NOT use it with TSX or RT-11SJ.  If you do get stuck, and have
+run the server on the other end, you can wait for the server to time out and
+send a NAK packet, which will definitely do the trick..
+
+1.  Rearranged some stuff to make the XM (K11TSX) root smaller (2886. words).
+This uses a few kb more memory, PLAS swap file space, etc. in order to make
+life easier for XM use.
+
+2.  Moved disabling XL's interrupts to exiting program as it seemed to get
+get confused under XM when doing this every time link was closed, after which
+weird things would happen, such as ^\I in CONNECT failing not only to drop
+DTR, but to even trap the "I" on some systems, or "?" on others..
+
+
+Narrative Edit History	KRT V03.61
+
+
+From edit of 17-Mar-91:
+
+1.  Fixed the can't .close XL problem by moving the binary read routine
+to the I/O dispatch module so CONNECT and packet xfrs can share it, after
+which XL/XC can be left open for every monitor (lncluding TSX) other than
+RT-11XM.  This means if you use XL/XC anywhere besides XM, you can not then
+deassign it without exiting the program.  This may be a pain, however it is
+far better than no handler support at all for the SJ monitor..
+
+From edit of 19-Mar-91:
+
+1.  Cleaned up the RPACK (received packet) debug display, added <TIMOUT>
+and now won't display <EOL> unless it's actually received (as opposed to
+merely getting "length" number of bytes).
+
+2.  Combined the TT and handler I/O modules into one segment in the low
+memory overlay version to avoid zapping some handler parameters not kept
+in the root.  Adds about 280 words..
+
+3.  Cleaned up the shared XL read routine so as to not drop chars when
+entering the CONNECT mode and when getting the first packet after exiting
+it.
+
+From edit of 20-Mar-91:
+
+1.  Fixed DCD display for XL handler.
+
+2.  Reorganized psects to get stuff out of root that doesn't need to be there.
+
+3.  PRO auto assign of a CL unit now sets flag used to deassign same when
+modifying the line or exiting Kermit.
+
+4.  Added esc_char ^x to send control char "x" to the host ala VTCOM, tho
+here it's done from within the CONNECT mode.  Useful under RT-11, TSX passes
+everything directly.
+
+From edit of 22-Mar-91:
+
+1.  Restored the "stock" Kermit kludge of doing several twaits in the DTR drop
+to dump extra .RSUMs queued up when in the CONNECT mode which cause it to fail
+under XM (only) when one twait becomes a nop and sends XL to outer space..
+
+Fixing this properly will require some thought about how best to proceed.  As
+it is now the idle timer alone does a .RSUM every 3.1 secs, etc, etc..  In the
+meantime, this program now runs reasonably well under SJ, XM and TSX and that
+includes CONNECT from SJ through XL (with TIMER support) and even XL with TSX.
+
+2.  Fixed transfer of control of the handler read spfun completion routine to
+CONNECT (from anywhere else) to only pass unused data, which may be less than
+the contents of the whole buffer.  This avoids displaying the last part of a
+modem message when DIAL succeeds and jumps to the terminal emulator.
+
+
+Narrative Edit History	KRT V03.61
+
+
+From edit of 23-Mar-91:
+
+1.  Display take file opened message even when a device for same is specified
+in the command string.
+
+2.  Fixed problem with PRO auto-assign of XC where it would blow up and Kermit
+would try to send a file to it as if it were a disk..
+
+3.  Fixed error handling for strike any key abort during REDIAL, also added
+some small delays to let modem settle between various stages of its abort.
+
+From edit of 24-Mar-91:
+
+1.  Fixed a problem where some modems (most notably a Telebit at 9600/19200)
+would start the TSX port to which they were connected when exiting Kermit.
+
+2.  Misc small timing changes made to accommodate the cheaper variety of "pc"
+modems.
+
+3.  Don't flush the handler read buffer while DCD is high, so any plain text
+message sent by the remote after a file xfr can be displayed when CONNECTing
+back to it.
+
+From edit of 31-Mar-91:
+
+0.  With this edit version X3.61 becomes Y3.61, as the program now actually
+performs as claimed/expected/etc, and is relatively bug free..
+
+1.  Cleaned up SET FILE TYPE so when one sets a specific type, the flag
+controlling same is cleared forcing the SET value.  In the past the image
+mode would be set when sending (and that attribute sent) if the file type
+was found in the binary-type list.
+
+SET FIL AUTO (default) now enables the binary test, SET FILE anything-else
+locks Kermit in that particular mode.  SHOW FILE was fixed to reflect what's
+really going on.
+
+2.  A serious attempt was made to clean up the help text file, make it more
+readable and render it completely accurate with respect to what this Kermit
+actually does..
+
+3.  Modified SET RETRY ala VMS Kermit in that now there is a separate
+parameter for send or receive inits, INITIAL-CONNECTION, and PACKET for
+the number of retries after the init succeeds.  See HELP SET RETRY.
+
+4.  Added SET INCOMPLETE-FILE-DISPOSITION for incoming files ala VMS Kermit.
+
+5.  Made the TSX priority boost when using a handler settable by adding
+SET CL PRIORITY.  Legal values are 50 to 100.  This helps when chars are
+dropped at high handler speeds..  71 is a suggested starting point for 9600
+if most everything else runs at 50, and this must now go into KERMIT.INI if
+one wants to retain the same priority boost as was the default in the past.
+
+
+Narrative Edit History	KRT V03.61
+
+
+6.  Patched HELP so it nests in as far as possible when a [sub]topic error
+occurs after one or more of the prior arguments matched, instead of going
+back to the top and displaying the root list of topics no matter what..
+
+From edit of 2-Apr-91:
+
+1.  Fix calculation of buffer space to only allocate what's actually needed.
+Also made init error reporting more explicit, including displaying memory
+needed vs. memory obtained when it's not enough.
+
+2.  Added SHO MEMORY to display free memory available to fetch handlers
+under RT-11.  Also display same when signing on.
+
+3.  Added a test for a running clock to the above init code..
+
+4.  Use copyz macro to load phnum buffer to be sure it won't be overwritten.
+
+From edit of 3-Apr-91:
+
+1.  When the packet-length is reduced as Kermit attempts to make things work
+when the first data packet fails, display its new values as it's modified.
+
+2.  Extended the incomplete file disposition code to check for a discard
+flagged in the EOF packet and use same accordingly.  That is, if you are
+sending to another Kermit, or to this one from another which supports it,
+when you abort on the send end (via ^X, ^Z, etc) the incomplete file left
+on the receive side will be saved or discarded as it is then (locally) set.
+
+3.  Flush TT input buffer when exiting GET, RECEIVE, REMOTE and SEND to eat
+any lingering control chars.  A leftover ^Z will dump the program if it gets
+through.
+
+From edit of 8-Apr-91:  (Y08)
+
+1.  Corrected some errors in the HELP for SET DIAL, and added its text to the
+doc file.
+
+2.  Add a warning message when same packet is ACKed more than once, as from
+excessive delay in the path.
+
+3.  Add a generic Hayes-MNP modem definition, supporting a locked DTE speed.
+Also pulled two of the three Vadic definitions that were identical.  Use the
+generic Vadic for all the VA212 variants..
+
+4.  Fix error handling for LOGFILE command, also added support for LP as the
+log file.  For this you MUST spool LP in the operating system, if you will
+be working faster than your printer can print, which will likely be the case.
+
+5.  Added a couple extra queue elements, in case one wants to send a break
+amidst receiving data sufficiently fast to keep all previously available busy.
+
+
+Narrative Edit History	KRT V03.61
+
+
+From edit of 15-Apr-91:  (Y13)
+
+1.  Fixed failure to send abort string to modem when a call timed out or
+didn't answer ..
+
+2.  Sped up the CONNECT code, cleaned up its source file, etc..  This now
+will hold its own with VTCOM regarding speed when receiving data from the
+handler.  Writes from the terminal to the handler are currently only half
+as fast, though it's only noticeable when using function keys which output
+data at speed.  Also added a "Z" command to zap (100% hose and reset) the
+handler.
+
+From edit of 19-Apr-91:  (Y14)
+
+1.  Cleaned up Kermit-11's emulation of ".PRINT" knocking another couple
+blocks off the complied program size.
+
+2.  Added an HPRINT facility to print help text as may be useful..
+
+From edit of 21-Apr-91:  (Y15)
+
+1.  Sped up CONNECT's sending of keyboard input to the remote.  This
+involved a minor cleanup of the parity generation stuff, which is back to
+using a lookup table as it's faster and only added 32 words to the root
+after the mods were done.  This remains slightly slower than VTCOM, but
+then VTCOM doesn't offer local echo, software generated parity, protection
+from typing the TSX lead-in char to the terminal, etc, etc..
+
+2.  Moved all of the WHATS.NEW file to the end of K11TSX.DOC, which is
+where it will live from now on, other than keeping only the most recent
+edits in it, as it was getting too big and not all that current..
+
+3.  Minor tweak to SET MODEM to ensure DTR comes up and stays there on
+PRO hardware.
+
+From edit of 24-Apr-91:  (Y16)
+
+1.  Fixed a problem unique to XM where after dialing four calls which
+resulted in failure the program would trash RMON and crash.  See the
+incsts subroutine in K11RT4 for details.  This also led to some further
+cleaning up of the dialer module, which is now is slightly faster when
+clearing/reseting/re-initting the modem.
+
+From edit of 25-Apr-91:  (Y17)
+
+1.  Combine program segments where possible in both versions.
+
+From edit of 26-Apr-91:  (Y18)
+
+1.  Added version checking for TSX so as not to crash when attempting to
+use something that does not exist in a particular version.
+
+
+Narrative Edit History	KRT V03.61
+
+
+2.  Sped up (slightly) CONNECT's writing data from TT to the handler.
+
+3.  Cleaned up code for EXAMINE.
+
+4.  Fixed DISMOUNT to work with just "LD" (no zero, no colon).
+
+From edit of 29-Apr-91:  (Y19)
+
+1.  Fixed dupe error messages bug in HANGUP, SET DTR and modem init.  Also
+cleaned up error handling for SET MODEM USER-DEFINED.
+
+2.  Modified suggested setup for Telebit T2500 to the non-MNP, non-V.42,
+plain, ordinary operation.  The various T2500 definitions init it as needed.
+Also changed S55 to 0 (no big deal as the escape char is also disabled) and
+S58 to 3 (it was 7, an error).
+
+3.  Modified SHO LINE to not run off the screen by moving DTR status down a
+line, then display PARITY on a third line, etc..
+
+From edit of 30-Apr-91:  (Y21)
+
+1.  Fix reset/DTR-drop/etc for modem on exiting so it all happens without
+screwing up the modem or starting the line to which it's attached.
+
+From edit of 1-May-91:  (Y23)
+
+1.  (Y23A) Fixed a problem where HPRINT would eat the index space padding.
+
+2.  (Y23) Moved the getdk routine to K11INI from K11RTI, and thus farther
+down stream in the init.  This avoids various types of what seem to be
+hardware related/dependent crashes when calling same under TSX..
+
+From edit of 3-May-91:  (Y24)
+
+1.  Clean up TRANSMIT code, modify for more efficient echoing.
+
+2.  Sped up modem SET/RESET/EXIT stuff to run as fast as possible, and
+patched c$idle to restore SET speed before reset.
+
+3.  (Y24A) Clean up comments and help to more accurately reflect mods made.
+
+From edit of 7-May-91:  (Y25)
+
+1.  Help text, comments, .DOC file clean up.
+
+From edit of 10-May-91:  (Y26)
+
+1.  Add support for non-EIS CPUs, made the divide macro double precision
+(input only, same as EIS divide) and made calls to ddiv and $ddiv normal
+divides, since double precision output is never needed (or at least used).
+
+2.  Made the distributed K11RT5.SAV runnable on a non-EIS CPU ..
+
+
+Narrative Edit History	KRT V03.61
+
+
+3.  Added a "BUG" command ala C-Kermit.
+
+From edit of 12-May-91:  (Y27)
+
+1.  Minor help/doc and K11DIA/K11SHO clean up..
+
+From edit of 15-May-91:  (Y28)
+
+1.  Remove crud from RX.XLE in K11ATR, and fixed typo in it where r4 wuz
+being restored into r3.
+
+2.  Made L$VAL (ascii number to integer) unsigned, and fixed/sped-up non-EIS
+MUL code so it sets the carry bit when it overflows, allowing L$VAL's use of
+same for error detection to function.  Also added comments to P$DIV..
+
+3.  Fixed error handling in K11DIA so as not to send an unnecessary abort
+string to the modem.
+
+From edit of 19-May-91:  (Y29)
+
+1.  Provide double precision output for seconds subroutine, so transfer
+time display works ok past 18:12:15 (>65535 secs past midnight), my mistake!
+
+2.  Added equivalent to SETSIZ K11TSX/T:64., helps on some TSX systems..
+
+From edit of 29-May-91:  (Y30/Y31)
+
+1.  Fixed a couple typos in the comments.
+
+2.  Display an ACK/NAK error message from the remote on a new line.
+
+3.  Extended Kermit's SL editor to advance/backup and delete/undelete
+char/word/line, etc.  See HELP SL for details.
+
+4.  (Y31) Minor SL editor cleanup..
+
+From edit of 30-May-91:  (Y31A)
+
+1.  Finish K11HLP.HLP for SL editor.
+
+2.  Fix undel word/line cursor position error on function error.
+
+From edit of 6-Jun-91:  (Y31B)
+
+1.  Clean up misc typos and clarify comments in some modules.
+
+2.  Clean out unused stuff from K11RTE.
+
+3.  Display free memory for handlers in words, not bytes (K11RTI).
+
+
+Narrative Edit History	KRT V03.61
+
+
+From edit of 9-Jun-91:  (Y31C)
+
+1.  Fix SL char processing when inserting chars at end of line.
+
+2.  Clean up reduced packet length due to TT message in K11RTI.
+
+From edit of 11-Jun-91:  (Y32)
+
+1.  Include tentative entries in space shown as free in DIR routine.
+Some of may it be tied up at the time, but on the whole this produces
+a result closer to what's really available.
+
+2.  Clean up server's opening message, ala C-Kermit.
+
+From edit of 13-Jun-91:  (Y33)
+
+1.  Fix text for HELP SET PROMPT.
+
+2.  Fix SL to backspace/space/backspace when deleting char at end of line.
+
+From edit of 17-Jun-91:  (Y34)
+
+0.  Serious maintenance update, clean up and etc..
+
+1.  Added SET/SHO SETTLE, allows altering settling time between sending a
+reset string to the modem and dumping its handler, which also drops DTR.
+If your modem doesn't faithfully resume its auto-answer state when exiting
+Kermit, increase this value, specified in decimal clock ticks (1/50-60 sec).
+
+From edit of 21-Jun-91:  (Y35)
+
+1.  Changed "SETTLE" to "SETTLE-TIME" ..
+
+2.  Dump yet more unused stuff from program.
+
+3.  Fix problem with ^C abort when a write to the handler is pending.
+
+From edit of 24-Jun-91:  (Y36)
+
+1.  Add settle-time to SHO MODEM.
+
+2.  Extended the incomplete file disposition to work with error packets.
+
+From edit of 28-Jun-91:  (Y37)
+
+1.  Removed control of SL from terminal type, added SET SL ON/OFF/KED/NOKED.
+SL no longer defaults ON, it must be explicitly SET on, as in the init file.
+SL also clears the keypad application mode as required, instead of doing it
+SET TERM..  Added support for PF2 in both NOKED/KED modes.  Reset keypad on
+exiting the program.
+
+
+Narrative Edit History	KRT V03.61
+
+
+2.  (Y37A) Fix problem with PF2 trying to open the help file when in HELP
+and said file is already open.
+
+From edit of 4-Jul-91:  (Y38)
+
+1.  Fix display of control chars via "^X" notation to conform to DEC's
+A..Z[\]~? keys to be struck whilst the control key is depressed.
+
+2.  Dropped the "RT-11" prefix from SET BREAK, CREATE-SIZE, [NO]VOLUME.
+
+3.  Added SHOW REPEAT-QUOTING, SERVER, break to SHOW CONSOLE, CREATE-SIZE
+and [NO]VOL to SHOW FILE.
+
+4.  Misc small stuff changed/consolidated/enhanced..
+
+From edit of 7-Jul-91:  (Y39)
+
+1.  Add support for Concord Data 224 modem.
+
+2.  Make dialer echo results direct from modem, so above can type out "..."
+and similar call progress stuff from other modems may be seen in real time.
+
+From edit of 15-Jul-91:  (Y39B)
+
+1.  Clean up HELP error handling, comments in K11DIA, other small stuff.
+
+From edit  of 17-Jul-91:  (Y39C)
+
+1.  Misc HELP text and comments clean-up.
+
+From edit of 21-Jul-91:  (Y40)
+
+1.  Conform display for SL when ^C is typed to that of the op system.
+
+2.  More misc small comments/HELP clean-up.
+
+From edit of 22-Jul-91:  (Y41)
+
+1.  Display abort message when file is skipped due to SET FILE PROTECT
+(that is, by an "X" or "Z" in the ACK packet) on the other Kermit.
+
+From edit of 7-Aug-91:  (Y42)
+
+1.  Fix a bogus "local" error message header in K11REC.
+
+From edit of 25-Aug-91:  (Y43)
+
+1.  Minor cleanup.
+
+2.  Fix NOTAIL to work with pre-V6.3 TSX per Chester Wilson's TSCLIB and
+include in distribution.
+
+
+Narrative Edit History	KRT V03.61
+
+
+From edit of 5-Sep-91:  (Y44)
+
+1.  Use file create date/time/protection in COPY.
+
+From edit of 21-Sep-91:  (Y45)
+
+1.  The rx.xle result in at$len is no longer overwritten by rx.len.  Added
+send exact file length in bytes.  This allows sticking an odd-block-length
+file into an exactly matching hole, whereas before an extra free block was
+needed, due to 1Kb block-size rounding..
+
+From edit of 6-Oct-91:  (Y46)
+
+1.  Clean up pre-V3.49 Kermit-11 bad system attribute length fix.
+
+2.  Query before overwriting an existing file when opening a log file.
+
+3.  Misc. small stuff cleaned up.
+
+From edit 19-Oct-91:  (Y47)
+
+0.  Pre-release clean up.  Commented everything in all source modules,
+even a few things not added by me.  Also found and removed a few leftover
+or unnecessary things in the program portion of them.
+
+1.  Fix send in remote mode to check for file (and report an error if not
+found) before the delay to enable the receiving Kermit, and not to open TT
+as the link until after the delay, allowing ^C to abort during said delay.
+
+2.  Prevent PF2 from possibly eating an overlay when it loads HELP by only
+letting it work from the main command line.
+
+3.  Add call to .gtim before calling .date to ensure clock is rolled over.
+
+From edit of 23-Oct-91:  (Y47A)
+
+0.  More small stuff fixed, almost entirely concerning correctness of
+comments in the source modules.
+
+From edit of 25-Oct-91:  (Y48)
+
+1.  Modified LOGFILE, SET LOGFILE and SET DEBUG commands to each parse an
+additional argument for a file name or debug mode as appropriate, allowing
+a log file, mode, etc. to all be handled in one single command line, whilst
+retaining compatibility with the prior two command scheme of doing things.
+See HELP for details.
+
+2.  If modem is on-line when SET SPEED is used, try to re-init the modem.
+
+
+Narrative Edit History	KRT V03.61
+
+
+From edit of 31-Oct-91, V3.61 Pre-Release:  (Y49)
+
+1.  Modified the modem re-init just added to SET SPEED to check for carrier
+and not do the re-init when it's present.
+
+2.  Modify incoming file name buffer to accommodate SVID (255. byte) file
+names.  Also corrected its definition to bytes instead of words.
+
+3.  Modify SET CL LINE to work on any matching fraction of LINE.  This used
+to require at least LIN.
+
+4.  Modify the LOGFILE and SET LOGFILE commands to close an open logfile
+if issued with no argument(s).
+
+5.  Added HELP MILNET-TAC ..
+
+From V3.61 Pre-Release, 3-Nov-91:  (Y50)
+
+1.  Kill SL editor during queries added to LOGFILE command requiring a yes/no
+response.  Scrolling through stored commands here eats the argbuf containing
+an as yet unparsed file name..
+
+2.   SET now does multiple args, separated by commas, ala RT-11, for any one
+function.  Example: SET SL ON,KED now works..
+
+From edit Y50A:
+
+3.  Ditto for GET, SEND commands per item #2, just above.
+
+From edit of 15-Nov-91:  (Y51)
+
+0.  This is, barring any unforseen bugs, the V3.61 release edit.
+
+1.  Added display of program type (XM=extended-memory overlays, SJ=low-memory
+overlays) to SHO VERSION.
+
+From edit Y51A:
+
+1.  Fix SET PHONE NUMBER so an embedded comma in the argument string is
+not eaten.
+
+From edit of 23-Nov-91: (Y52)
+
+1.  Final clean-up.
+
+
+Narrative Edit History	KRT V03.61
+
+
+From edit of 28-Nov-91, V3.61:  (Y53)
+
+1.  Force USR to re-read the directory segment, so floppies can be swapped.
+
+From edit Y53A:
+
+1.  Fix error handling for leading comma in GET/SEND args.
+
+2.  Call binary files "BINARY" not "IMAGE" so MS-Kermit is happy.
+
+3.  Ensure directory search channel is closed on sen.sw errors/aborts.
+
+This it it, V03.61, released 3-Dec-91:
+
+1.  Rename files with KRT prefix to avoid conflict with K11.. files.
+A few were renamed as is more appropriate:
+
+KRT     was  K11RT5		KRTERM  was  K11TSX
+KRT.INI was  KERMIT.INI		KRTERR  was  K11RTE
+KRTCON  was  K11RCO		KRTRMS  was  K11RT4
+KRTDIR  was  K11RTD		KRTUTL  was  K11RTU
+KRTHLP  was  K11HLP		KRTXL   was  K11PRT
+KRTOSI  was  K11RTI
+
+
+Narrative Edit History	KRT V03.62
+
+
+				Edit 3.62:
+
+From edit of 11-Jan-92, X03.62:  (third trial)
+
+1.  Increase size of ERRTXT buffer to max prompt + max error message size
+in KRTDAT.MAC, and conform its size in KRTDEB.MAC, by placing ERBFSIZ in
+KRTMAC.MAC.
+
+3.  In KRTDIA at DODIAL's 50$: add a one tick wait to conform to what happens
+when waiting for the modem to echo.
+
+4.  Move CREATE-SIZE and VOLUME-VERIFY to SET FILE, and conform HELP text.
+Restore default en$siz=0 after successful use of SET FIL CRE nnn.
+
+5.  Move BREAK-SIZE to SET CONSOLE, and conform HELP text.
+
+6.  Make PRINTM write to log files too.  Ditto for ERROR.  Clean up DEBUG
+modes, etc.  See SET$DEBUG and SHO$DEBUG, or use commands and observe the
+improvements.  This causes transfer status and error messages to be included
+in packet logging.
+
+7.  In KRTRMS, save .ENTER's file size in the file data table.  Also report
+same when opening a log file.  SH DEB now displays current block pointer and
+size of the file.
+
+8.  Report error when log file fills up (putcr0,putrec,putc).  Add LOGERR
+routine in KRTPAK.MAC to cope with this stuff..  Previously the file full
+error(s) were just ignored, at the expense of losing all overflowed data.
+
+9.  Fixed C$TYPE to strip hi bit and print the lower 7 bits on terminals
+<= VT100, as opposed to just tossing them as in the past.
+
+10.  Dropped NONAME.TMP for a nfs .enter, return "bad file name" error.
+
+11.  Check packet length in dskdmp, don't trap to 4 writing past end
+of buffer due to line noise and/or modems retraining.
+
+12.  Fix display formatting when debugging to TT during an extended reply.
+Also cleaned up formatting of debug display, including as written to disk.
+
+13.  Redo SET DIAL ECHO and INIT-ONCE as [NO]ECHO and [NO]INIT-ONCE..
+
+14.  Fix a few very small typos and errors in KRTHLP.HLP, expand and
+enhance help text for SET DIAL, particularly its commands.
+
+15.  Fixed wildcard "%" match to no longer match on blanks - there must be
+some valid char in the appropriate column.
+
+16.  Add current-block-pointer/size-of file to ^A stats display.
+
+17.  Rename SET DIAL PROMPT to WAKE-ACK, add BLIND, PULSE, TONE, DIAL-ACK,
+INITIATE-PROMPT, CONFIRM-ACK, [NO]BINARY-RESPONSE (were missing)..
+
+18.  SET SETTLE-TIME is now SET DIAL SETTLE-TIME.  This remains a global
+function, and works with pre-defined modems as well.
+
+
+Narrative Edit History	KRT V03.62
+
+
+19.  Added x.result (default "Hayes" xmode) and time.settle defaults,
+and in "Hayes" and Telebit modem definitions.
+
+From edit of 12-Jan-92:  (Y03.62.01)
+
+1.  Rewrote and greatly expanded help text for SET DIAL.
+
+From edit of 17-Jan-92:  (Y03.62.03)
+
+1.  Write time of day and process time for each packet at end of same
+when debugging packets.
+
+2.  If DCD is high when exiting program, hang up modem.
+
+From edit of 20-Jan-92:  (Y03.62.04)
+
+1.  Modify RDATA to not NAK unknown packets (noise), and SDATA to wait
+through bad ACK packets, noise, etc..
+
+2.  Make BUFFIL limit test max-0 (was max-4), allows bigger packets.
+
+From edit of 21-Jan-92:  (Y03.62.05)
+
+1.  Don't log bogus data for timout.
+
+From edit of 23-Jan-92:  (Y03.62-7)
+
+1.  Misc small stuff cleaned up in previously added V03.62 items.
+
+From edit of 3-Feb-92:  (Y03.62-9)
+
+1.  Make ERROR send an error packet, use PRINTM elsewhere.
+
+2.  Fix KRTREC.MAC and KRTSEN.MAC error handling, extensive mods..
+
+From edit of 5-Feb-92:  (Y03.62-10)
+
+1.  More liberal retry on noise during file xfrs scheme.
+
+2.  Default TIME-OUT made 5 secs.
+
+From edit of 6-Feb-92:  (Y03.62-11)
+
+1.  Clean up above noise handling routines.
+
+From edit of 11-Feb-92:  (Y03.62-12)
+
+1.  Further clean up above noise handling routines.
+
+2.  Don't modify SET time-out value no matter what remote's is.
+
+3.  Display any difference between local and remote time-outs.
+
+
+Narrative Edit History	KRT V03.62
+
+
+From edit of 20-Feb-92:  (X03.62-13)
+
+1.  Add bells: up arrow when nothing saved yet, down arrow at end.
+
+2.  Add/enforce SET SEND PACKET-LEN limit, which is now in KRTST1.MAC.
+
+3.  Major cleanup and maintenance update.
+
+4.  Conform to major sinit stuff update in KRTINI.MAC
+
+5.  Numerous small fixes and removal of redundant code..
+
+From edit of 21-Feb-92:  (X03.62-14)
+
+1.  Move SET TIME-OUT to SET RECEIVE TIME-OUT and SET SEND TIME-OUT.
+
+From edit of 21-Feb-92:  (X03.62-15)
+
+1.  Drop time-outs display, other Kermit's value is not always received
+before send or receive mode is selected, thus it's not always correct.
+
+2.  Minor code cleanup.
+
+From edit of 23-Feb-92:  (X03.62-16)
+
+1.  Corrected suggested XL BUFSIZ to 256. (sorry about this!).
+
+2.  Leave channels to comm handler open all the time after it has been
+assigned the link device.
+
+From edit of 27-Feb-92:  (X03.62-17)
+
+1.  Move senbrk to KRTCON.MAC.
+
+From edit of 27-Feb-92:  (X03.62-18)
+
+1.  Reduce size of XM root.
+
+From edit of 5-Mar-92:  (X03.62-19)
+
+1.  Minor clean up.
+
+From edit of 18-Mar-92:  (Y03.62-20)
+
+1.  Another minor clean up..
+
+From edit of 23-Mar-92:  (Y03.62-21)
+
+1.  Include last number dialed in SH PH (if one exists).
+
+2.  Time-outs are now 7 secs rx, 10 secs tx.  SET REC TIME-OUT 0 is a good
+idea when downloading from Compuserve.
+
+
+Narrative Edit History	KRT V03.62
+
+
+From edit of 24-Mar-92:  (Y03.62-22)
+
+1.  Added selectable .csispc comma delimiter parsing, see HELP SET FILE CSI.
+
+From edit of 25-Mar-92:  (Y03.62-23)
+
+1.  Clean up and speed up the above .csispc mods..
+
+From edit of 31-Mar-92:  (Y03.62-25)
+
+1.  Speed up dir name match testing.
+
+From edit of 1-Apr-92:  (Y03.62-27)
+
+1.  Yet more code cleaned up..
+
+From edit of 11-Apr-92:  (Y03.62-31)
+
+1.  Increase efficiency of KRTDIR.MAC yet again.
+
+2.  Increase size of fixfil stack buffer to SVID limit.
+
+From edit of 3-May-92:  (Y03.62-33)
+
+1.  Still more minor clean up work..
+
+2.  Make TYPE append a LF to CR if CR not followed by one..
+
+From edit of 9-May-92:  (Y03.62-37)
+
+1.  Clean up various macros.
+
+From edit of 25-May-92:  (Y03.62-39)
+
+1.  Move sho$ve after kerini so xprint is cleared first.
+
+2.  Add dummy file name for HPRINT via RT-11 V5.2/TSX V6.0 LP/LS.
+
+3.  Fixed virtual segment 1 size in non-EIS XM version.
+
+From edit of 26-May-92:  (Y03.62-40/41/42)
+
+1.  (Y40) Keep XL open even for XM, to accommodate RT-11 V5.6.
+
+2.  (Y41) Drop auto-assign of XC during PRO-300 startup, in light of above..
+
+3.  (Y42) Increase MAXLNG (long-packet size) to 1920.
+
+From edit of 27-May-92:  (Y43)
+
+1.  Clean up above mods..
+
+
+Narrative Edit History	KRT V03.62
+
+
+From edit of 29/30-May-92:  (Y44/45)
+
+1.  (Y44)  HELP extended wildcarding in progress, otherwise this is a stable
+version.
+
+2.  (Y45)  Finish up display all subtopic text when wildcarding through nested
+text.
+
+From edit of 31-May-92:  (Y47)
+
+1.  Clean up recent additions and edits.
+
+From edit of 3-Jun-92:  (Y48)
+
+1.  Reinstall support for KL handler.  Note the HELP text isn't yet done..
+
+2.  Fix SHO VERSION so SJ doesn't zap its number, added (non-)EIS to display.
+
+3.  Return correct error message for non-existent device.
+
+From edit of 5-Jun-92:  (Y49)
+
+1.  Add RT-11 version checking, bypass V5 calls so V4 will run.  This kills
+doing file create date and protection from Kermit (ala received attributes)
+and the abort I/O call to the comm handler (which is first flushed by looping
+regardless).
+
+2.  Expand V5 macros so everything will assemble under V4, even though most
+of it will never run..
+
+3.  Add support for 38.4kb.  This requires hardware capable of doing it..
+
+From edit of 7/9-Jun-92:  (Y51..53)
+
+1.  Extend, finish and clean up recent work.
+
+From edit of 11-Jun-92:  (Y55)
+
+1.  Speed up keyboard input processing at high data rates.
+
+2.  Add SET CONSOLE PRIORITY for KL/XC/XL under TSX.
+
+From edit of 13-Jun-92:  (Y56)
+
+1.  Speed up CL/XL/etc reads from the modem.
+
+2.  Add Telebit T3000 modem definitions.
+
+From edit of 14-Jun-92:  (Y57)
+
+1.  Double the settle-time value for the wait after dropping DTR, as
+some modems (including the T3000) need more time to recover.  Note when
+changing the modem type the new default will overwrite any previously
+SET value.
+
+
+Narrative Edit History	KRT V03.62
+
+
+From edit of 16-Jun-92:  (Y59)
+
+1.  Dumped the concept of KL (more or less XL-compatible) and created a
+new handler called KM ("Kermit Modem" driver) which is more TSX-like, and
+is thus easier to unhang, smaller, hopefully faster and etc.  See HELP
+INSTALL KM for details.  This handler does NOT support VTCOM nor is it
+intended to be used with anything besides KRT Y03.62-59 or future edits.
+
+From edit of 18-Jun-92:  (Y60)
+
+1.  Set virtual bit in JSW for XM assembly, which inadvertently got dropped.
+
+2.  Apply the final solution to the parity memory vector eating the version
+data in block 0.  See top of KRTCMD.MAC for details..
+
+From edit of 19-Jun-92:  (Y61)
+
+1.  Add hardware (RTS/CTS) flow control to the KM handler, and support for
+same to Kermit, including making the T3000 modem definition use it.  You
+must explicitly SET FLOW-CONTROL RTS to enable this (as in the init file).
+
+From edit of 21-Jun-92:  (Y63)
+
+1.  Reduce MAXLNG to 600. for NONEIS assembly, so the program has some
+hope of loading under FB..  This of course restricts the long-packet length
+to one block, but is better than nothing, until and unless other reductions
+can be made.  It was done with the NONEIS flag for convenience.  See MAXLNG
+in KRTMAC.MAC if this is not to your taste..
+
+From edit of 23-Jun-92:  (Y64)
+
+1.  Reduce ALSIZE (phone # buffer) to 512. bytes and LN$CNT (SL # of
+lines saved) to 3 under the non-EIS assembly, so now KRT will run on
+anybody's FB system with room enough left to load a comm handler, etc.
+This applies to KRT.SAV as distributed with this program.  You may feel
+free to tweak these as needed in KRTMAC.MAC.
+
+2.  Ensure I/O to block 0 is done when initting KM, XC, XL, so SJ queue
+gets reset.  This was causing various problems with these handlers..
+
+From edit of 29-Jun-92:  (Y65)
+
+0.  Clean up recent edits..
+
+From edit of 30-Jun-92:  (Y66)
+
+1.  Moved GETREC to KRTRMS from KRTUTL, so HELP via PF2 can't ever crash..
+
+From edit of 3-Jul-92:  (Y67)
+
+1.  Add Jim Whitlock's VBGEXE fetch pointer fixes.
+
+
+Narrative Edit History	KRT V03.62
+
+
+From edit of 9-Jul-92:  (Y69)
+
+1.  Add DCDTST for status during file transfers, so one will know when
+one's data path via a modem has died..
+
+2.  Ensure hi byte of time-out value is cleared in RPACK$.
+
+From edit of 11-Jul-92:  (Y70)
+
+1.  Fix flipped RTS and CTS status display flags in KM handler, and
+SET FLOW-CONTROL code problem getting back to the XOFF mode.
+
+2.  Dumped SET DIAL INFO, as any undefined message defaults to it and
+as this program gets bigger the memory recovered is more than worth it.
+
+From edit of 12-Jul-92:  (Y71)
+
+1.  Misc cuts in FB root size, saving another 387. words..
+
+From edit of 19-Jul-92:  (Y73)
+
+1.  Fix DIR error handling for non-initialized disk.
+
+2.  Enhance display of take file errors, and fix some related bugs.
+
+3.  Command line buffer length (LN$MAX) is now back to 80. bytes.
+
+From edit of 23-Jul-92:  (Y75)
+
+1.  Yet more cuts to the root.
+
+From edit of 26-Jul-92:  (Y76/77)
+
+1.  Even more cuts to the root, added passed buff length to rpack and
+also cut a big piece out of the overlays too.
+
+2.  Add SHOW EOF.
+
+From edit of 29-Jul-92:  (Y78)
+
+1.  Fixed titles of .MAC files so XREF gets the file names.
+
+2.  Moved $limit into the root so it links ok under separate I&D space.
+
+3.  Dropped ndf tests in macros as it blows up the .LST output.
+
+From edit of 31-Jul-92:  (Y79)
+
+1.  Skip .ABTIO for XC/XL under ALL RT-11 V5.6 monitors to avoid hang/race/?
+
+From edit of 2-Aug-92:  (Y82)
+
+1.  Clean up error handling.
+
+
+Narrative Edit History	KRT V03.62
+
+
+From edit of 3-Aug-92:  (Y83)
+
+1.  Document use of LINK's /Extend switch and KRTTSX's handler buffer size.
+
+From edit of 7-Aug-92:  (Y85)
+
+1.  $$trip hack to avoid "ndf/df" tests blowing up .LST output.
+
+2.  Yet more cuts to the root for use under RT-11FB.
+
+From edit of 9-Aug-92:  (Y87)
+
+1.  More clean-up work..
+
+From edit of 29-Aug-92:  (Y88)
+
+1.  Yet more clean-up, fixed HOME which Y87 screwed up.
+
+From edit of 17-Sep-92:  (Y89)
+
+1.  Add 25% to rec'd length for text files from non RT-11/TSX systems,
+as others don't include record terminators and etc in the passed length.
+
+2.  Fix .LST output of macros when code not producing binary output is
+inserted.
+
+3.  Once again fix free core pointer stuff for VBGEXE and separate I&D space.
+
+From edit of 16-Oct-92:  (Y90)
+
+1.  Fix various spelling errors.
+
+From edit of 23-Oct-92:  (Y91)
+
+1.  Fix more spelling and grammar errors.
+
+2.  Add SET FILE [NO]REPLACE.
+
+3.  Indicate possible device not responding in handler error messages.
+
+4.  Fix BUFEMP's error handling.
+
+5.  Add SHOW CL.
+
+From edit of 1-Nov-92:  (Y93)
+
+1.  Display any possible contents of "X" packet, for Unix and C-Kermit.
+
+From edit of 5-Nov-92:  (Y94)
+
+1.  Make hd$fir=:6 so badly initted disks don't crash DIR.
+
+2.  Unpack repeat-encoded chars when displaying data in an "X" packet.
+
+
+Narrative Edit History	KRT V03.62
+
+
+From edit of 18-Nov-92:  (Y95)
+
+1.  Fix error reporting when modem dies during a keyboard abort when dialing.
+
+2.  Fix problem dispatching I/O via TT under RT-11.
+
+From edit of 3-Dec-92:
+
+1.  This is it, V03.62.
+
+2.  V03.62-1 adds Jim Whitlock's separate I&D space LINK command files,
+and fixes numerous spelling and syntax errors.  No functional change from
+V03.62.
+
+From edit of 19-Mar-93:  V03.62-2
+
+1.  Fix problem with error handler overwriting APR6.
+
+From edit of 30-Apr-93:  V03.62-3
+
+1.  Use clock rate for 0.5 sec status checks in CONNECT mode.
+
+2.  Include RT-11 V5.6 monitor changes in documentation.
+
+3.  Clean up dialer module, misc other small things cleaned up as well,
+including some small USER-DEFINED modem bugs.
+
+4.  Add automatic 50Hz clock rate detection and support for watching more
+than 34. lines to NOTAIL (KRTAIL), just in case anyone ever achieves this..
+
+5.  Fixed check for indirect command file or detached job running program, for
+error handling.
+
+From edit of 31-May-93:  V03.62-5
+
+1.  Add SET PHONE [NO]ANSWER and SET DIAL [NO]ANSWER to support call back
+modems.  Currently in the Hayes, Telebit and User-Defined definitions, others
+either go idle on their own or need a manually entered command after the
+remote hangs up (consult your modem's documentation).
+
+2.  Fixed error handling when Kermit is being run by a command file, IND
+process, as a detached job, etc..  Also updated KRT.IND by removing things
+Kermit itself can now do.
+
+From edit of 4-Jul-93:  V03.62-7
+
+1.  Fix problem introduced in V03.62-5 wherein XL couldn't be dumped on exit.
+
+2.  Allow the server to run through a comm handler.
+
+3.  Add everything missing to SHOW - now, if you can SET it, you can SHOW it.
+
+4.  Started on individual on/off control of file attribute processing, but
+stopped as it would overflow 3 RX02/I:1 floppies, adding a disk for just
+about nothing.  This will be in the next release along with INPUT and OUTPUT
+commands, etc. worth the fourth disk..
+
+
+Narrative Edit History	KRT V03.62
+
+
+From edit of 27-Jul-93:  V03.62-8
+
+1.  Fix missing psect in KRTRMS.MAC.
+
+2.  Add note concerning "dma=no" error when building KM.
+See HELP INSTALL KM.
+
+3.  This is absolutely, positively it for V03.62 ..
+
+
+Narrative Edit History	KRT V03.63
+
+
+				Edit 3.63:
+
+From edit of 21-Feb-94:  (X00)
+
+0.  Various small stuff was corrected or added prior to resuming this work.
+
+1.  Attributes made individually settable and showable, ala C-Kermit.
+These additions are documented in HELP.
+
+2.  Cleaned up SET and SHOW modules.
+
+3.  Added SPFUNs to KM to support xmodem ala how it will be done with CL.
+See KRTKM.MAC for details.
+
+From edit of 3-Mar-94:  (X01)
+
+1.  Add SET/SHOW CONTROL-CHARACTER ala C-Kermit.  If you can do it
+there, you can do it here too, with the exact same command syntax.
+
+From edit of 5-Mar-94:  (X02)
+
+1.  Make "-" = "_" when parsing commands.
+
+2.  Create KRTIDX.MAC and KRTIDX.BAS, dump KRTHLP.PRE and KRTHLP.BAS,
+KRTHLP.MAC is now a permanent file.  This was because KRTHLP finally
+overflowed 4096. words.
+
+From edit of 13-Mar-94:  (X03)
+
+1.  Modified the command definition macro (KRTCDF.MAC) to accept the
+location of an optional prompt string instead of the string itself.
+This allows sharing strings which reduces the overall program size by
+2 blocks.
+
+From edit of 17-Apr-94:  (X04/X05)
+
+1.  Clean up most of the SET command routines.
+
+2.  Use TSX EMT 114 for output when TT is the link device under TSX.
+This makes Kermit _much_ zippier..
+
+From edit of 21-Nov-94:  (X11 et.al. inbetween)
+
+1.  Move buffil back to the root (KRTPAK) for speed, and because there
+was now room for it once again there.  This makes for less calling of
+overlays and helps even more when running Kermit from a floppy.
+
+2.  Completed most of the SET modules code clean-up.
+
+3.  Modifed the test for a LTC (KRTOSI) to accomodate QED's fast
+machines, per idea from Alan Sieving of QED.  This also makes it
+complete as fast as possible regardless of machine type and allows
+an ample margin of safety as well.
+
+
+Narrative Edit History	KRT V03.63
+
+
+From edit of 23-Nov-94:  (X13)
+
+1.  Modified FIXFIL (file name conversion) to accomodate various
+previously troublesome Unix file names, such as .x. or .x: or ..x.
+which were being erronously taken as implicitly wildcarded names.
+
+From edit of 25-Nov-94:  (X15)
+
+1.  Add warn message when receiving empty file, so one will know why
+the (0 block) file was not created.
+
+2.  Clean up fixfil, chkext and namcvt data table in KRTCVT, added
+previously undefined chars to those possible in file name (for Unix).
+
+3.  Add file name when opening LP as log file so later OS versions
+are happy.  As in the past, LP must either be spooled or extremely
+fast to serve as a log device.
+
+4.  GETs to LP are now possible, tho there's currently no wildcard
+support when renaming files (whether to LP or a disk).
+
+From edit of 26-Nov-94:  (X16)
+
+1. Add SET WILDCARDS - doesn't modify the OS parameter, but allows
+one to get Unix files with a leading dot in the name whilst using
+an output file to rename same (SET WILD EXPLICIT for this).  Default
+is IMPLICIT, as it always has been in K11/KRT.
+
+2.  Add support for passed CSISPC file size ala FILENAME[size]..
+
+From edit of 27-Nov-94:  (X17)
+
+1.  Moved SHO VERSION to KRTCMD, modified so REM HELP can call and
+use it.
+
+2.  KRTSHO, KRTST0 and KRTST1 are in first trial of a thorough
+maintenance clean-up, which includes some minor rewrites.  This
+is the start of moving all message text to the tops of the source
+modules so anyone who'd like to translate same to another language
+at least has a fighting chance..  This also makes Kermit a bit
+smaller as strings can easily be shared, and it eliminates 100s
+of .even pad chars as well.
+
+3.  Add DAYTIME and SHOW DAYTIME commands.
+
+From edit of 23-Dec-94:  (X19)
+
+1.  Display file sizes when sending and receiving.  Note that for text
+files from foreign systems KRT adds 25% + 1 block to the received size
+to accomodate differing line termination schemes, and this increased
+size is what is displayed, even though the file may be closed later at
+some smaller number of blocks.
+
+2.  Support quoted string to place a blank at end of prompt string
+via SET PROMPT "K11> ".
+
+
+Narrative Edit History	KRT V03.63
+
+
+From edit of 25-Dec-94:  (X20:23)
+
+0.  Consolodating message data at tops of modules in progress, as is
+re-ordering of local labels and a general mainienance update and cleanup..
+
+Modules in first trial -
+
+KRTATR	KRTCM1	KRTDAT	KRTDEF	KRTDIR	KRTEDI	KRTERM	KRTERR
+KRTHLP	KRTIDX	KRTNHD	KRTSHO	KRTSJ	KRTST0	KRTST1	KRTSUB
+KRTTRA	KRTUTL	KRTXM
+
+From edit of 25-Jan-96:  (X24,Y25)
+
+1. Increase LN$MAX to 132. bytes to accomodate long command lines in
+take files (also works for keyboard input).
+
+2.  Add T3000X.42 modem definition, for XOFF flow control with this
+modem.  Note that S48 must be set to 0 here or the modem will NOT do
+XOFF restraint, regardless of what the modem docs say, at least in
+the modem's ready to accept a command mode and probably when on-line
+to another modem and exchanging data that need restraint.  This is
+a bug in the modem itself.  As long as Kermit is also doing XOFF
+flow control (only thing possible other than with the KM handler)
+it will also be forced to quote both XOFF/XON _and_ their hi-bit-set
+counterparts, thus this will not impact file transfers done under
+the Kermit protocol.  Xmodem under these circumstanses is useless
+though.
+
+3.  Fix problem with the SET PHONE XMODE value specified in the
+SET CL PORTS string from being overwritten by the default value
+in the modem definition.  Now if a value is explicitly supplied
+it will prevail.
+
+4.  Move all the pre-defined modem data to a separate module,
+KRTMDM, to make room for more defintions there and to allow for
+future expansion of the dialer module KRTDIA.
+
+5.  Fix problem with garbage being appended to log file name.
+
+From edit of 27-Jan-96:  (Y27)
+
+1.  KRTDIA final clean-up.  KRTHLP.HLP cleaned a bit too.
+
+2.  Fix unpopped stack on error exit from bufemp (receiving a file).
+This bug was introduced in V03.62 (but there was no error checking
+at all before this), sorry!
+
+3.  Send an error packet to other Kermit when appropriate (as when
+write to a local file fails) so the transfer gets properly aborted.
+
+4.  Display file type (ASCII, binary, etc) in create file message
+(just to be sure you know what's going on) when receiving files.
+
+
+Narrative Edit History	KRT V03.63
+
+
+From edit of 28-Jan-96:  (Y28)
+
+1.  Bug fixes to recent additions.
+
+2.  Display file type in sending file message as well..
+
+From edit of 29-Jan-96:  (Y29)
+
+1.  Flush any possible lingering data from modem when dialing or redialing.
+
+From edit of 29-Jan-96:  (Y30)
+
+1.  Display contents of SEND FILE ACK packet, such as file name returned
+by the remote Kermit.
+
+From edit of 29-Jan-96:  (Y30)
+
+1.  Display contents of RECEIVE FILE ACK packet as well...
+
+From edits of 30-Jan-96:  (Y31,Y32,Y33)
+
+1.  Clean up remote command response code, also display reasons for retries
+as each occurs.  Error packets are now sent when bailing out, to stop any
+possible lingering activity at the other end.
+
+From edit of 1-Feb-96:  (Y34)
+
+1.  Fixed all possible sign extension problems now that LN$MAX > 127.
+
+2.  More minor additions to remote command code.
+
+From edit of 3-Feb-96:  (Y35)
+
+1.  Move BYE and FINISH commands into REMOTE command processor, finish
+up error handling enhancements.
+
+2.  Clean up REMOTE HOST code.
+
+3.  On error for any REMOTE command resend the command packet when
+retrying instead of just continuing to listen.
+
+4.  Make LN$MAX=132. (max command line length) for EIS assembly only.
+KRT.SAV now remains at 80. bytes, for overall size considerations.
+
+From edits of 7-Feb-96:  (Y36,Y37)
+
+1.  Fix byte compares in single line editor undelete word/line code
+that were broken due to hi bit being set in LN$MAX value.
+
+2.  Clean up more REMOTE command sub-routine code.
+
+3.  Add some newlines in SHOW ALL to make it more readable.
+
+
+Narrative Edit History	KRT V03.63
+
+
+From edit of 8-Feb-96:  (Y38)
+
+1.  Allow CD, CWD and REMOTE CD, CWD to operate without an argument.
+Also added tests for illegal input string length for RT-11/TSX assigns.
+
+2. Redo data packet at sdat$$ when resizing due to first one failing
+so the next retry is actually done with the smaller sized packet.  In
+the past the size reduction wasn't done until the next packet was sent.
+
+From edits of 9/10-Feb-96:  (Y39,Y40)
+
+1.  More source code cleanup work, message macro no longer in use.
+
+2.  Fix error in testing SET CON 8 for terminal emulator command chars.
+
+From edit of 11-Feb-96:  (Y41)
+
+1.  Cleanup of all source modules completed, unimplimented commands
+pulled from server dispatch tables as they default to it anyway.
+
+From edit of 12-Feb-96:  (Y42)
+
+1.  Move GETNXT, GETCR0 and TGETCR from KRTPAK to KRTRMS.
+
+From edit of 13-Feb-96:  (Y43)
+
+1.  Pull a few redundant CLC instructions.
+
+From edit of 14-Feb-96:  (Y44)
+
+1.  Dump BUFPAK and patch BUFFIL to do the REMOTE commands too.
+This means repeated char encoding may now be done on argument strings,
+which BUFPAK did not do.  This makes a big difference for a command
+like REMOTE DELETE *~ on a Unix system, which without repeat encoding
+becomes DEL * and hoses everything.  8-bit quoting is also available
+now, which BUFPAK did not do either.
+
+From edit of 17-Feb-96:  (Y45)
+
+1.  More cleanup of REMOTE command processor, now inits stats registers,
+uses more existing subroutines and is thus smaller, etc...
+
+From edit of 17-Feb-96:  (Y46)
+
+1.  REMOTE WHO now passes arguments to remote host.  Some hosts
+support this, such as VMS where it's really handy on a busy system.
+
+2.  SET WILDCARDS is now SET FILE WILDCARDS..
+
+From edit of 18-Feb-96:  (Y47)
+
+1.  Fixed possible sign extension problem in TGETCR.
+
+2.  Remove unused globals, and $CMGLOBAL.
+
+
+Narrative Edit History	KRT V03.63
+
+
+3.  Use spare1 buffer for UNFMTS - it's more than big enough to prevent
+any overrun, and uses no additional memory.
+
+From edit of 19-Feb-96:  (Y48)
+
+1.  Move SET$DTR and SET$MODEM back to KRTDIA as there is now plenty
+of room there.  This makes the unmapped KRT somewhat smaller.
+
+2.  Only resend REMOTE commands every other retry - that is, just
+listen again for tries 1,3,5,.. and resend for 2,4,6,..
+
+3.  More source code cleanup.
+
+[RSTS/E work in progress here...]
+
+From edit of 5-Dec-96:  (Y51)
+
+1.  Field test - some documentation is not yet updated ...
+
+From edits through 24-May-97:  (Y52/Y53)
+
+1.  Split out this narrative edit history into its own file (KRTHIS.DOC)
+so KRT.DOC is no longer the monster it was..
+
+2.  Undo repeated char encoding before displaying remote ACK packet
+in KRTSEN.MAC.
+
+3.  Update release notes in KRTHLP.HLP.
+
+4.  Add rewind routine to KRTRMS.MAC and use same in KRTSEN.MAC when
+resizing packets downward, instead of closing/reopening file.
+
+From edits through 1-Aug-97:  (Z54/Z55)
+
+1.  Clean up, finish documentation and create field test release.
+
+From edits through 27-Aug-97:  (Z56)
+
+1.  Fix problem with shared buffer being overwritten with an error
+message when SET LINE CL * fails, the leading question mark of which
+was taken as SET PHONE XMODE ? and dumping its command dispatch table
+before the preceeding error was handled.
+
+From edit of 1-Sep-97:  (Z57)
+
+1.  Clean up docs, update HELP text file.
+
+From edit of 27-Sep-97:  (V03.63)
+
+1.  This is it, V3.63, ready for production service.
+
+Billy Y..
+27-Sep-1997
+-eof-

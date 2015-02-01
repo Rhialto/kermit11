@@ -1,0 +1,534 @@
+	.title	KRTCON	Terminal emulator
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	marktime (scheduler) completion routines are now more efficient
+;	fix SET CON 8 test for emulator command chars
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	correct comments to indicate r3 is not preserved between tasks
+;	fixed error handling for suspend/resume CONSOLE logging
+;	added handling for logfile errors
+;	move senbrk here
+;	speed up keyboard input processing at high data rates
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	this module has been extensively modified and will now run fine
+;	under any monitor including SJ if it's built with timer support
+;
+;	pulled RT-11 multi-terminal and sj monitor w/o twait stuff..
+;
+;	set/reset a list of "activation" chars under TSX which
+;	allows non-printing chars input at the terminal, such as ^O,
+;	to be passed to the remote system during the connect mode
+;
+;	display handler speed (fixed for 19.2k too) when connecting
+;	display escape sequence when entering CONNECT
+;	disallow typing TSX lead-in char to TT when running under TSX
+;	allow suppression of sign-on text, for use with krttra
+;	skip TT input routine once done flag is set
+;	tt input now uses con8bit ala TT output
+;	added MILNET option to wakeup (XON) MILNET TACs
+;	added send a control char via esc_char "^x" ala VTCOM
+;	added esc_char "Z" command to hose/refresh handler
+
+;	Copyright 1986 Change Software, Inc
+;
+;	07-MAY-1986 10:55  Brian Nelson
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+	.mcall	.CMKT	,.MRKT	,.RSUM	,.SCCA	,.SPFUN
+	.mcall	.SPND	,.TTINR	,.TTOUTR,.TWAIT	,.WRITC
+
+
+	BRKDRV	=	202		; /62/ wc=0 ends break, else begin it
+	STSDRV	=	204		; low byte status, high byte version
+	$XLV51	=	16.		; RT-11 V5.1 XL/XC version number
+
+	.macro	beep
+	mov	#bell	,r0		; load a bell
+	.ttoutr				; try to beep, but don't wait for it..
+	.endm	beep
+
+	.macro	schedule  taskheader
+	mov	r0	,-(sp)		; this is a completion routine
+	mov	taskheader,r0		; top of task's entry in scheduler
+	mov	sp	,state(r0)	; flag task is now ready to run
+	mov	(sp)+	,r0
+	.endm	schedule
+
+
+	.sbttl	Local buffers
+
+	.psect	condat	,rw,d,lcl,rel,con
+brkwrk:	.word	0 ,0 ,0 ,0		; /62/ break mark time work area
+cancel:	.word	0 ,0 ,0 ,0		; .cmkt work area
+crflag:	.word	0			; if <> last char was a CR
+done:	.word	0			; set this <> to exit scheduler
+iopend:	.word	0			; if <> XL write completion is pending
+rmbuff:	.word	0			; one word buffer for writes to XL
+rt.v51:	.word	0			; if <> XL is from RT-11 V5.1
+scca:	.word	0 ,0 ,0			; trap ^C here
+short:	.word	0 ,1			; wait one tick
+stsmark:.word	0 ,0 ,0 ,0		; status watcher mark time work area
+ttmark:	.word	0 ,0 ,0 ,0		; ttdone mark time work area
+twait:	.word	0 ,0			; .twait work area
+xkmark:	.word	0 ,0 ,0 ,0		; xktime mark time work area
+xkwork:	.word	0 ,0 ,0 ,0 ,0 ,0	; writes to handler work area
+
+
+	.sbttl	Task scheduler data table
+
+; these are NOT saved and may be used only within the then active task
+;	r0	= scratch
+;	r1	= scratch
+;	r2	= scratch
+;	r3	= not currently in use	; /62/
+
+; this register is preserved between tasks
+;	r4	= one word TT input buffer
+
+;	r5	= pointer to CURRENT task's entry in table
+
+	TASKADDR = 0			; task's starting address
+	STATE	 = 2			; if <> run this task next time thru
+
+;	       taskaddr	,state		; /62/ rmhead MUST follow tthead in
+tlist:					; /62/ this table, see note in rmproc
+xkhead::.word	xkproc	,0		; XL data out to TT
+tthead:	.word	ttproc	,0		; get TT input
+rmhead:	.word	rmproc	,0		; send it to XL
+sthead:	.word	stproc	,0		; check XL status
+	.word	0			; terminate table
+hdsize	=	tthead - xkhead		; each entry is this long
+
+	.psect	$pdata			; /63/ consolidate local data here..
+;		marktime intervals
+ststime:.word	0 ,0			; /62/ init puts 0.5 sec in ticks here
+ttwait:	.word	0 ,3			; poll TT for input every 3 ticks
+xktime:	.word	0 ,2			; wait to clear stuffed output buffer
+
+con.01:	.asciz	"Connecting to "
+con.02:	.asciz	"  DTE speed: "		; "DTE" as path speed may be different
+con.03:	.asciz	"N/A"
+con.04:	.asciz	<cr><lf>"Type ^"
+con.05:	.asciz	"C to return to your local machine"<cr><lf>
+con.06:	.asciz	"%KRTCON-W-Carrier "
+con.07:	.asciz	"lost"<cr><lf>
+con.08:	.asciz	"detected"<cr><lf>
+con.09:	.asciz	"Logfile is "
+con.10:	.asciz	", cur/max blk: "
+con.11:	.asciz	"/"
+con.12:	.asciz	"No LOGFILE is open"
+hlptxt:	.ascii	<cr><lf>
+	.ascii	"B	Send a break"<cr><lf>
+	.ascii	"C	Connect back to the local Kermit-11"<cr><lf>
+	.ascii	"I	Drop DTR for 0.5sec (hang up) then restore it"<cr><lf>
+	.ascii	"Q	Suspend CONSOLE logging"<cr><lf>
+	.ascii	"R	Resume CONSOLE logging"<cr><lf>
+	.ascii	"S	CONSOLE logging status"<cr><lf>
+	.ascii	"X	Flow control reset"<cr><lf>
+	.ascii	"Z	Zap (100% hose & try to unhang) the handler"<cr><lf>
+	.ascii	'^x	Send control char "x" using A..Z[\]~? '
+	.ascii	"prefixed with a carat"<cr><lf>	; /63/ added for clarity
+	.asciz	"RUBOUT	Send a break"<cr><lf><cr><lf>
+lis.ct:	.asciz	"ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]~?"
+	.even
+
+
+	.psect	$code
+	.sbttl	Initialization
+
+doconn::call	opentt			; /63/ open the link device
+	tst	r0			; ok?
+	beq	10$			; ya
+	return				; nope, bail out
+
+10$:	.scca	#scca	,#scca+4	; kill ^C, this is reset by setcc
+	.cmkt	#cancel	,#40		; then dump setcc's mark timer
+	calls	t.ttyini,<#-1>		; init terminal (w/flag for ^W)
+
+	tst	conmsg			; display sign-on text?
+	bne	40$			; nope..
+	wrtall	#con.01			; /63/ "Connecting to "
+	wrtall	#ttname			; spell out the device name
+	wrtall	#con.02			; /63/ "  DTE speed: "
+	call	ttspeed			; get speed
+	tst	r0			; wuz it gettable?
+	bne	20$			; /62/ yup..
+	wrtall	#con.03			; /63/ "N/A"
+	br	30$			; continue
+20$:	call	L10266			; write speed in r0 as dec num to TT
+30$:	wrtall	#con.04			; /63/ <cr><lf>"Type ^"
+	mov	conesc	,r0		; get esc char
+	dec	r0			; lis.ct here has no null entry
+	movb	lis.ct(r0),r0		; make it printable
+	call	writ1ch			; write it to TT
+	wrtall	#con.05			; /63/ "C to return .."<cr><lf>
+40$:	clr	conmsg			; reset sign-on bypass flag
+	mov	sp	,logini		; /62/ force logerr msg into the clear
+
+	clr	r4			; init TT input buffer
+	tst	milnet			; MILNET mode on?
+	beq	50$			; no
+	mov	#xon+<xon*400>,r4	; ya, stuff a couple XONs for remote
+
+50$:	.spfun	#rtwork,#xc.control,#stsdrv,#xcsts,#0,#1 ; /62/ get status
+
+	clr	rt.v51			; init version flag
+	tst	tsxcl			; CL?
+	bne	70$			; ya, skip this
+	tst	km.lock			; /62/ if it's KM do it here which
+	bne	60$			; /62/ keeps handler smaller..
+	cmpb	xcsts+1	,#$xlv51	; does this ver of XL eat LF after CR?
+	bgt	70$			; ya
+60$:	inc	rt.v51			; no, flag it has to be done here
+
+70$:	mov	clkflg	,r0		; /62/ get number of ticks/second
+	asr	r0			; /62/ number of ticks in 1/2 second
+	mov	r0	,ststime+2	; /62/ stuff into status check timer
+	mov	#tlist	,r0		; init flags for each task
+80$:	tst	(r0)			; end of the list?
+	beq	90$			; ya
+	mov	sp	,state(r0)	; no, run each task to init itself
+	add	#hdsize	,r0		; bump to head of next task
+	br	80$			; and loop back for it
+
+90$:	clr	crflag			; no CR received from TT yet
+	clr	done			; definitely not done
+	mov	#1	,suspnd		; don't miss a .rsum in the init pass
+
+	mov	sp	,xk.con		; direct data read from handler here
+	tstb	@xkpoint		; anything unused in buffer?
+	bne	100$			; ya
+	call	readxk			; get data or set completion routine
+	.br	100$			; /63/
+
+
+	.sbttl	CONNECT main_loop
+
+100$:	mov	#tlist	,r5		; get top of the task list
+110$:	tst	(r5)			; end of the table now?
+	beq	130$			; ya, go away until something happens
+	tst	state(r5)		; runnable task?
+	beq	120$			; no
+	jsr	pc	,@(r5)		; ya, do it
+120$:	add	#hdsize	,r5		; next task control block please
+	br	110$			; loop back for it
+130$:	inc	suspnd			; flag a .rsum is needed
+	.spnd				; suspend ourself
+	tst	done			; time to go now?
+	beq	100$			; no, loop again
+
+
+	.sbttl	Shut_down and exit
+
+	clr	xk.con			; send completed reads data to binread
+	.cmkt	#cancel	,#0		; kill all marktime requests
+	call	clostt			; /63/ close the link device
+	.newline			; ensure exit is to a clean line
+	clr	logini			; /62/ indicate cursor on a clean line
+	return
+
+
+	.sbttl	Scheduler's mark time completion routines
+
+stsdone:mov	sp	,sthead+state	; /63/ make the status test runnable
+	br	rerun			; /63/
+
+xkredo:	mov	sp	,xkhead+state	; /63/ retry TT output, buff was full
+	br	rerun			; /63/
+
+ttdone:	tst	done			; finished?
+	bne	S10$			; ya, skip all this..
+	mov	sp	,tthead+state	; /63/ no, poll TT for possible input
+	.br	rerun			; /63/
+
+rerun:	tst	suspnd			; need to resume?  /62/ add rerun ept
+	beq	S10$			; nope..
+	dec	suspnd			; ya, make sure no one else does it
+	.rsum				; get scheduler going
+S10$:	return
+
+
+	.sbttl	Process TT input
+
+ttproc:	tst	done			; finished?
+	bne	140$			; ya, don't eat possible type ahead..
+	tst	r4			; previous input queued to send yet?
+	bne	140$			; no, loop until it has been
+
+10$:	.ttinr				; check for input waiting for term
+	bcs	130$			; nothing to do
+
+	tst	con8bit			; SET CON 8?
+	bne	20$			; ya
+	bic	#^c<177>,r0		; no, strip any parity present
+20$:	cmpb	r0	,conesc		; escape sequence?
+	bne	60$			; no, dump character as is
+	mov	#5	,r1		; ya, wait up to five seconds
+	mul	clkflg	,r1		; for the next char
+
+30$:	.ttinr				; try to get the next char
+	bcc	40$			; got something valid
+	.twait	#twait	,#short		; nothing, wait one tick
+	sob	r1	,30$		; and try again
+	br	130$			; exit as we did not get anything
+40$:	tst	con8bit			; SET CON 8?
+	bne	50$			; ya
+	bic	#^c<177>,r0		; strip junk from the character
+50$:	cmpb	r0	,conesc		; another escape character?
+	beq	60$			; yes, dump that character as is
+	call	concmd			; console command processor
+	br	130$			; if n.g. concmd will beep
+
+60$:	bit	#2	,xcsts		; /62/ remote asserted flow control?
+	beq	70$			; no
+	save	<r0>			; /62/ ya, save the input byte
+	beep				; beep & continue, _OVERWRITING_ data
+	unsave	<r0>			; /62/ by restoring input byte and
+	clr	r4			; /62/ ensuring it's bit settable here
+70$:	tst	tsxsav			; running under TSX?
+	bne	90$			; ya, skip LF processing..
+	tst	rt.v51			; is this OLD XL/XC from RT-11 V5.1?
+	beq	90$			; no
+	asr	crflag			; ya, see if a CR precedes a LF
+	bcc	80$			; last char was not a CR
+	cmpb	r0	,#lf		; ignore LINE FEEDs please, but only
+	beq	10$			; when they follow a CR, that is..
+80$:	cmpb	r0	,#cr		; is this a CR?
+	bne	90$			; no
+	inc	crflag			; yes, flag for next pass
+
+90$:	tst	duplex			; need local echoing?
+	beq	110$			; no
+	tst	tsxsav			; TSX?
+	beq	100$			; no
+	cmpb	r0	,m.tsxr		; is it TSX lead-in char?
+	beq	110$			; ya, don't type this to TT
+100$:	.ttoutr				; echo the character
+
+110$:	setpar	r0	,r0		; set parity if enabled
+	tstb	r4			; is this byte free?
+	bne	120$			; no, use the hi byte for this char
+	bisb	r0	,r4		; ya, stuff the char in
+	schedule #rmhead		; enable the send char via XL task
+	br	10$			; and try for one more input byte
+
+120$:	swab	r4			; swap bytes to
+	bisb	r0	,r4		; stuff second char into the hi one
+	swab	r4			; bytes back into proper positions
+	return				; waste no time, every inst counts..
+
+130$:	clr	state(r5)		; don't come back right away
+	.mrkt	#ttmark,#ttwait,#ttdone,#3 ; sched another try for TT input
+140$:	return
+
+
+	.sbttl	Send data from XL to TT
+
+xkproc:	clr	r0			; avoid sign extension
+	bisb	@xkpoint,r0		; get next char
+	beq	60$			; nothing left..
+	tst	con8bit			; SET CON 7 or 8?
+	bne	10$			; 8
+	bicb	#200	,r0		; 7, strip high bit
+10$:	tst	tsxsav			; TSX?
+	beq	20$			; no
+	cmpb	r0	,m.tsxr		; lead-in char?
+	beq	30$			; ya, don't type this to TT
+20$:	.ttoutr				; dump the char
+	bcs	50$			; buffer full, go wait a bit
+30$:	bit	#<log$co!log$on>,trace	; /63/ logging enabled?
+	beq	40$			; no
+	mov	#lun.lo	,r1		; log file chan, char is still in r0
+	call	putcr0			; that's it folks
+	tst	r0			; /62/ did it work?
+	beq	40$			; /62/ ya
+	save	<r0>			; /62/ no, save error code
+	beep				; /62/ call attention to this!
+	unsave	<r0>			; /62/ recover error code
+	call	logerr			; /62/ handle the error
+40$:	inc	xkpoint			; bump to next byte
+	br	xkproc			; loop for it
+
+50$:	.mrkt	#xkmark,#xktime,#xkredo,#13 ; output ring buffer is FULL
+	clr	state(r5)		; wait for mark time to expire
+	return
+
+60$:	clr	state(r5)		; no longer runnable
+	jmp	readxk			; /63/ get more data from XL
+
+
+	.sbttl	Write one word from TT input to XL
+
+rmproc:	tst	iopending		; we still waiting for XL?
+	bne	10$			; /62/ ya, don't wait too long..
+	mov	r4	,rmbuff		; copy the data
+	beq	20$			; nothing to do
+	clr	r4			; make TT input buffer available again
+	mov	sp	,iopending	; flag I/O is not yet completed
+	.writc	#xkwork,#lun.xk,#rmbuff,#1,#30$,#1 ; queue the write
+10$:	jmp	rerun			; /62/ check for more, rerun ttproc
+
+20$:	clr	state(r5)		; done, no longer runnable
+	return
+
+
+	.sbttl	XL write completion routine
+
+30$:	clr	iopending		; I/O no longer pending
+	return
+
+
+	.sbttl	Status_watcher
+
+stproc:	mov	xcsts	,r2		; /62/ save prior status
+	.spfun	#rtwork,#xc.control,#stsdrv,#xcsts,#0,#1 ; /62/ present status
+	bcs	30$			; failed
+	mov	xcsts	,r1		; /62/ copy of current status
+	tst	tsxcl			; which handler is it?
+	bne	10$			; CL uses bit 2
+	asr	r1			; KM, XC and XL use bit 3
+	asr	r2			; make it 2 here
+10$:	bic	#^c<4>	,r2		; recover the carrier
+	bic	#^c<4>	,r1		; detect bits
+	cmp	r1	,r2		; any change?
+	beq	30$			; no
+	beep				; ya, make a small noise
+	wrtall	#con.06			; /63/ "%KRTCON-W-Carrier "
+	tst	r1			; did we loose it?
+	bne	20$			; no, must have just gotten it
+	wrtall	#con.07			; /63/ "lost"
+	call	ttxon			; clear the driver just in case
+	br	30$
+20$:	wrtall	#con.08			; /63/ "detected"
+30$:	clr	state(r5)			; no longer runnable
+	.mrkt	#stsmark,#ststime,#stsdone,#7	; reschedule us
+	return
+
+
+	.sbttl	Internal command processor
+
+concmd:	call	strip0			; /62/ strip parity, upcase if alpha
+	scan	r0	,#C10$		; look for a match
+	asl	r0			; word offsets
+	jmp	@C20$(r0)		; /62/ dispatch to the correct routine
+
+	.save
+	.psect	$pdata			; /62/ pull lower case stuff..
+C10$:	.byte	'/	,'?	,'B&137	,'C&137	,'H&137	,'I&137
+	.byte	'Q&137	,'R&137	,'S&137	,'X&137	,'Z&137	,'^	,177
+	.byte	0
+	.even
+
+C20$:	.word	con.$
+	.word	con.hl	,con.hl	,con.br	,con.c	,con.hl	,con.i
+	.word	con.q	,con.r	,con.s	,con.x	,con.z	,con.ctr,con.br
+	.restore
+
+
+	.sbttl	CONCMD sub-routines
+
+con.$:	beep				; bad command, ring the bell
+	return
+
+con.c:	mov	sp	,done		; set flag to exit the emulator
+	return
+
+con.i:	jmp	ttyhang			; /62/ go toggle DTR
+
+con.q:	bit	#log$op	,trace		; /62/ file open?
+	beq	con.$			; /62/ no, go make a beep
+	bic	#log$co	,trace		; turn off console logging
+	return
+
+con.r:	bit	#log$op	,trace		; file open?
+	beq	con.$			; /62/ no, go make a beep
+	bis	#log$co	,trace		; yes, resume console logging
+	return
+
+con.s:	.newline			; /63/ added debug status
+con.s0:	bit	#log$op	,trace		; is a file open?
+	beq	10$			; no
+	wrtall	#con.09			; "Logfile is "
+	wrtall	#logfil			; include file name
+	wrtall	#con.10			; ", cur/max blk: "
+	mov	#lun.lo	,r1		; logfile lun
+	asl	r1			; word indexing
+	mov	blknum(r1),r0		; recover current block number
+	call	L10266			; dump it to TT
+	wrtall	#con.11			; "/"
+	mov	sizof(r1),r0		; recover file size
+	call	L10266			; dump that to TT too
+	bit	#log$co	,trace		; yes, resume console logging
+	br	20$
+10$:	wrtall	#con.12			; "No LOGFILE is open"
+20$:	.newline
+	.newline
+	return
+
+con.z:	call	hose			; zap handler, then
+con.x:	jmp	ttxon			; /62/ reset XOFF and send an XON
+
+con.br:	.spfun	#rtwork,#xc.control,#brkdrv,#0,#1,#1 ; /62/ turn break on
+	.mrkt	#brkwrk,#break,#20$,#20	; /62/ queue this to turn it off
+	return
+
+20$:	save	<r0>			; /62/ this is a completion routine
+	.spfun	#rtwork,#xc.control,#brkdrv,#0,#0,#1 ; /62/ turn break off
+	unsave	<r0>
+	return
+
+con.hl:	wrtall	#hlptxt			; dump help text to terminal
+	jmp	con.s0			; /63/ sho debug status
+
+
+	.sbttl	Send a control char ala VTCOM's ^x command
+
+con.ctrl:mov	#5	,r1		; wait five seconds
+	mul	clkflg	,r1		; for the next char
+
+10$:	.ttinr				; get possible ctrl character
+	bcc	20$			; got something valid
+	.twait	#twait	,#short		; nothing, wait one tick
+	sob	r1	,10$		; next please
+	br	60$			; exit as we did not get any data
+20$:	call	strip0			; /62/ strip parity, upcase if alpha
+	scan	r0	,#lis.ctrl	; a control char symbol?
+	tst	r0
+	bne	30$			; ya
+	beep				; no, beep for a n.g. char
+	br	60$
+
+30$:	setpar	r0	,r0		; set parity if enabled
+	tstb	r4			; is this byte free?
+	bne	40$			; no
+	bisb	r0	,r4		; ya, stuff the char in
+	br	50$			; and try for another one
+
+40$:	swab	r4			; swap bytes to
+	bisb	r0	,r4		; stuff second char into the hi one
+	swab	r4			; bytes back into proper positions
+
+50$:	schedule #rmhead		; dump the data down the line
+60$:	return
+
+
+	.sbttl	Strip parity and upcase	; /62/ moved this here, now shared..
+
+strip0:	bic	#^c<177>,r0		; strip parity
+	cmp	r0	,#'a!40		; convert
+	blo	10$			; char
+	cmp	r0	,#'z!40		; to
+	bhi	10$			; upper
+	bic	#40	,r0		; case
+10$:	return
+
+	.end

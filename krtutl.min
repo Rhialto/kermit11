@@ -1,0 +1,247 @@
+	.title	KRTUTL.MIN  Rename, delete, copy, paksta, etc..
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984 Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTDEF.MIN"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MIN failed>
+
+	.mcall	.CSISPC	,.DELETE,.RENAME
+
+
+	.psect	$code
+	.sbttl	The real work of RENAME
+
+rename::save	<r2,r3>
+	call	check2
+	tst	r0
+	bne	120$
+	clr	r1
+	mov	#renlst	,r3
+	mov	#srcnam	,r0
+	call	docsi
+	bcs	120$
+	mov	#filnam	,r0
+	call	docsi
+	bcs	120$
+	mov	renlst	,r0
+	calls	fetch	,<r0>
+	tst	r0
+	bne	120$
+	.rename	#rtwork,#lun.in,#renlst
+	bcc	110$
+	movb	@#errbyt,r0
+	asl	r0
+	mov	renerr(r0),r0
+	br	120$
+
+110$:	mov	#1	,r1
+	clr	r0
+120$:	unsave	<r3,r2>
+	return
+
+	.save
+	.psect	rendat	,rw,d,lcl,rel,con
+renlst:	.word	0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0
+	.restore
+
+
+	.sbttl	The real work of DELETE
+	.enabl	lsb
+
+delete::save	<r3>
+	call	check1
+	tst	r0
+	bne	120$
+	mov	#renlst	,r3
+	mov	#srcnam,r0
+	call	docsi
+	bcs	120$
+	mov	renlst	,r0
+	calls	fetch	,<r0>
+	tst	r0
+	bne	120$
+	.delete	#rtwork,#lun.ou,#renlst
+	bcc	110$
+	movb	@#errbyt,r0
+	asl	r0
+	mov	renerr(r0),r0
+	br	120$
+
+110$:	clr	r0
+120$:	unsave	<r3>
+	return
+
+
+	.sbttl	The real work of COPY
+	.enabl	lsb
+
+	PROT	= 100000
+
+copy::	save	<r2,r3,r4>
+	clr	r2
+	call	check2
+	tst	r0
+	bne	1$
+	calls	open	,<#srcnam,#lun.in,#binary>
+	tst	r0
+	beq	2$
+1$:	br	120$
+
+2$:	mov	#lun.out,r0
+	asl	r0
+	mov	lokdate	,date.a(r0)
+	clr	prot.a(r0)
+	bit	#prot	,lokstat
+	beq	3$
+	inc	prot.a(r0)
+
+3$:	mov	#lun.in	,r1
+	asl	r1
+	mov	sizof(r1),at$len
+	calls	create	,<#filnam,#lun.out,#binary>
+	tst	r0
+	bne	purge
+
+9$:	mov	#1000	,r3
+10$:	calls	getc	,<#lun.in>
+	tst	r0
+	bne	inerr
+	calls	putc	,<r1,#lun.ou>
+	tst	r0
+	bne	outerr
+	sob	r3	,10$
+	inc	r2
+	br	9$
+
+inerr:	cmp	r0	,#er$eof
+	bne	purge
+	calls	close	,<#lun.ou>
+	save	<r0>
+	beq	33$
+	br	31$
+
+outerr:	cmp	r0	,#er$eof
+	bne	purge
+	mov	#er$ful	,r0
+
+purge:	save	<r0>
+	calls	close	,<#lun.ou>
+31$:	calls	delete	,<#filnam>
+33$:	calls	close	,<#lun.in>
+	unsave	<r0>
+
+120$:	mov	r2	,r1
+	unsave	<r4,r3,r2>
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Parse device and file name
+
+docsi:	save	<r1>
+	sub	#40.*2	,sp
+	mov	sp	,r1
+
+310$:	movb	(r0)+	,(r1)+
+	bne	310$
+	movb	#'=	,-1(r1)
+	clrb	@r1
+	mov	sp	,r1
+	.csispc	r1,#defext,r1
+	mov	r1	,sp
+	bcs	320$
+	mov	(r1)+	,(r3)+
+	mov	(r1)+	,(r3)+
+	mov	(r1)+	,(r3)+
+	mov	(r1)+	,(r3)+
+	add	#40.*2	,sp
+	clc
+	br	330$
+
+320$:	movb	@#errbyt,r0
+	asl	r0
+	mov	csierr(r0),r0
+	add	#40.*2	,sp
+	sec
+330$:	unsave	<r1>
+	return
+
+	.save
+	.psect	rendat	,rw,d,lcl,rel,con
+defext:	.word	0 ,0 ,0 ,0
+	.restore
+
+
+	.sbttl	Check file name(s)
+	.enabl	lsb
+
+check2:	calls	fparse	,<2(r5),#filnam>
+	tst	r0
+	bne	120$
+	calls	iswild	,<#filnam>
+	tst	r0
+	bne	120$
+check1:	calls	fparse	,<@r5,#srcnam>
+	tst	r0
+	bne	120$
+	calls	iswild	,<#srcnam>
+120$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Calculate time used to send last packet
+	.enabl	lsb
+
+paksta::mov	r2	,-(sp)
+	mov	#130$	,r2
+30$:	call	101$
+	mov	(sp)+	,r2
+	call	101$
+	mov	#140$	,r2
+	call	101$
+	scan	state	,#150$
+	asl	r0
+	mov	160$(r0),r2
+101$:	movb	(r2)+	,(r1)+
+	bne	101$
+	dec	r1
+	return
+
+	.save
+	.psect	$pdata
+130$:	.ascii	<cr><lf><cr><lf>
+140$:	.asciz	" = STA."
+
+150$:	.byte	STA.ABO,STA.BRK,STA.COM,STA.DAT,STA.FIL
+	.byte	STA.ATR	,STA.INI,STA.RIN,STA.SIN,STA.TYP,STA.EOF
+	.byte	0
+	.even
+160$:	.word	999$
+	.word	710$	,720$	,730$	,740$	,750$
+	.word	760$	,770$	,780$	,790$	,800$	,810$
+
+710$:	.asciz	"ABO  Abort"
+720$:	.asciz	"BRK  Break Link"
+730$:	.asciz	"COM  Transaction Complete"
+740$:	.asciz	"DAT  Data"
+750$:	.asciz	"FIL  File Name"
+760$:	.asciz	"ATR  Attributes"
+770$:	.asciz	"INI  Server Init"
+780$:	.asciz	"RIN  Receive Init"
+790$:	.asciz	"SIN  Send Init"
+800$:	.asciz	"TYP  Extended Reply"
+810$:	.asciz	"EOF  End of File"
+999$:	.asciz	"BAD  Unknown State"
+	.even
+	.restore
+
+	.dsabl	lsb
+
+	.end

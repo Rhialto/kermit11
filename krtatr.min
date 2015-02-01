@@ -1,0 +1,527 @@
+	.title	KRTATR.MIN  Process attribute packets
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984 Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.mcall	.DATE	,.GTIM
+
+	.psect	tempdata,rw,d,lcl,rel,con
+atrctx:	.word	0
+curatr:	.blkb	200
+day.x:	.word	0
+day.y:	.byte	0 ,0 ,0 ,0
+mon.x:	.word	0
+mon.y:	.byte	0 ,0 ,0 ,0
+sizbuf:	.byte	0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0
+xblock:	.word	0 ,0
+yr.x:	.word	0
+yr.y:	.byte	0 ,0 ,0 ,0 ,0 ,0
+
+
+	.psect	$code
+	.sbttl	Send all attributes in a single packet
+
+w$attr::save	<r2,r3,r4>
+	clr	r1
+	bitb	#capa.a	,conpar+p.capas
+	beq	100$
+	mov	2(r5)	,r4
+	clr	atrctx
+
+10$:	mov	atrctx	,r0
+	asl	r0
+	tst	watt(r0)
+	beq	30$
+	jsr	pc	,@watt(r0)
+	inc	atrctx
+	br	10$
+
+30$:	strlen	2(r5)
+	mov	r0	,r1
+100$:	clr	r0
+	unsave	<r4,r3,r2>
+	return
+
+	.save
+	.psect	$pdata
+watt:	.word	sn.sys	,sn.typ	,sn.pr1	,sn.len	,sn.fty	,sn.cdt	,sn.xlen
+	.word	0
+	.restore
+
+	.sbttl	Send system type
+
+sn.sys:	movb	#'.	,(r4)+
+	movb	#42	,(r4)+
+	movb	#'D&137	,(r4)+
+	movb	#'B&137	,(r4)+
+	clrb	@r4
+	return
+
+
+	.sbttl	Send generic file type
+
+sn.typ:	movb	#42	,(r4)+
+	movb	#41	,(r4)+
+	movb	#'A&137	,r0
+	cmpb	image	,#binary
+	bne	10$
+	movb	#'B&137	,r0
+10$:	movb	r0	,(r4)+
+	clrb	(r4)
+	return
+
+
+	.sbttl	Send file protection
+
+sn.pr1:	movb	#55	,(r4)+
+	movb	#41	,(r4)+
+	mov	(r5)	,r0
+	asl	r0
+	tst	prot.a(r0)
+	bne	10$
+	mov	#<1!2!4!10!20!40>,r0
+	br	30$
+10$:	mov	#<1!4!40>,r0
+30$:	add	#40	,r0
+	movb	r0	,(r4)+
+	clrb	@r4
+	return
+
+
+	.sbttl	Send file length
+
+sn.len:	mov	(r5)	,r1
+	asl	r1
+	mov	sizof(r1),r1
+	inc	r1
+	asr	r1
+	bne	1$
+	inc	r1
+1$:	movb	#41	,(r4)+
+	movb	#45	,(r4)+
+	deccvt	r1	,r4	,#5
+	mov	#5	,r0
+10$:	cmpb	@r4	,#space
+	bne	20$
+	movb	#'0	,@r4
+20$:	inc	r4
+	sob	r0	,10$
+	clrb	@r4
+	return
+
+
+	.sbttl	Send DEC_specific file type
+	.enabl	lsb
+
+sn.fty:	movb	#'0	,(r4)+
+	movb	#42	,(r4)+
+	movb	#42	,(r4)+
+	mov	image	,r0
+	movb	200$(r0),(r4)+
+	clrb	@r4
+	return
+
+	.save
+	.psect	$pdata
+200$:	.byte	'A&137	,'I&137	,'N&137
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Get file creation date
+
+sn.cdt:	save	<r4>
+	mov	(r5)	,r4
+	asl	r4
+	mov	date.a(r4),r0
+	mov	#curatr	,r1
+
+	mov	r0	,r3
+	bic	#^c37	,r3
+	add	#1972.	,r3
+	mov	r0	,r2
+	bic	#^c140000,r2
+	swab	r2
+	asr	r2
+	add	r2	,r3
+	call	i4toa
+
+	mov	r0	,r3
+	swab	r3
+	asr	r3
+	asr	r3
+	bic	#^c37	,r3
+	call	i2toa
+
+	mov	r0	,r3
+	ash	#3	,r3
+	swab	r3
+	bic	#^c37	,r3
+	call	i2toa
+
+	clrb	@r1
+	unsave	<r4>
+	mov	#curatr	,r1
+	strlen	r1
+	add	#40	,r0
+	movb	#'#	,(r4)+
+	movb	r0	,(r4)+
+95$:	movb	(r1)+	,(r4)+
+	bne	95$
+	dec	r4
+100$:	return
+
+
+	.sbttl	Send file length in bytes
+
+sn.xlen:mov	(r5)	,r3
+	asl	r3
+	mov	sizof(r3),r3
+	bne	1$
+	inc	r3
+1$:	clr	r2
+	mov	#512.	,r0
+	call	$dmul
+	mov	r0	,xblock
+	mov	r1	,xblock+2
+	clr	r2
+	mov	#xblock	,r1
+	mov	#sizbuf	,r0
+	call	$cddmg
+	clrb	@r0
+	cmpb	#'*	,sizbuf
+	beq	9$
+	strlen	#sizbuf
+	movb	#61	,(r4)+
+	add	#40	,r0
+	movb	r0	,(r4)+
+	mov	#sizbuf	,r0
+3$:	movb	(r0)+	,(r4)+
+	bne	3$
+9$:	return
+
+
+	.sbttl	Received attribute packet processing
+
+r$attr::save	<r1,r2,r5>
+	tst	doattr
+	beq	99$
+	mov	@r5	,r5
+
+10$:	movb	(r5)+	,r0
+	beq	90$
+	movb	(r5)+	,r1
+	beq	90$
+	cmpb	r0	,#'.
+	bne	20$
+	cmpb	r1	,#'D&137
+	bne	20$
+	dec	r5
+	mov	#42	,r1
+
+20$:	sub	#40	,r1
+	ble	90$
+	mov	#curatr	,r2
+40$:	movb	(r5)+	,(r2)+
+	sob	r1	,40$
+	clrb	(r2)+
+	mov	r5	,-(sp)
+	scan	r0	,#attrty
+	asl	r0
+	jsr	pc	,@attrds(r0)
+	mov	(sp)+	,r5
+	tst	r0
+	beq	10$
+	br	100$
+
+90$:	call	ispdp
+	cmp	r0	,#4
+	beq	99$
+	cmp	image	,#binary
+	beq	99$
+	mov	at$len	,r0
+	beq	100$
+	asr	r0
+	asr	r0
+	inc	r0
+	add	r0	,at$len
+	bcc	99$
+	mov	#65497.	,at$len
+99$:	clr	r0
+100$:	unsave	<r5,r2,r1>
+	return
+
+	.save
+	.psect	$pdata
+attrty:	.byte	41	,42	,43	,55	,56	,60	,61
+	.byte	0
+	.even
+attrds:	.word	at.$$
+	.word	at.len	,at.typ	,at.cre	,at.pr1	,at.sys	,at.fab	,at.xle
+	.restore
+
+
+	.sbttl	Null attribute handler
+
+at.$$:	clr	r0
+	return
+
+
+	.sbttl	Process received length specified in 1024. byte blocks
+
+at.len:	tst	at$len
+	bne	100$
+	mov	#curatr	,r2
+	clr	r1
+10$:	tstb	@r2
+	beq	30$
+	cmpb	@r2	,#space
+	beq	20$
+	clr	-(sp)
+	bisb	@r2	,@sp
+	sub	#'0	,@sp
+	mul	#12	,r1
+	add	(sp)+	,r1
+20$:	inc	r2
+	br	10$
+30$:	asl	r1
+	mov	r1	,at$len
+100$:	clr	r0
+	return
+
+
+	.sbttl	Received file type
+
+at.typ:	tst	doauto
+	bne	1$
+	mov	$image	,image
+	br	100$
+1$:	cmpb	curatr	,#'B&137
+	beq	10$
+	cmpb	curatr	,#'I&137
+	bne	100$
+10$:	mov	#binary	,image
+100$:	clr	r0
+	return
+
+
+	.sbttl	Put create date where close can get them later
+
+at.cre:	clr	-(sp)
+	scan	#space	,#curatr
+	tst	r0
+	bne	1$
+	strlen	#curatr
+	cmp	r0	,#7
+	bgt	3$
+	br	10$
+
+1$:	cmp	r0	,#10
+	blt	10$
+3$:	mov	sp	,(sp)
+10$:	mov	#curatr	,r1
+	mov	#yr.y	,r0
+	call	mov2b
+	tst	(sp)+
+	beq	13$
+	call	mov2b
+13$:	mov	#mon.y	,r0
+	call	mov2b
+	mov	#day.y	,r0
+	call	mov2b
+
+	mov	#yr.y	,r3
+	call	gnum
+	mov	r1	,yr.x
+	mov	#mon.y	,r3
+	call	gnum
+	mov	r1	,mon.x
+	mov	#day.y	,r3
+	call	gnum
+	mov	r1	,day.x
+
+	mov	mon.x	,r1
+	ash	#5	,r1
+	add	day.x	,r1
+	ash	#5	,r1
+
+	mov	yr.x	,-(sp)
+	cmp	(sp)	,#100.
+	bge	20$
+
+	cmp	(sp)	,#71.
+	ble	17$
+	add	#1900.	,(sp)
+	br	20$
+17$:	add	#2000.	,(sp)
+
+20$:	sub	#1972.	,(sp)
+	bge	23$
+	clr	r1
+	br	30$
+
+23$:	mov	(sp)	,r0
+	bic	#^c<40!100>,r0
+	asl	r0
+	swab	r0
+	bic	#^c37	,(sp)
+	add	(sp)	,r1
+	bis	r0	,r1
+
+30$:	tst	(sp)+
+	mov	#lun.ou	,r0
+	asl	r0
+	mov	r1	,date.a(r0)
+	clr	r0
+	return
+
+mov2b:	movb	(r1)+	,(r0)+
+	movb	(r1)+	,(r0)+
+	clrb	(r0)
+	return
+
+gnum:	clr	r1
+10$:	movb	(r3)+	,r0
+	sub	#'9+1	,r0
+	add	#9.+1	,r0
+	bcc	20$
+	mul	#10.	,r1
+	add	r0	,r1
+	br	10$
+20$:	tstb	-(r3)
+	rts	pc
+
+
+	.sbttl	Put file protection code where close can get it later
+
+at.pr1:	mov	#lun.ou	,r1
+	asl	r1
+	bicb	#<1!4!40!100!200>,curatr
+	beq	10$
+	clr	prot.a(r1)
+	br	100$
+10$:	mov	sp	,prot.a(r1)
+100$:	clr	r0
+	return
+
+
+	.sbttl	Received system type
+
+at.sys:	movb	curatr	,at$sys
+	movb	curatr+1,at$sys+1
+	clr	r0
+	return
+
+
+	.sbttl	Receive IFAB file attributes data from another PDP-11
+	.enabl	lsb
+
+at.fab:	call	ispdp
+	tst	r0
+	beq	100$
+	mov	#curatr	,r0
+	cmpb	(r0)+	,#42
+	bne	100$
+	tst	doauto
+	beq	100$
+	scan	(r0)	,#200$
+	asl	r0
+	mov	210$(r0),image
+100$:	clr	r0
+	return
+
+	.save
+	.psect	$pdata
+200$:	.byte	'A&137	,'I&137	,'N&137
+	.byte	0
+	.even
+210$:	.word	TEXT
+	.word	TEXT	,BINARY	,DECNAT
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Exact file size in bytes (type "1")
+
+at.xlen:mov	#curatr	,r5
+	clr	r3
+	clr	r2
+10$:	tstb	@r5
+	beq	30$
+	cmpb	@r5	,#space
+	beq	20$
+	mov	#12	,r0
+	call	$dmul
+	mov	r0	,r2
+	mov	r1	,r3
+	clr	-(sp)
+	bisb	@r5	,@sp
+	sub	#'0	,@sp
+	add	(sp)+	,r3
+	adc	r2
+20$:	inc	r5
+	br	10$
+30$:	div	#1000	,r2
+	mov	r2	,at$len
+	tst	r3
+	beq	100$
+	inc	at$len
+100$:	clr	r0
+	return
+
+
+	.sbttl	Determine if other system is a PDP-11
+
+	PD$RSX	= '8
+	PD$IAS	= '9
+	PD$RSTS	= 'A&137
+	PD$RT	= 'B&137
+	PD$POS	= 'C&137
+
+ispdp:	clr	r0
+	cmpb	at$sys	,#'D&137
+	bne	100$
+	scan	<at$sys+1>,#pdplst
+100$:	return
+
+	.save
+	.psect	$pdata
+pdplst:	.byte	pd$rsx	,pd$ias	,pd$rsts,pd$rt	,pd$pos	,0
+	.even
+	.restore
+
+
+	.sbttl	Clear attributes
+
+clratr::clr	at$len
+	clr	at$sys
+	return
+
+
+	.sbttl	32-bit multiply from RSX SYSLIB.OLB
+
+$DMUL:	MOV	R0	,-(SP)
+	CLR	R0
+	CLR	R1
+10$:	TST	(SP)
+	BEQ	30$
+	ROR	(SP)
+	BCC	20$
+	ADD	R3	,R1
+	ADC	R0
+	ADD	R2	,R0
+20$:	ASL	R3
+	ROL	R2
+	BR	10$
+30$:	TST	(SP)+
+	RETURN
+
+	.end

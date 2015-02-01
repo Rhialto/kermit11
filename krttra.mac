@@ -1,0 +1,126 @@
+	.title	KRTTRA	ASCII transfer to remote
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	now called direct instead of through KRTCM1
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	after each byte sent the response from the receiver is echo'd
+;	this makes it handy for reading text files into a called system's
+;	message editor, etc..  speed is locked at 1 byte/tick, which is
+;	600 baud in 60Hz land
+;
+;	added code at EOF so last char(s) echo'd by remote are displayed
+;	modified action on EOF to reconnect, also suppress CONNECTs sign-on
+;	message for a cleaner return
+
+;	07-Mar-84  11:42:22   Brian Nelson
+;
+;	Copyright 1984 Change Software, Inc.
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+	.mcall	.TTYOUT	,.TWAIT
+
+
+	.psect	$pdata
+fifteen:.word	0 ,15			; wait fifteen ticks after EOF
+short:	.word	0 ,1			; wait up to 1 tick for remote to echo
+twarea:	.word	0 ,0			; .twait work area
+
+
+	.psect	$code
+	.sbttl	TRANSMIT		; /BBS/ heavily hacked..
+
+;	input:	argbuf	= name of file to send
+;	output:	   r0	= if <>, error code
+
+c$tran::tst	remote			; /62/ disallow to TT
+	beq	10$			; prevents typing TSX lead-in!
+	direrr	#er$pls			; please SET LINE first
+	return
+
+10$:	clr	r2			; input_open := false
+	clr	r3			; terminal_set := false
+	upcase	argbuf			; /62/ upper case all args
+	calls	fparse	,<argbuf,#srcnam> ; /62/ parse the file name please
+	tst	r0			; did the $parse work ok?
+	bne	50$			; no
+	calls	iswild	,<#srcnam>	; check for wildcarded file spec
+	tst	r0			; is it?
+	bne	50$			; ya..
+
+	call	opentt			; open the link
+	tst	r0			; did it work?
+	bne	50$			; no
+	mov	sp	,r3		; ya, flag link is init'd..
+	calls	open	,<#srcnam,#lun.in,#text> ; open the input file
+	tst	r0			; did it work?
+	bne	50$			; no
+	mov	sp	,r2		; ya, flag the file is open
+
+20$:	tst	cccnt			; ^C typed?
+	bne	60$			; ya, exit
+	calls	getc	,<#lun.in>	; no, get the next char in the file
+	tst	r0			; did that work?
+	bne	50$			; no
+	cmpb	r1	,#lf		; a line feed we don't need?
+	beq	20$			; ya, skip it
+	mov	r1	,-(sp)		; one word buffer
+	mov	sp	,r1		; point to it please
+	calls	binwri	,<r1,#1>	; simple to put a single char
+	tst	(sp)+			; pop the tiny buffer now
+	.twait	#twarea	,#short		; wait one tick
+30$:	calls	xbinrea	,<#-1>		; now try for the echo please
+	tst	r0			; get anything back?
+	bne	20$			; no, continue sending
+	tst	tsxsav			; running under TSX?
+	beq	40$			; no
+	cmpb	r1	,m.tsxr		; /62/ ya, don't type
+	beq	30$			; the lead-in char
+40$:	mov	r1	,r0		; pass char to .ttyout
+	.ttyout				; dump it to the terminal
+	br	30$			; and see if another can be had
+
+50$:	mov	r0	,r4		; save a copy of the error
+	cmp	r0	,#er$eof	; end of file?
+	beq	60$			; yes, that's ok
+	direrr	r0			; no, print the error out and exit
+60$:	tst	r2			; input file still open?
+	beq	100$			; no
+	.twait	#twarea	,#fifteen	; after EOF, wait 15. ticks
+70$:	calls	xbinrea	,<#-1>		; now clean up echo at end
+	tst	r0			; get anything back this time?
+	bne	90$			; no, all done
+	tst	tsxsav			; running under TSX?
+	beq	80$			; no
+	cmpb	r1	,m.tsxr		; /62/ ya, don't type
+	beq	70$			; the lead-in char
+80$:	mov	r1	,r0		; pass char to .ttyout
+	.ttyout				; dump it to the terminal
+	br	70$			; see if another can be had
+
+90$:	calls	close	,<#lun.in>	; close the input file
+100$:	cmp	r4	,#er$eof	; end of file today?
+	beq	130$			; ya, reconnect with link open
+	tst	r3			; should we put the terminal back?
+	beq	110$			; no
+	call	clostt			; close the link device
+110$:	tst	r2			; ever get file open?
+	beq	120$			; no, so skip the newline
+	.newline			; for prompt
+120$:	clr	r0			; /62/ error already handled..
+	return
+
+130$:	mov	#bell	,r0		; load a beep
+	.ttyout				; ring the bell when done
+	mov	sp	,conmsg		; suppress CONNECT sign-on msg
+	jmp	c$conn			; and connect automatically..
+
+	.end

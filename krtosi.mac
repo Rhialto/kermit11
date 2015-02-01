@@ -1,0 +1,621 @@
+	.title	KRTOSI	One shot init
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	fix test for running LTC to accomodate QED's fast PDP-11s
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	check for indirect command file running program, for error handling
+;	dump unused BUFDEF stuff
+;	add Jim Whitlock's VBGEXE fetch pointer fixes
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	"pic" code dumped
+;	if TSX, line number saved in tsxsav during init, for t.ttxon
+;	store clock rate (50/60 Hz) in clkflg, use elsewhere for timers
+;	add init for TSX activation char list
+;	call assdev when PRO-350 tries to automatically assign CL or XC
+;	.SERR is set here and then left on forever..
+;	VT200 now sets con8bit
+;	cleaned up init code
+;	increase ALSIZE to 1024. (user_defined modem and ph numb buffer)
+;	under RT-11 display memory free for handlers at sign-on
+
+;	23-May-86  18:23:36 BDN	Creation.
+;	07-Jun-86  05:39:17 BDN XM edits.
+;
+; /BBS/	20-Oct-91  Updated  this  narrative  to  reflect  mods made.
+;	[Note in KRTTSX the mapped part of the root actually spans 3
+;	pages (APR1 thru APR3), and was padded with command dispatch
+;	tables and SL to the end of APR3 to allow the most efficient
+;	allocation of the remaining memory..]
+;
+;	 There are some significant assumptions made  here.  One for
+;	the  virtual  (RT-11XM)  Kermit  (KRTTSX.SAV)  is  that APR7
+;	(160000-177777) is available and does NOT contain  any  code
+;	overlays,  because  in  the  XM  image  we  create a dynamic
+;	region mapped from APR7 to allow placement  of  buffers  and
+;	the like  up there.   In the case of the disk overlaid image
+;	(KRT.SAV) we just  do  a  .SETTOP  to  177776  and  allocate
+;	buffers there,  allowing the USR to swap if need be over the
+;	buffers.  Additionally, the .FETCH buffer is, for  the  disk
+;	overlaid   (non-virtual)   KRT.SAV,   allocated   from  this
+;	.SETTOP area.  In  the  case  of  XM,  however,  we  have  a
+;	problem.  In  order  to reduce the size of the ROOT to allow
+;	Kermit to run as a foreground job we ended up  with  the top
+;	of the  root mapped by APR1 (20000-37777).  Now it is a well
+;	known fact that XM places many constraints on what  you  can
+;	put in the range,  QUE elements being the best known example
+;	of something you CAN NOT put there.  It also turns  out that
+;	you  must NEVER try to load a handler into that area either.
+;	If you do, depending on the address,  you  can  expect  very
+;	erratic  behavior  from the handler, if not outright failure
+;	and a system crash.  Such was the case on  the PRO/350.  The
+;	XC  driver  would  MOST  of the time work ok, but the system
+;	would ALWAYS crash on a .HRESET directive.  Additionally the
+;	XC  OFFDRV  .SPFUN, while setting the "shutdown" flag in the
+;	driver,   would  be  ignored  at  program  exit.   Thus   an
+;	outstanding  XC  read  would attempt to enter a non-existent
+;	completion routine when the remote server timed out (sending
+;	a NAK packet that'd be read by XC), and hang the PRO.
+;
+;	 The correct method to control this buffer (XM version only)
+;	is to with the extend size for the psect HNBUFF at link time
+;	using the /e:0000 option in KRTLNK.COM.
+;
+;	 There are  a couple of things here for TSX+ also.  The TSX+
+;	directive for  altering  the physical address space limit is
+;	used,  which is simply an  EMT 375  with  R0  pointing to an
+;	argument block of the form
+;
+;	.byte	0,141
+;	.word	TOP_ADDRESS_DESIRED
+;
+;	 This is done because, as in the case of  the  RSTS/E  RT-11
+;	emulator,  the  .SETTOP  directive  only returns the current
+;	high limit, it has no effect on the memory allocation.  Both
+;	systems  thus  have special directives to actually alter the
+;	memory size.  KRTXM.MAC also patches  location 56  so KRTTSX
+;	will start on TSX+ systems with a default  memory allocation
+;	less  than  64Kb.  The  TSX+  "Line Number"  is  checked  to
+;	determine if the operating system is TSX+.  I have left that
+;	in the init code as it works even in older versions of TSX+.
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+	.sbttl	Macro references, various handy constants defined
+
+; /62/	.PEEK bypassed for V4, also expanded to allow assembly under same
+; /62/	.CRAW,.CRRG,.RDBBK,.WDBBK expanded as well..
+
+	.MCALL	.CSTAT	,.DSTAT	,.EXIT	,.GTIM	,.GTJB	,.GVAL
+	.MCALL	.LOOKUP	,.PURGE	.QSET	,.RCTRLO,.SERR	,.SETTOP
+
+
+	CNTXT	= 320		; /62/ pointer to impure area of current job
+	CONFIG	= 300		; RT-11 primary configuration word
+		SJSYS	= 1	; clear if a SJ system
+		HERTZ50	= 40	; /BBS/ 50Hz clock if set
+		XMSYS	= 10000	; XM if set and SJSYS off
+	CONFG2	= 370		; /62/ RT-11 configuration word 2
+		EIS$	= 400	; /62/ extended instruction set is present
+	CURPRI	= -16.		; /BBS/ offset to TSX current priority
+	STATWD	= 366		; /62/ DCL indirect file status word
+		IFACTV	= 400	; /62/ indirect file active bit
+	SYSGEN	= 372		; /BBS/ sysgen features word
+		MARKTIM	= 2000	; SJ timer support is present
+	SYSVER	= 276		; the monitor version number
+	TOPMEM	= 50		; location of address of top of memory
+	TS.VER	= -32.		; /BBS/ offset to TSX version number
+	VRUN$	= 20000		; /62/ VBGEXE bit in job state word
+
+
+	.sbttl	APR7 buffer allocation	; /BBS/ moved here..
+
+;	ALSIZE is the SET DIAL,PHONE buffer length, and lives in KRTMAC.MAC
+	BINLSIZ	= 40*4			; binary types list buffer size
+;	$ALLSIZ is the packet buffer length, and lives in KRTMAC.MAC
+	MAXSIZ	==   1000		; individual file buffer size
+	$$BUFP	= <<MAXSIZ+2>*4>	; 4 file buffers: in, out, log, take
+	$.1	= 82.+200+60		; /62/ dirnam + dirbfr + phnum buffers
+	$.2	= <34*2*2>*2		; totp.r and totp.s stats buffers
+	$.3	= <LN$MAX+2>*2		; cmdbuf and argbuf allocations
+	$.4	= <<LN$MAX+2>*LN$CNT>	; SL editor command line buffers
+
+	TOTALL	== <ALSIZE+BINLSIZE+$ALLSIZ+$$BUFP+$.1+$.2+$.3+$.4>
+
+	.if eq TOTALL-<<TOTALL/100>*100> ; 32-word boundary
+	ALLOC	== TOTALL		; landed right on it
+	.iff
+	ALLOC	== <TOTALL&177700>+100	; force to next 32-word boundary
+	.endc
+
+
+	.sbttl	Local data
+
+	.psect	mapwin	,rw,d,gbl,rel,con  ; ensure window data in ROOT
+apr7re:	; /62/	.rdbbk	alloc/100	; define symbols and reserve space
+	R.GID=:0			; /62/ expanded to assemble under V4
+	R.GSIZ=:2.			; /62/ even though it won't run there
+	R.GSTS=:4.
+	R.GNAM=:6.
+	R.GBAS=:10.
+	R.GLGH=:12.
+	RS.CRR=:^o100000
+	RS.UNM=:^o40000
+	RS.NAL=:^o20000
+	RS.NEW=:^o10000
+	RS.GBL=:^o4000
+	RS.CGR=:^o2000
+	RS.AGE=:^o1000
+	RS.EGR=:^o400
+	RS.EXI=:^o200
+	RS.CAC=:^o100
+	RS.BAS=:^o40
+	RS.NSM=:^o20
+	.WORD	0,alloc/100,0,0,0,0
+apr7wi:	; /62/	.wdbbk	7,alloc/100,0,0,alloc/100,ws.map ; for memory region
+	W.NID=:0			; /62/ expanded to assemble under V4
+	W.NAPR=:1			; /62/ even though it won't run there
+	W.NBAS=:2.
+	W.NSIZ=:4.
+	W.NRID=:6.
+	W.NOFF=:^o10
+	W.NLEN=:^o12
+	W.NSTS=:^o14
+	W.NLGH=:^o16
+	WS.CRW=:^o100000
+	WS.UNM=:^o40000
+	WS.ELW=:^o20000
+	WS.MAP=:^o400
+	.BYTE	0,7
+	.WORD	0,alloc/100,0,0,alloc/100,ws.map
+mapwrk:	.word	0 ,0			; mapping work buffer
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+chkbuf:	.word	0 ,0			; /BBS/ check for running clock buff
+timbuf:	.word	0 ,0			; roll the clock over buffer
+tsxmem:	.byte	0 ,141			; TSX-Plus get more memory emt
+	.word	0			; /BBS/ xinit puts size in here
+
+	.psect	$pdata
+cl0asn:	.byte	0 ,155			; try to assign
+	.word	0			; CL0 to
+	.word	3			; line 3
+cl1asn:	.byte	0 ,155			; try to assign
+	.word	1			; CL1 to
+	.word	3			; line 3
+tsxjob:	.byte	0 ,144			; /62/ TSX job status info emt args
+tsxj.l:	.byte	0 , 0			; /62/ line_# ,subfunct (line status)
+	.word	chkbuf			; /62/ borrow a buffer to return stats
+tsxlin:	.byte	0 ,110			; TSX get line number emt
+tsxon:	.byte	0 ,152			; /BBS/ TSX nowait TT input mode
+	.word	'U&137	,0
+tsxsin:	.byte	0 ,152			; /BBS/ TSX single char activation
+	.word	'S&137	,0
+tsxtrm:	.byte	0 ,137			; TSX get terminal type
+km.r50:	.rad50	"KM "			; /62/ to test for KM
+pi.r50:	.rad50	"PI "			; used to test for PRO hardware
+xc.r50:	.rad50	"XC "			; device names for
+xl.r50:	.rad50	"XL "			; testing for same
+
+trmlst:	.byte	0.	,1.	,2.	,3.	,4. ; terminal types
+	.byte	5.	,6.	,7.	,8.	,9. ; data table
+	.byte	-1
+	.even
+trmtyp:	.word	NOSCOPE	,TTY	,VT100	,TTY	,TTY
+	.word	NOSCOPE	,NOSCOPE,TTY	,TTY	,VT200
+
+cl0text:.asciz	"CL0:"			; asciz names
+cl1text:.asciz	"CL1:"			; for TSX
+fatal:	.asciz	"?KRTOSI-F-"
+noxcmt:	.ascii	"This system lacks KM, XC and XL drivers.  "	; /62/
+	.ascii	"TT must be used for transfers."<cr><lf>
+	.ascii	"Packet length has been set to 60. bytes "
+	.asciz	"to avoid overflowing the console port."<cr><lf>
+nolog:	.ascii	"Packet stats display disabled for FRUNed Kermit."<cr><lf>
+	.asciz	"Use SET UPDATE to enable stats during transfers."<cr><lf>
+osi.01:	.asciz	"RT-11SJ must be SYSGENNED with timer support"<cr><lf>
+osi.02:	.asciz	"Line Time Clock is not running"<cr><lf>
+osi.03:	.asciz	"CPU has no EIS support, rebuild KRT with KRTASM.NON"<cr><lf>
+osi.04:	.asciz	"HIMEM in TSGEN.MAC must be at least "
+osi.05:	.asciz	". bytes"<cr><lf>
+osi.06:	.asciz	"CRRG/CRAW error #"
+osi.07:	.ascii	"Insufficient space available for buffer allocation"<cr><lf>
+	.asciz	"TOTALL = "
+osi.08:	.asciz	",  MAXTOP-HILIMIT = "
+osi.09:	.ascii	"Program high limit exceeds top of memory"<cr><lf>
+	.asciz	"HILIMIT = "
+osi.10:	.asciz	",  MAXTOP = "
+osi.11:	.asciz	<cr><lf>"You are "
+osi.12:	.asciz	" from happiness.."<cr><lf>
+osi.13:	.asciz	". word"
+osi.14: .asciz	"s"			; /63/ not 1, so make it plural
+osi.15:	.asciz	" free to load handlers"<cr><lf>
+	.even
+
+
+	.psect	$code
+	.sbttl	Init for RT-11/TSX-Plus
+
+xinit::	.gtim	#rtwork	,#timbuf	; ensure clock rollover
+	mov	#60.	,clkflg		; /BBS/ preset clock rate at 60Hz
+	mov	#17.	,break+2	; /BBS/ assume 60Hz for break length
+	.gval	#rtwork	,#config	; get RMON configuration word into r0
+	bit	#hertz50,r0		; /BBS/ is clock 50Hz?
+	beq	10$			; /BBS/ nope..
+	mov	#50.	,clkflg		; /BBS/ ya, overwrite 60Hz default
+	mov	#14.	,break+2	; /BBS/ and fix break length for 50Hz
+10$:	bit	#sjsys	,r0		; is this the SJ monitor?
+	bne	20$			; it's FB or XM
+	dec	montyp			; /BBS/ it's SJ, exec type saved
+	.gval	#rtwork	,#sysgen	; /BBS/ check for
+	bit	#marktime,r0		; /BBS/ timer support
+	bne	30$			; /BBS/ found it
+	wrtall	#fatal			; /BBS/ fatal error message prefix
+	wrtall	#osi.01			; /63/ "must SYSGEN w/timer support"
+	jmp	180$			; go die..
+
+20$:	bit	#xmsys	,r0		; XM system?  r0=config_word
+	beq	30$			; no, must be FB
+	inc	montyp			; it's XM, save flag
+	mov	#$limit+2,hilimit	; we really want VIRTUAL limit
+
+30$:	clr	r2			; /63/ init a 64k pass loop counter
+40$:	.gtim	#rtwork	,#chkbuf	; /BBS/ check to see if clock is on
+	cmp	chkbuf+2,timbuf+2	; /63/ well?
+	bne	50$			; /62/ there is a clock..
+	sob	r2	,40$		; /63/ not yet, try it again
+	wrtall	#fatal			; /BBS/ no clock, Kermit must die
+	wrtall	#osi.02			; /63/ "LTC is not running"
+	jmp	180$
+
+50$:	neg	r2			; /63/ convert to # clock test loops
+	mov	r2	,qedtst		; /63/ save so count can be EXAMINEd
+	.if ndf	NONEIS			; /62/ if KRT was built for an EIS CPU
+	.gval	#rtwork	,#confg2	; /62/ check to see
+	bit	#eis$	,r0		; /62/ if an EIS CPU is running this..
+	bne	60$			; /62/ it is
+	wrtall	#fatal			; /62/ no EIS present
+	wrtall	#osi.03			; /63/ "CPU has no EIS support ..."
+	jmp	180$
+	.endc	; ndf NONEIS
+
+60$:	.gtjb	#rtwork	,#jobsts	; so we know if BG or FG job
+	.gval	#rtwork	,#statwd	; /62/ DCL indirect file status word
+	bit	#ifactv	,r0		; /62/ indirect file running this pgm?
+	beq	70$			; /62/ no
+	inc	jobtype			; /62/ ya, flag it for error handling
+70$:	.qset	#rtque	,#nrtque	; allocate extra queue elements
+
+; /62/	W A R N I N G:  the following 70. lines of code may seem somewhat
+;	kludgey, however to get this all to run across all the various OS
+;	versions and hardware and options and etc, this it it -
+
+	.serr	;; /BBS/ NOTE: .serr is set here and remains enabled forever..
+	mov	#totall	,r2		; /BBS/ need this much buffer space
+	.gval	#rtwork	,#sysver	; /62/ get monitor version number
+	movb	r0	,rt11ver	; /62/ save it here
+	swab	r0			; /62/ now get the
+	movb	r0	,rt11upd	; /62/ release level
+	cmp	rt11ver	,#5		; /62/ what version is this?
+	blt	80$			; /62/ VBGEXE doesn't exist before V5
+	.gval	#rtwork	,#cntxt		; /62/ get pointer to impure area
+	mov	r0	,r1		; /62/ save a copy of it
+	beq	80$			; /62/ if cntxt=0, it's TSX
+; /62/	.peek	#rtwork	,r1		; /62/ get job state word
+	MOV	#rtwork	,R0		; /62/ expanded for assy under V4
+	MOV	#28.*^o400+1.,@R0	; /62/ even though V4 can't run it
+	MOV	r1	,2.(R0)		; /62/
+	EMT	^o375			; /62/
+	bit	#vrun$	,r0		; /62/ running under VBGEXE today?
+	beq	80$			; /62/ nope..
+	mov	sp	,vbgexe		; /62/ ya
+80$:	tst	imgtyp			; /62/ is this virtual overlay image?
+	beq	90$			; no
+	add	#160000	,r2		; top limit minimum for virtual memory
+	br	110$			; skip low memory stuff
+
+90$:	tst	vbgexe			; /62/ is VBGEXE running this program?
+	beq	100$			; /62/ no
+	mov	#topmem	,hilimit	; /62/ ya use location 50 not $limit+2
+100$:	add	@#topmem,r2		; /BBS/ disk overlaid, add high limit
+	add	#4	,r2		; /BBS/ fudge factor for TSX
+
+110$:	mov	#tsxmem	,r0		; /BBS/ grab some extra TSX memory
+	mov	r2	,2(r0)		; /BBS/ pass size to tsxmem emt..
+	emt	375			; call TSX now
+	bcs	120$			; must be RT-11 today
+	cmp	r0	,r2		; TSX+, did it give us enough?
+	bhis	120$			; yes, keep on going
+	wrtall	#fatal			; /BBS/ no
+	wrtall	#osi.04			; /63/ "HIMEM .. must be at least .."
+	mov	r2	,r0		; copy needed value for L10266
+	call	L10266			; /BBS/ what it needs..
+	wrtall	#osi.05			; /63/	". bytes"<cr><lf>
+	jmp	180$			; /BBS/ die
+
+120$:	mov	#freept	,r2		; setup pointer to start of free core
+	mov	#160000,@r2		; /62/ assume /v ovrlys and force APR7
+	tst	imgtyp			; /62/ is it really /v overlays today?
+	bne	130$			; /62/ yes
+	mov	@hilimit,@r2		; no, free core list for SJ/FB .fetch
+130$:	add	#3	,@r2		; +2 to pointer above us please
+	bic	#1	,@r2		; whilst ensuring even address
+	tst	imgtyp			; /62/ running the XM image?
+	beq	150$			; /BBS/ no, use .settop for buffers
+
+					; it's KRTTSX.SAV on RT-11XM or TSX+
+; /62/	.crrg	#mapwrk	,#apr7re	; we will instead create a region
+	MOV	#mapwrk	,R0		; /62/ expanded to assemble under V4
+	MOV	#30.*^o400+0.,@R0	; /62/ even though it can't run there
+	MOV	#apr7re	,2.(R0)		; /62/
+	EMT	^o375			; /62/
+	bcs	140$			; didn't work..
+	mov	apr7re+r.gid,apr7wi+w.nrid  ; this will allow future expansion
+; /62/	.craw	#mapwrk	,#apr7wi	; create address window and map it
+	MOV	#mapwrk	,R0		; /62/ expanded to assemble under V4
+	MOV	#30.*^o400+2.,@R0	; /62/ even though it can't run there
+	MOV	#apr7wi	,2.(R0)		; /62/
+	EMT	^o375			; /62/
+	bcs	140$			; if failed..
+	mov	#alloc+160000,maxtop	; /BBS/ success, save copy of the top
+	jmp	A200$			; continue
+
+140$:	movb	@#errbyt,r0		; region failed, get the error code
+	wrtall	#fatal			; fatal error message prefix
+	wrtall	#osi.06			; /63/ "CRRG/CRAW error #"
+	call	L10266			; /BBS/ dump error byte
+	.newline
+	br	180$			; /BBS/ die on mapping failure
+
+150$:	.settop	#-2			; SJ or FB, or TSX and disk overlays
+	mov	r0	,maxtop		; save the current max address
+	cmp	@r2	,r0		; is there REALLY space available?
+	bhi	160$			; no, die
+	sub	@r2	,r0		; compute space available now
+	cmp	#totall	,r0		; space available for buffer pool?
+	blos	A200$			; yes, it's ok
+
+	wrtall	#fatal			; /BBS/ added this..
+	wrtall	#osi.07			; /63/ "Insufficient space ..TOTALL ="
+	octout	#totall			; dump octal value to TT
+	wrtall	#osi.08			; /63/ ",  MAXTOP-HILIMIT = "
+	octout	r0			; dump octal value to TT
+	sub	#totall	,r0		; get diff for reporting
+	br	170$			; and go display it
+
+160$:	wrtall	#fatal			; /BBS/ added this too..
+	wrtall	#osi.09			; /63/ "..high limit exceeds top.."
+	octout	@r2			; dump octal value to TT
+	wrtall	#osi.10			; /63/ ",  MAXTOP = "
+	octout	r0			; r0 still contains maxtop here
+	sub	@r2	,r0		; get diff for reporting
+
+170$:	wrtall	#osi.11			; /63/ <cr><lf>"You are "
+	neg	r0			; fix sign, args were flipped
+	call	plural			; display value and "word" or "words"
+	wrtall	#osi.12			; /63/ " from happiness.."<cr><lf>
+180$:	clr	r0			; do a hard exit (includes .hreset)
+	.exit
+
+plural:	asr	r0			; /BBS/ display size in words
+	mov	r0	,r1		; copy to test for singular/plural
+	call	L10266			; dump size to TT
+	wrtall	#osi.13			; /63/ ". word"
+	dec	r1			; just one word?
+	beq	190$			; ya, don't make it plural
+	wrtall	#osi.14			; /63/ no, add an "s"
+190$:	return
+
+
+	.sbttl	Allocate and init buffers
+
+; /BBS/	 NOTE:	if you add or change any buffer here you must also
+;		conform the constants from which TOTALL is derived
+;		at the top of this file
+
+A200$:	mov	@r2	,r0		; /62/ save top to clear when done
+	mov	#2	,r3		; offset into buflst
+	mov	#4	,r4		; /62/ four buffers to set up
+210$:	mov	@r2	,buflst(r3)	; setup our buffer addresses now
+	add	#maxsiz	,@r2		; fix freept up to point to next
+	add	#2	,r3		; point to next list entry
+	sob	r4	,210$		; /62/ simple
+	mov	@r2	,xklgbuf	; a special buffer for XC/XL/CL
+	add	#$allsiz,@r2		; add in the allocation now
+	mov	@r2	,albuff		; allocate this buffer
+	add	#alsize	,@r2		; and move the pointer up
+	mov	@r2	,dirnam		; allocate more static buffers
+	add	#82.	,@r2		; /62/ allow for max .csispc can do
+	mov	@r2	,dirbfr		; allocate more dir listing buffers
+	add	#200	,@r2		; /62/ and move on up
+	mov	@r2	,phnum		; save a phonenumber for REDIAL
+	add	#60	,@r2		; allocate it
+	mov	@r2	,bintyp		; more to go
+	add	#binlsiz,@r2		; binary file types list lives here
+	mov	@r2	,totp.s		; send packet stats
+	add	#34*2*2	,@r2		; 28. double precision numbers here
+	mov	@r2	,totp.r		; receive packet stats
+	add	#34*2*2	,@r2		; 28. double precision numbers here
+	mov	#ln$cnt	,r3		; recall buffer count
+	mov	#lastli	,r4		; where to stuff the addresses
+220$:	mov	@r2	,(r4)+		; command line editing
+	add	#ln$max+2,@r2		; move up
+	sob	r3	,220$		; keep going
+	mov	@r2	,cmdbuf		; insert command line buffer
+	add	#ln$max+2,@r2		; /63/ next
+	mov	@r2	,argbuf		; argument buffer
+	add	#ln$max+2,@r2		; /63/ next
+
+230$:	clr	(r0)+			; /62/ clear out now
+	cmp	r0	,@r2		; done?
+	blos	230$			; no
+
+	mov	r2	,fetpt		; yes, setup pointers for .fetch now
+	mov	@hilimit,fetptmax	; max address for .fetching
+	tst	vbgexe			; /62/ is VBGEXE running this program?
+	bne	240$			; /62/ ya
+	tst	montyp			; if this is XM, then we must
+	ble	240$			; force handlers into lowcore
+	mov	#xmflow	,xmfetpt	; ensure APR0 fetching
+	add	#3	,xmfetpt	; ensure
+	bic	#1	,xmfetpt	; .even
+	mov	#xmfetpt,fetpt		; now insert address of pointer
+	mov	#xmftop	,fetptmax	; this is the top of XM .fetch space
+	.br	240$			; /63/
+
+
+	.sbttl	Set/get terminal config..   ; /BBS/ moved here
+
+	TTMODE	= 20 ! 100 ! 10000 ! 40000  ; nosl ,nowait ,spec ,lc
+	$TCFIG	= 424			; offset to addr of term config word
+	$SCOPE	= 100000		; and its SET TT SCOPE bit
+
+240$:	bis	#ttmode	,@#jsw		; this pgm runs in single char mode
+	.rctrlo				; force read of new jsw..
+	mov	@#jsw	,ttparm		; save jsw
+	mov	sp	,remote		; /62/ assume remote mode
+
+	.lookup	#rtwork,#lun.sr,#dkblk	; get physical name of os's DK
+	bcs	250$			; failed..
+	.cstat	#rtwork,#lun.sr,#cstat	; get device data
+	bcs	250$			; failed..
+	calls	rdtoa	,<#dkname,cstat+12> ; device name
+	movb	cstat+10,r0		; get unit number
+	add	#'0	,r0		; convert to ascii
+	movb	r0	,dkname+2	; stuff unit number into name
+	movb	#':	,dkname+3	; tag it with a colon
+	clrb	dkname+4		; null terminate the string
+250$:	.purge	#lun.sr			; dump the channel to the device
+	strcpy	#defdir	,#dkname	; /62/ set default device name
+	mov	sp	,tt$io		; /62/ init with I/O through TT
+;
+; ---	use tried-and-true method to detect TSX+
+;
+	mov	#tsxlin	,r0		; load TSX get line number emt arg
+	emt	375			; try to get it
+	bcc	260$			; /62/ got it
+	jmp	350$			; /62/ if failed it's not TSX
+260$:	mov	r0	,tsxsav		; /BBS/ stash TSX line number here
+
+	movb	r0	,tsxj.l		; /62/ copy to check line status
+	mov	#tsxjob	,r0		; /62/ point to argument block
+	emt	375			; /62/ inquire
+	bcs	270$			; /62/ something failed..
+	bit	#2	,chkbuf		; /62/ is this a detached job?
+	beq	270$			; /62/ no
+	mov	#-1	,jobtyp		; /62/ ya, flag it
+
+270$:	mov	#tsxon	,r0		; /BBS/ TSX nowait TT input mode
+	emt	375			; /BBS/ enable it
+	mov	#tsxsin	,r0		; /BBS/ TSX single char activation
+	emt	375			; /BBS/ enable this too..
+
+	.gval	#rtwork	,#-4		; /BBS/ moved here, get TSX lead-in
+	cmpb	#35	,r0		; is it the default?
+	beq	290$			; ya..
+	movb	r0	,m.tsxr		; no, set in
+	movb	r0	,m.tsxs		; place
+
+	clr	r1			; /BBS/ start at first one
+	mov	#11.	,r2		; /BBS/ 11. of 'em to do
+280$:	movb	r0	,limits(r1)	; /BBS/ load lead-in char into init $
+	add	#3	,r1		; /BBS/ bump to next one
+	sob	r2	,280$		; /BBS/ and go do it
+
+290$:	wrtall	#m.tsxs			; /BBS/ kill LF after CR under TSX
+	.gval	#rtwork	,#ts.ver	; /BBS/ get TSX version
+	bcs	300$			; /BBS/ this doesn't work before V6.0
+	mov	r0	,tsxver		; /BBS/ save it
+
+300$:	.gval	#rtwork	,#curpri	; /BBS/ get current priority
+	mov	r0	,defpri		; /BBS/ save it
+	mov	r0	,cl.pri		; /BBS/ and init this
+
+	mov	#tsxtrm	,r0		; now get terminal type
+	emt	375			; do it
+	bcs	320$			; oops
+	clr	r1			; map terminal type now
+310$:	inc	r1			; next please
+	tstb	trmlst-1(r1)		; end of the list yet?
+	bmi	320$			; yes
+	cmpb	r0	,trmlst-1(r1)	; no, a match?
+	bne	310$			; no, keep looking
+	asl	r1			; /BBS/ word index here
+	mov	trmtyp-2(r1),vttype	; save internal code for TT type
+	cmp	vttype	,#vt200		; /BBS/ is it an 8-bit terminal?
+	bne	320$			; /BBS/ nope ..
+	mov	sp	,con8bit	; /BBS/ ya, do this for CONNECT
+320$:	mov	tsxsav	,r0		; /BBS/ recover line number
+	dec	r0			; which line (1=console) is this?
+	bne	340$			; not console
+	.dstat	#rtwork	,#pi.r50	; console, see if this is a PRO
+	bcs	340$			; can't be
+	mov	#cl0text,r1		; for the strcpy
+	mov	#cl0asn	,r0		; try to assign
+	emt	375			; line 3 to CL0
+	bcc	330$			; success
+	mov	#cl1text,r1		; for the strcpy
+	mov	#cl1asn	,r0		; CL0 is busy,
+	emt	375			; try CL1
+	bcs	340$			; CL0 and CL1 are busy (unlikely)
+330$:	calls	assdev	,<r1>		; /BBS/ assign the device
+	tst	r0			; /BBS/ ok?
+	bne	340$			; /BBS/ no
+	clr	remote			; say we are a local Kermit
+	strcpy	#ttname	,r1		; copy the CL name
+	mov	#3	,cl$line	; /BBS/ save line # for defterm
+	mov	sp	,z.atch		; /BBS/ flag assign done by Kermit
+340$:	return				; /62/
+
+350$:	.gval	#rtwork	,#$tcfig	; get term config word address
+	cmp	rt11ver	,#5		; /62/ is this RT-11 V5 or above?
+	bge	360$			; /62/ ya, .peek will work
+	tst	montyp			; /62/ if XM and V4..
+	bgt	380$			; /62/ ..tough luck
+	mov	(r0)	,r0		; /62/ otherwise, this is it
+	br	370$
+360$:	mov	r0	,r1		; save copy for peek
+; /62/	.peek	#rtwork	,r1		; got to do it this way for XM!
+	MOV	#rtwork	,R0		; /62/ expanded for assy under V4
+	MOV	#28.*^o400+1.,@R0	; /62/ even though V4 can't run it
+	MOV	r1	,2.(R0)		; /62/
+	EMT	^o375			; /62/
+370$:	mov	r0	,ttpar2		; save it
+	bit	#$scope	,r0		; hard copy terminal?
+	beq	380$			; ya
+	mov	#vt100	,vttype		; no, make it a VT-100
+380$:	mov	#par$space,parity	; /BBS/ force 8-bit quoting for RT-11
+	.dstat	#rtwork	,#xc.r50	; /39/ check for KM, XC or XL
+	bcc	390$			; /39/ found it
+	.dstat	#rtwork	,#xl.r50	; /39/ no XC, try XL
+	bcc	390$			; /39/ found it
+	.dstat	#rtwork	,#km.r50	; /62/ no XL, try KM
+	bcc	390$			; /62/ found it
+	wrtall	#noxcmt			; /39/ No, warn user of such fact
+	mov	#60.	,senlen		; /62/ console port won't XOFF fast
+	movb	#60.	,senpar+p.spsiz	; /62/ enough, do receive size too
+	clr	dolong			; /BBS/ can't do long packets now..
+
+390$:	tst	jobsts			; /54/ FRUNed?
+	beq	400$			; /54/ no
+	clr	blip			; /54/ yes, no packet status display
+	wrtall	#nolog			; /54/ inform
+	br	410$			; /BBS/ can't fetch from foreground
+
+400$:	tst	vbgexe			; /62/ any hope getting a good number?
+	bne	410$			; /62/ not if VBGEXE runs the program
+	mov	fetptmax,-(sp)		; /BBS/ this is top of memory, which
+	sub	@fetpt	,@sp		; /BBS/ minus top of program + buffers
+	mov	(sp)+	,r0		; /BBS/ = what's left for handlers
+	call	plural			; /BBS/ display it
+	wrtall	#osi.15			; /63/ " free to load hand.."<cr><lf>
+410$:	return
+
+	.end

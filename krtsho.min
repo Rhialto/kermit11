@@ -1,0 +1,830 @@
+	.title	KRTSHO.MIN  The SHOW command
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTCDF.MIN"
+	.iif ndf  KRTCDF  .error 	<; .include for IN:KRTCDF.MIN failed>
+
+	.mcall	.PURGE
+
+
+	.psect	$code
+	.sbttl	SHOW command processor
+	.enabl	lsb
+
+c$show::tstb	@argbuf
+	beq	103$
+	upcase	argbuf
+	calls	getcm0	,<argbuf,#sholst>
+	tst	r0
+	bmi	110$
+	tst	wasnul
+	bne	199$
+	jsr	pc	,@r1
+199$:	clr	r0
+	return
+
+103$:	call	sho$df
+	br	199$
+
+110$:	cmp	r0	,#cmd$un
+	bne	189$
+	mov	#er$tam	,r0
+	br	190$
+189$:	mov	#er$tun	,r0
+190$:	direrr	r0
+	return
+
+	.dsabl	lsb
+
+	$CMGLOB	= 1
+
+command	sholst	,ALL		,2   ,sho$al
+command	sholst	,ASSIGNS	,2   ,sho$df
+command	sholst	,ATTRIBUTES	,2   ,sho$at
+command	sholst	,BINARY_TYPE	,2   ,sho$bt
+command	sholst	,BLOCK_CHECK_TYPE ,2 ,sho$bl
+command	sholst	,DEBUG		,3   ,sho$de
+command	sholst	,DEFAULT	,3   ,sho$df
+command	sholst	,DELAY		,3   ,sho$dl
+command	sholst	,FILE_TYPE	,1   ,sho$fi
+command	sholst	,INCOMPLETE_FILE_DISPOSITION ,1 ,sho$in
+command	sholst	,LINE		,1   ,sho$li
+command	sholst	,PACKET		,3   ,sho$pk
+command	sholst	,PARAMETERS	,3   ,sho$pa
+command	sholst	,PARITY		,3   ,sho$pr
+command	sholst	,PAUSE		,3   ,sho$ps
+command	sholst	,REPEAT_QUOTING	,3   ,sho$rp
+command	sholst	,RETRY		,3   ,sho$rt
+command	sholst	,SERVER		,2   ,sho$sv
+command	sholst	,SL		,2   ,sho$sl
+command	sholst	,START_OF_PACKET,2   ,sho$so
+command	sholst	,TERMINAL	,1   ,sho$tt
+command	sholst	,TIME_OUT	,2   ,sho$to
+command	sholst	,TT:		,2   ,sho$tt
+command	sholst	,VERSION	,2   ,sho$ve
+command	sholst
+
+
+	.sbttl	SHOW ALL
+
+sho$al:	call	sho$ve
+	call	sho$li
+	call	sho$tt
+	call	sho$at
+	call	sho$bt
+	call	sho$de
+	call	sho$fi
+	call	sho$in
+	call	sho$bl
+	call	sho$pa
+	jmp	sho$yy
+
+
+	.sbttl	SHOW DEBUG
+	.enabl	lsb
+
+sho$de:	tst	trace
+	bne	10$
+	message	<No debugging or logging is active>,cr
+	br	100$
+
+10$:	clr	r0
+20$:	tst	200$(r0)
+	beq	70$
+	wrtall	205$(r0)
+	bit	200$(r0),trace
+	beq	30$
+	message	< ENABLED>
+	br	40$
+30$:	message	< disabled>
+40$:	.newline
+	tst	(r0)+
+	br	20$
+
+70$:	bit	#log$op	,trace
+	beq	73$
+	message	<Logfile is >
+	wrtall	#logfil
+	message	<, cur/max blk: >
+	mov	#lun.lo	,r1
+	asl	r1
+	mov	blknum(r1),r0
+	call	L10266
+	message	</>
+	mov	sizof(r1),r0
+	call	L10266
+	br	79$
+73$:	message	<No LOGFILE is open>
+79$:	.newline
+100$:	return
+
+	.save
+	.psect	$pdata
+200$:	.word	log$pa	,log$io	,0
+205$:	.word	220$	,230$
+220$:	.asciz	"Packet logging to logfile:"
+230$:	.asciz	"Raw  Binary  I/O  logging:"
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	SHOW DEFAULT, SHOW HOME
+	.enabl	lsb
+
+c$pwd::
+sho$df::call	sho$xx
+	br	sho$yy
+
+sho$xx:	wrtall	#hoslug
+	wrtall	#dkname
+	.newline
+	br	1$
+
+c$home::strcpy	#defdir	,#dkname
+sho$yy::wrtall	#dkslug
+	wrtall	#defdir
+	.newline
+1$:	clr	r0
+	return
+
+	.save
+	.psect	$pdata
+hoslug:	.asciz	"HOME--> "
+dkslug:	.asciz	"DK  --> "
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	SHOW VERSION
+	.enabl	lsb
+
+sho$ve::wrtall	#100$
+	wrtall	#sho.ve
+	.newline
+	return
+
+	.save
+	.psect	$pdata
+100$:	.ascii	"Kermit-11 for RX-based nonEIS RT-11SB,SJ,FB  "
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	SHOW FILE_TYPE
+	.enabl	lsb
+
+sho$fi:	wrtall	#210$
+	tst	doauto
+	beq	1$
+	mov	#220$	,r0
+	br	20$
+1$:	mov	$image	,r0
+	asl	r0
+	mov	200$(r0),r0
+20$:	wrtall	r0
+	.newline
+	wrtall	#260$
+	tst	filprot
+	beq	26$
+	mov	#270$	,r0
+	br	27$
+26$:	mov	#300$	,r0
+27$:	wrtall	r0
+	.newline
+	wrtall	#350$
+	tst	rtvol
+	beq	130$
+	mov	#330$	,r0
+	br	139$
+130$:	mov	#320$	,r0
+139$:	wrtall	r0
+	.newline
+	wrtall	#360$
+	tst	csi.fake
+	beq	140$
+	mov	#400$	,r0
+	br	199$
+140$:	mov	#370$	,r0
+199$:	wrtall	r0
+	.newline
+	wrtall	#410$
+	mov	en$siz	,r0
+	call	L10266
+	.newline
+	wrtall	#420$
+	wrtall	#ininam
+	.newline
+	return
+
+	.save
+	.psect	$pdata
+200$:	.word	230$ ,240$ ,250$
+210$:	.asciz	"FILE_TYPE set to "
+220$:	.asciz	"Auto ASCII/Binary"
+230$:	.asciz	"ASCII"
+240$:	.asciz	"BINARY (fixed 512, no carriage control)"
+250$:	.asciz	"DEC_Multinational (8-bit text)"
+260$:	.asciz	"Existing file protection: "
+270$:	.asciz	"ENABLED"
+300$:	.asciz	"disabled"
+320$:	.asciz	"DISABLED"
+330$:	.asciz	"enabled"
+350$:	.asciz	"Volume  verification  is: "
+360$:	.asciz	"Local comma CSI_Parsing:  "
+370$:	.asciz	"real"
+400$:	.asciz	"EMULATED"
+410$:	.asciz	"File create_size blocks:  "
+420$:	.asciz	"Init file: "
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	 SHOW BLOCK_CHECK_TYPE
+	.enabl	lsb
+
+sho$bl:	wrtall	#105$
+	movb	setchkt	,r0
+	sub	#'1	,r0
+	asl	r0
+	wrtall	100$(r0)
+	.newline
+	return
+
+	.save
+	.psect	$pdata
+100$:	.word	110$ ,120$ ,130$
+105$:	.asciz	"Block_check_type: "
+110$:	.asciz	"1_Byte_Checksum"
+120$:	.asciz	"2_Byte_Checksum"
+130$:	.asciz	"3_Byte_CRC_CCITT"
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	SHOW INCOMPLETE_FILE_DISPOSITION
+	.enabl	lsb
+
+sho$in:	message	<Incomplete_file_disposition: >
+	tst	incfile
+	bne	1$
+	message	<KEEP>
+	br	3$
+1$:	message	<discard>
+3$:	.newline
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SHOW PARAMETERS
+
+sho$pa:	call	sho$pk
+	call	sho$dl
+	call	sho$ps
+	call	sho$to
+	jmp	sho$rt
+
+
+	.sbttl	SHOW PACKET
+	.enabl	lsb
+
+sho$pk:	call	sho$so
+	message	<RECEIVE  conpar+p.eol   EOL  >
+	clr	-(sp)
+	bisb	conpar+p.eol,@sp
+	mov	sp	,r0
+	call	unfmts
+	wrtall	r0
+	call	tag.it
+	clr	(sp)
+	bisb	senpar+p.eol,@sp
+	message	<SEND     senpar+p.eol   EOL  >
+	mov	sp	,r0
+	call	unfmts
+	wrtall	r0
+	call	tag.it
+	tst	(sp)+
+	message	<RECEIVE nominal packet  LEN>
+	movb	conpar+p.spsiz,r0
+	decout	r0
+	.newline
+	message	<SEND    nominal packet  LEN>
+	movb	senpar+p.spsiz,r0
+	decout	r0
+	.newline
+	message	<SEND  set packet limit  LEN>
+	decout	senlen
+	.newline
+	message	<LONG_PACKETS set locally to>
+	tst	dolong
+	bne	1$
+	message	<   OFF>
+	br	2$
+1$:	decout	reclng
+2$:	.newline
+	message	<LONG_PACKETS _received_ LEN>
+	decout	senlng
+	.newline
+	message	<LONG_PACKETS max avail buff>
+	decout	#maxlng
+	.newline
+	return
+
+
+	.sbttl	SHOW TIME_OUT
+
+sho$to:	message	<TIME_OUT  REC  seconds wait>
+	decout	rectim
+	.newline
+	message	<TIME_OUT  SEND seconds wait>
+	decout	sentim
+	.newline
+	message	<TIME_OUT _received_ seconds>
+	movb	conpar+p.time,r0
+	decout	r0
+	.newline
+	return
+
+
+	.sbttl	SHOW RETRY
+
+sho$rt:	message	<RETRY initial_connect limit>
+	decout	initry
+	.newline
+	message	<RETRY max for other packets>
+	decout	maxtry
+	.newline
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Display a control char in "^n" notation
+
+tag.it:	message	<  ^>
+	mov	2(sp)	,r0
+	movb	lis.ct(r0),r0
+	call	writ1char
+	.newline
+	return
+
+	.save
+	.psect	$pdata
+lis.ct:	.ascii	"@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]~?"
+	.even
+	.restore
+
+
+	.sbttl	STATUS
+	.enabl	lsb
+
+c$stat::sub	#120	,sp
+	wrtall	#300$
+	clr	r3
+	mov	#27.	,r4
+	mov	sp	,r5
+	br	15$
+
+10$:	mov	sp	,r5
+	tst	pcnt.r+2(r3)
+	bne	15$
+	tst	pcnt.s+2(r3)
+	bne	15$
+	mov	totp.s	,r1
+	add	r3	,r1
+	tst	2(r1)
+	bne	15$
+	mov	totp.r	,r1
+	add	r3	,r1
+	tst	2(r1)
+	beq	90$
+15$:	mov	r5	,r1
+	mov	#110	,r2
+20$:	movb	#space	,(r1)+
+	sob	r2	,20$
+	mov	r3	,r1
+	beq	30$
+	asr	r1
+	asr	r1
+	add	#100	,r1
+	movb	r1	,(r5)+
+	br	40$
+30$:	movb	#'A&137	,(r5)+
+	movb	#'L&137	,(r5)
+	movb	#'L&137	,1(r5)
+40$:	add	#5	,r5
+	mov	#pcnt.s	,r1
+	call	200$
+	mov	#pcnt.r	,r1
+	call	200$
+	mov	totp.s	,r1
+	call	200$
+	mov	totp.r	,r1
+	call	200$
+	movb	#cr	,(r0)+
+	movb	#lf	,(r0)+
+	clrb	@r0
+	mov	sp	,r0
+	wrtall	r0
+90$:	add	#4	,r3
+	dec	r4
+	beq	99$
+	jmp	10$
+
+99$:	clr	txflag
+	wrtall	#310$
+	mov	sp	,r4
+	message	<Bytes >
+	tst	charout
+	bne	70$
+	tst	charout+2
+	beq	77$
+70$:	message	<sent:    >
+	mov	#charout,r1
+	mov	sp	,txflag
+	br	79$
+77$:	message	<received:>
+	mov	#charin	,r1
+79$:	call	190$
+
+	message	<For data bytes:>
+	tst	txflag
+	bne	83$
+	mov	#filein	,r1
+	br	85$
+83$:	mov	#fileout,r1
+85$:	call	190$
+100$:	add	#120	,sp
+	clr	r0
+	return
+
+190$:	clr	r2
+	mov	r4	,r0
+	call	$cddmg
+	movb	#cr	,(r0)+
+	movb	#lf	,(r0)+
+	clrb	@r0
+	sub	r4	,r0
+	sub	#15	,r0
+	neg	r0
+	mov	r0	,r2
+	mov	#space	,r0
+193$:	call	writ1ch
+	sob	r2	,193$
+	wrtall	r4
+	return
+
+200$:	add	r3	,r1
+	clr	r2
+	mov	r5	,r0
+	call	$cddmg
+	add	#14	,r5
+	return
+
+	.save
+	.psect	$rwdata	,rw,d,lcl,rel,con
+txflag:	.word	0
+
+	.psect	$pdata
+300$:	.ascii	" ----------------- Packet Stats -----------------"<cr><lf>
+	.asciz	"Type  Last Sent   Last Rec    Prev Sent   Prev Rec"<cr><lf>
+310$:	.asciz	" --- Last Transaction ---"<cr><lf>
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	SHOW DELAY, SHOW PAUSE
+
+sho$ps:	message	<PAUSE secs before send_pack>
+	decout	pauset
+	.newline
+	return
+
+sho$dl:	message	<DELAY secs before send_init>
+	decout	sendly
+	.newline
+	return
+
+
+	.sbttl	SHOW PARITY
+
+sho$pr:	message	<S/W Parity is set >
+	mov	parity	,r0
+	asl	r0
+	wrtall	parlst(r0)
+	.newline
+	return
+
+	.save
+	.psect	$pdata
+parlst:	.word	5$ ,10$ ,20$ ,30$ ,40$
+5$:	.asciz	"NONE"
+10$:	.asciz	"ODD"
+20$:	.asciz	"EVEN"
+30$:	.asciz	"MARK"
+40$:	.asciz	"SPACE"
+	.even
+	.restore
+
+
+	.sbttl	SHOW TERMINAL, SHOW ATTRIBUTES
+	.enabl	lsb
+
+sho$tt:	mov	vttype	,r0
+	message	<Terminal is set >
+	asl	r0
+	wrtall	ttlst(r0)
+	message	<, >
+	tst	infomsg
+	beq	10$
+	message	<NO>
+10$:	message	<QUIET, >
+	call	sho$sl
+	return
+
+sho$at:	message	<Attribute packet transmission is >
+	tst	doattr
+	bne	39$
+	message	<DISABLED>
+	br	40$
+39$:	message	<ENABLED>
+40$:	.newline
+	return
+
+	.save
+	.psect	$pdata
+ttlst:	.word	1$ ,2$ ,3$ ,4$
+1$:	.asciz	"NOSCOPE"
+2$:	.asciz	"TTY"
+3$:	.asciz	"VT100"
+4$:	.asciz	"VT200"
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	SHOW START_OF_PACKET
+
+sho$so:	message	<RECEIVE start of packet SOH  >
+	mov	recsop	,-(sp)
+	bic	#^c177	,@sp
+	mov	sp	,r0
+	call	unfmts
+	wrtall	r0
+	call	tag.it
+	message	<SEND    start of packet SOH  >
+	mov	sensop	,@sp
+	bic	#^c177	,@sp
+	mov	sp	,r0
+	call	unfmts
+	wrtall	r0
+	call	tag.it
+	tst	(sp)+
+	return
+
+
+	.sbttl	SHOW BINARY_TYPE
+	.enabl	lsb
+
+	HOWIDE	=	10.
+
+sho$bt:	message	<BINARY_TYPE file extents: >
+	mov	bintyp	,r1
+20$:	mov	#howide	,r2
+	.newline
+30$:	tstb	@r1
+	beq	40$
+	message	< *>
+	mov	#4	,r3
+33$:	movb	(r1)+	,r0
+	call	writ1char
+	sob	r3	,33$
+	sob	r2	,30$
+	br	20$
+40$:	cmp	#howide	,r2
+	beq	100$
+	.newline
+100$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SHOW SL
+	.enabl	lsb
+
+sho$sl::message	<SL status: >
+	tst	sl.on
+	bne	1$
+	message	<OFF>
+	br	2$
+1$:	message	<ON>
+2$:	mov	#comma	,r0
+	call	writ1char
+	tst	sl.ked
+	bne	3$
+	message	<NO>
+3$:	message	<KED>
+	.newline
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SHOW SERVER
+
+sho$sv:	message	<Server time_out: >
+	mov	serwait	,r0
+	call	L10266
+	message	< seconds>,cr
+	return
+
+
+	.sbttl	SHOW REPEAT_QUOTING
+	.enabl	lsb
+
+sho$rp:	message	<Repeated character quoting: >
+	tst	setrpt
+	bne	10$
+	message	<DISABLED>
+	br	100$
+10$:	message	<enabled>
+100$:	.newline
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	The RENAME command
+	.enabl	lsb
+
+c$rena::upcase	argbuf
+	call	gettwo
+	tst	r0
+	bne	100$
+	upcase	argbuf
+	calls	rename	,<cmdbuf,argbuf>
+	tst	r0
+	bne	90$
+	tst	infomsg
+	beq	100$
+	wrtall	#srcnam
+	wrtall	#290$
+	wrtall	#filnam
+	.newline
+	br	100$
+90$:	direrr	r0
+100$:	return
+
+	.save
+	.psect	$pdata
+290$:	.asciz	" renamed to "
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	The DELETE command
+	.enabl	lsb
+
+c$del::	upcase	argbuf
+	calls	delete	,<argbuf>
+	tst	r0
+	bne	90$
+	tst	infomsg
+	beq	100$
+	wrtall	#srcnam
+	wrtall	#290$
+	br	100$
+90$:	direrr	r0
+100$:	return
+
+	.save
+	.psect	$pdata
+290$:	.asciz	" deleted"<cr><lf>
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	PRINT, COPY commands
+	.enabl	lsb
+
+c$prin::upcase	argbuf
+	strcpy	cmdbuf	,argbuf
+	scan	#'.	,cmdbuf
+	tst	r0
+	bne	2$
+	strcat	cmdbuf	,#typdef
+2$:	strcpy	argbuf	,#200$
+	br	c.print
+
+c$copy::upcase	argbuf
+	call	gettwo
+	tst	r0
+	bne	100$
+	upcase	argbuf
+
+c.print:mov	argbuf	,r2
+	calls	namcvt	,<r2,#spare1>
+	tstb	spare1
+	bne	19$
+	calls	namcvt	,<cmdbuf,#spare1>
+	strcat	r2	,#spare1
+19$:	calls	fparse	,<cmdbuf,#srcnam>
+	clr	index
+	calls   lookup  ,<#srcnam,#spare1>
+	.purge	#lun.sr
+	calls	copy	,<cmdbuf,r2>
+	tst	r0
+	bne	40$
+	tst	infomsg
+	beq	100$
+	mov	r1	,r0
+	call	L10266
+	wrtall	#210$
+	dec	r1
+	beq	30$
+	mov	#'s!40	,r0
+	call	writ1char
+30$:	wrtall	#220$
+	wrtall	#filnam
+	.newline
+	clr	r0
+	br	100$
+40$:	direrr	r0
+100$:	return
+
+	.save
+	.psect	$pdata
+200$:	.asciz	"LP:"
+210$:	.asciz	" block"
+220$:	.asciz	" copied to "
+typdef:	.asciz	".LST"
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Get second argument for a command
+	.enabl	lsb
+
+	CVTARG	= C.CRLF ! C.LSPA ! C.SSPA ! C.TSPA
+
+gettwo::save	<r1,r2>
+	mov	argbuf	,r2
+	tstb	@r2
+	beq	100$
+	dec	r2
+10$:	inc	r2
+	tstb	@r2
+	beq	20$
+	cmpb	@r2	,#space
+	bne	10$
+	clrb	(r2)+
+	strcpy	cmdbuf	,argbuf
+	strcpy	argbuf	,r2
+	br	30$
+
+20$:	mov	argbuf	,r2
+	strcpy	cmdbuf	,r2
+	calls	readcmd	,<r2,#200$>
+	tst	r0
+	bne	100$
+	calls	cvt$$	,<r2,r1,#cvtarg>
+	tst	r0
+	beq	20$
+	add	r2	,r0
+	clrb	@r0
+30$:	clr	r0
+100$:	unsave	<r2,r1>
+	return
+
+	.save
+	.psect	$pdata
+200$:	.asciz	"To: "
+	.even
+	.restore
+
+	.dsabl	lsb
+
+	.end

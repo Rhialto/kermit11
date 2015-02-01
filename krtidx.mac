@@ -1,0 +1,709 @@
+	.title	KRTIDX	HELP RMS Index	27-Sep-97  15:34:33
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	moved this into a module of its own as KRTHLP was > 4096. words
+
+
+	.psect	$code	,ro,i,lcl,rel,con
+	.sbttl	Pass top of index back to caller
+
+loahlp::mov	#hlphead,r0		; calling this also loads this overlay
+	return
+
+
+	.psect	$pdata	,ro,d,lcl,rel,con
+	.sbttl	Fake RMS for help text file under RT-11
+
+;	Note here the "block" and "offset" point to the first line FOLLOWING
+;	the topic/subtopic line in the help text file (KRTHLP.HLP).  In other
+;	words, these data point to the first byte of the help text itself for
+;	the indicated topic or subtopic, which is directly AFTER the <cr><lf>
+;	tag on the topic/subtopic line.
+
+hident::.asciz	"V03.63 27-Sep-1997"
+	.even
+
+	;	address	,block	,offset	,string
+hlphead:.word	L1$	,0.	,25.	; 1 ?
+	.word	L2$	,0.	,305.	; 1 @
+	.word	L3$	,1.	,272.	; 1 ASCII-Set
+	.word	L4$	,6.	,414.	; 1 ASSIGN
+	.word	L5$	,7.	,129.	; 1 Binary-Files
+	.word	L6$	,11.	,109.	; 1 BUG
+	.word	L7$	,11.	,193.	; 1 BYE
+	.word	L8$	,11.	,225.	; 1 CD
+	.word	L9$	,12.	,115.	; 1 Character-Sets
+	.word	L10$	,12.	,263.	; 1 CLS
+	.word	L11$	,12.	,390.	; 1 CLX
+	.word	L12$	,12.	,481.	; 1 Common-Problems
+	.word	L13$	,18.	,28.	; 1 CONNECT
+	.word	L14$	,23.	,194.	; 1 Control-Chars
+	.word	L15$	,26.	,135.	; 1 COPY
+	.word	L16$	,26.	,363.	; 1 CWD
+	.word	L17$	,26.	,393.	; 1 DATE
+	.word	L18$	,26.	,483.	; 1 DAYTIME
+	.word	L19$	,27.	,26.	; 1 Debugging
+	.word	L20$	,28.	,381.	; 1 DELETE
+	.word	L21$	,29.	,69.	; 1 DIAL
+	.word	L22$	,33.	,343.	; 1 DIRECTORY
+	.word	L23$	,34.	,485.	; 1 DISCONNECT
+	.word	L24$	,35.	,11.	; 1 DISMOUNT
+	.word	L25$	,35.	,243.	; 1 EXAMINE
+	.word	L26$	,36.	,360.	; 1 EXIT
+	.word	L27$	,37.	,6.	; 1 File-Format-Info
+	.word	L28$	,49.	,420.	; 1 FINISH
+	.word	L29$	,50.	,55.	; 1 GET
+	.word	L30$	,55.	,411.	; 1 HANGUP
+	.word	L31$	,56.	,378.	; 1 HELP
+	.word	L32$	,58.	,48.	; 1 HOME
+	.word	L33$	,58.	,215.	; 1 HPRINT
+	.word	L34$	,59.	,379.	; 1 Installation-Notes
+	.word	L35$	,70.	,418.	; 2 Files-Required
+	.word	L36$	,77.	,68.	; 2 KM
+	.word	L37$	,82.	,401.	; 2 KRT.INI-Examples
+	.word	L38$	,86.	,101.	; 2 Modems
+	.word	L39$	,92.	,258.	; 3 Anchor
+	.word	L40$	,96.	,124.	; 3 Hayes-MNP
+	.word	L41$	,96.	,479.	; 3 Telebit-T2500
+	.word	L42$	,104.	,199.	; 3 Telebit-T3000
+	.word	L43$	,107.	,377.	; 3 US-Robotics
+	.word	L44$	,111.	,314.	; 2 RT-11
+	.word	L45$	,121.	,14.	; 2 TSX-Plus
+	.word	L46$	,133.	,58.	; 1 Introduction
+	.word	L47$	,140.	,305.	; 1 Local-vs-Remote
+	.word	L48$	,143.	,175.	; 1 LOGFILE
+	.word	L49$	,145.	,128.	; 1 LOGOUT
+	.word	L50$	,145.	,343.	; 1 Long-Packets
+	.word	L51$	,148.	,255.	; 1 MILNET-TAC
+	.word	L52$	,148.	,386.	; 2 Binary-Files
+	.word	L53$	,149.	,508.	; 2 Flow-Control
+	.word	L54$	,152.	,93.	; 2 Intercept-Character
+	.word	L55$	,153.	,4.	; 2 Time-Outs
+	.word	L56$	,153.	,233.	; 1 Modems
+	.word	L57$	,153.	,508.	; 1 MOUNT
+	.word	L58$	,155.	,323.	; 1 Parity
+	.word	L59$	,158.	,403.	; 1 PRINT
+	.word	L60$	,159.	,322.	; 1 PWD
+	.word	L61$	,159.	,464.	; 1 QUIT
+	.word	L62$	,159.	,499.	; 1 RECEIVE
+	.word	L63$	,163.	,493.	; 1 REDIAL
+	.word	L64$	,166.	,116.	; 1 Release-Notes
+	.word	L65$	,167.	,263.	; 2 KRTCDF.MAC
+	.word	L66$	,167.	,420.	; 2 KRTCMD.MAC
+	.word	L67$	,168.	,78.	; 2 KRTCM1.MAC
+	.word	L68$	,168.	,282.	; 2 KRTCOM.MAC
+	.word	L69$	,168.	,407.	; 2 KRTCON.MAC
+	.word	L70$	,169.	,27.	; 2 KRTCVT.MAC
+	.word	L71$	,169.	,192.	; 2 KRTDAT.MAC
+	.word	L72$	,169.	,277.	; 2 KRTDIA.MAC
+	.word	L73$	,169.	,454.	; 2 KRTDIR.MAC
+	.word	L74$	,170.	,57.	; 2 KRTEDI.MAC
+	.word	L75$	,170.	,207.	; 2 KRTERM.MAC
+	.word	L76$	,170.	,279.	; 2 KRTERR.MAC
+	.word	L77$	,170.	,421.	; 2 KRTHLP.MAC
+	.word	L78$	,171.	,108.	; 2 KRTIDX.MAC
+	.word	L79$	,171.	,197.	; 2 KRTKM.MAC
+	.word	L80$	,173.	,40.	; 2 KRTMAC.MAC
+	.word	L81$	,173.	,220.	; 2 KRTMDM.MAC
+	.word	L82$	,173.	,503.	; 2 KRTOSI.MAC
+	.word	L83$	,174.	,69.	; 2 KRTPAK.MAC
+	.word	L84$	,174.	,404.	; 2 KRTREC.MAC
+	.word	L85$	,175.	,115.	; 2 KRTRMS.MAC
+	.word	L86$	,175.	,369.	; 2 KRTSEN.MAC
+	.word	L87$	,176.	,256.	; 2 KRTSER.MAC
+	.word	L88$	,177.	,99.	; 2 KRTSHO.MAC
+	.word	L89$	,177.	,382.	; 2 KRTSTD.MAC
+	.word	L90$	,177.	,447.	; 2 KRTST0.MAC
+	.word	L91$	,178.	,77.	; 2 KRTST1.MAC
+	.word	L92$	,178.	,415.	; 2 KRTSUB.MAC
+	.word	L93$	,178.	,495.	; 2 KRTXMO.MAC
+	.word	L94$	,179.	,59.	; 1 REMOTE
+	.word	L95$	,179.	,486.	; 2 CD
+	.word	L96$	,180.	,180.	; 2 COPY
+	.word	L97$	,181.	,209.	; 2 CWD
+	.word	L98$	,181.	,248.	; 2 DELETE
+	.word	L99$	,181.	,409.	; 2 DIRECTORY
+	.word	L100$	,182.	,169.	; 2 HELP
+	.word	L101$	,182.	,221.	; 2 HOST
+	.word	L102$	,182.	,489.	; 2 LOGIN
+	.word	L103$	,183.	,350.	; 2 RENAME
+	.word	L104$	,184.	,22.	; 2 SPACE
+	.word	L105$	,184.	,162.	; 2 TYPE
+	.word	L106$	,184.	,322.	; 2 WHO
+	.word	L107$	,184.	,476.	; 1 RENAME
+	.word	L108$	,185.	,52.	; 1 SEND
+	.word	L109$	,190.	,476.	; 1 SERVER
+	.word	L110$	,195.	,263.	; 1 SET
+	.word	L111$	,196.	,9.	; 2 ATTRIBUTES
+	.word	L112$	,198.	,437.	; 3 ALL
+	.word	L113$	,199.	,62.	; 3 DATE
+	.word	L114$	,199.	,321.	; 3 EXACT-LENGTH
+	.word	L115$	,199.	,489.	; 3 LENGTH
+	.word	L116$	,200.	,44.	; 3 OFF
+	.word	L117$	,200.	,199.	; 3 ON
+	.word	L118$	,200.	,366.	; 3 PROTECTION
+	.word	L119$	,201.	,43.	; 3 SYSTEM-ID
+	.word	L120$	,201.	,131.	; 3 SYSTEM-INFO
+	.word	L121$	,201.	,326.	; 3 TYPE
+	.word	L122$	,201.	,401.	; 2 BAUD
+	.word	L123$	,201.	,445.	; 2 BINARY-TYPE
+	.word	L124$	,202.	,408.	; 2 BLOCK-CHECK-TYPE
+	.word	L125$	,204.	,174.	; 2 CL:
+	.word	L126$	,212.	,310.	; 2 CONSOLE
+	.word	L127$	,213.	,30.	; 3 7-BIT
+	.word	L128$	,213.	,261.	; 3 8-BIT
+	.word	L129$	,213.	,383.	; 3 BREAK
+	.word	L130$	,213.	,471.	; 3 MILNET
+	.word	L131$	,214.	,257.	; 3 PRIORITY
+	.word	L132$	,215.	,455.	; 2 CONTROL-CHARACTER
+	.word	L133$	,228.	,263.	; 3 PREFIXED
+	.word	L134$	,229.	,54.	; 3 UNPREFIXED
+	.word	L135$	,229.	,473.	; 2 DEBUG
+	.word	L136$	,230.	,414.	; 3 ALL
+	.word	L137$	,230.	,457.	; 3 CONSOLE
+	.word	L138$	,231.	,264.	; 3 CONNECT
+	.word	L139$	,231.	,309.	; 3 NONE
+	.word	L140$	,232.	,0.	; 3 NORPACK
+	.word	L141$	,232.	,255.	; 3 NOTERMINAL
+	.word	L142$	,232.	,441.	; 3 NOTT:
+	.word	L143$	,232.	,488.	; 3 OFF
+	.word	L144$	,233.	,222.	; 3 ON
+	.word	L145$	,233.	,326.	; 3 PACKET
+	.word	L146$	,236.	,274.	; 3 RAW
+	.word	L147$	,236.	,441.	; 3 RPACK
+	.word	L148$	,238.	,141.	; 3 TERMINAL
+	.word	L149$	,239.	,39.	; 3 TT:
+	.word	L150$	,239.	,88.	; 2 DEFAULT
+	.word	L151$	,239.	,227.	; 2 DELAY
+	.word	L152$	,239.	,471.	; 2 DIAL
+	.word	L153$	,253.	,413.	; 3 ABORT
+	.word	L154$	,254.	,216.	; 3 ANSWER
+	.word	L155$	,255.	,58.	; 3 BINARY-RESPONSE
+	.word	L156$	,255.	,331.	; 3 BLIND
+	.word	L157$	,256.	,81.	; 3 COMMENT
+	.word	L158$	,256.	,343.	; 3 CON300
+	.word	L159$	,257.	,99.	; 3 CON1200
+	.word	L160$	,257.	,349.	; 3 CON2400
+	.word	L161$	,258.	,87.	; 3 CON4800
+	.word	L162$	,258.	,337.	; 3 CON9600
+	.word	L163$	,259.	,136.	; 3 CON19200
+	.word	L164$	,259.	,435.	; 3 CON38400
+	.word	L165$	,260.	,177.	; 3 CONFIRM
+	.word	L166$	,260.	,444.	; 3 CONFIRM-ACKNOWLEDGE
+	.word	L167$	,261.	,292.	; 3 DIAL-ACKNOWLEDGE
+	.word	L168$	,262.	,46.	; 3 DIAL-PAUSE
+	.word	L169$	,263.	,102.	; 3 DIAL-RATE
+	.word	L170$	,263.	,432.	; 3 ECHO
+	.word	L171$	,264.	,210.	; 3 FAILURE
+	.word	L172$	,264.	,501.	; 3 FORMAT
+	.word	L173$	,266.	,237.	; 3 Format-effectors
+	.word	L174$	,268.	,280.	; 3 IDLE
+	.word	L175$	,269.	,68.	; 3 Important-Notes!
+	.word	L176$	,277.	,175.	; 3 INITIATE
+	.word	L177$	,277.	,482.	; 3 INITIATE-PROMPT
+	.word	L178$	,278.	,221.	; 3 INIT-ONCE
+	.word	L179$	,279.	,224.	; 3 NOANSWER
+	.word	L180$	,280.	,59.	; 3 NOBINARY-RESPONSE
+	.word	L181$	,280.	,274.	; 3 NOECHO
+	.word	L182$	,281.	,59.	; 3 NOINIT-ONCE
+	.word	L183$	,281.	,337.	; 3 PULSE
+	.word	L184$	,282.	,167.	; 3 RINGING
+	.word	L185$	,283.	,92.	; 3 SETTLE-TIME
+	.word	L186$	,284.	,212.	; 3 SUCCESS
+	.word	L187$	,285.	,242.	; 3 TIME-OUT
+	.word	L188$	,286.	,280.	; 3 TONE
+	.word	L189$	,287.	,117.	; 3 WAKE-ACKNOWLEDGE
+	.word	L190$	,287.	,418.	; 3 WAKE-RATE
+	.word	L191$	,288.	,243.	; 3 WAKE-STRING
+	.word	L192$	,288.	,472.	; 2 DTR
+	.word	L193$	,289.	,28.	; 2 DUPLEX
+	.word	L194$	,289.	,343.	; 2 END-OF-LINE
+	.word	L195$	,290.	,93.	; 2 EOF
+	.word	L196$	,290.	,393.	; 2 ESCAPE
+	.word	L197$	,291.	,246.	; 2 FILE-TYPE
+	.word	L198$	,294.	,195.	; 3 ASCII
+	.word	L199$	,294.	,503.	; 3 AUTO
+	.word	L200$	,295.	,295.	; 3 BINARY
+	.word	L201$	,296.	,11.	; 3 CREATE-SIZE
+	.word	L202$	,298.	,204.	; 3 CSI-PARSING
+	.word	L203$	,299.	,198.	; 3 DEC-MULTINATIONAL
+	.word	L204$	,300.	,4.	; 3 FIXED
+	.word	L205$	,300.	,48.	; 3 IMAGE
+	.word	L206$	,300.	,105.	; 3 NAMING
+	.word	L207$	,300.	,325.	; 4 CONVERTED
+	.word	L208$	,301.	,36.	; 4 FULL
+	.word	L209$	,301.	,265.	; 4 LOWER-CASE
+	.word	L210$	,301.	,498.	; 4 NOLOWER-CASE
+	.word	L211$	,302.	,248.	; 3 NOPROTECT
+	.word	L212$	,303.	,8.	; 3 NOREPLACE
+	.word	L213$	,303.	,63.	; 3 NOVOLUME-VERIFY
+	.word	L214$	,303.	,403.	; 3 PROTECT
+	.word	L215$	,305.	,64.	; 3 REPLACE
+	.word	L216$	,305.	,110.	; 3 TEXT
+	.word	L217$	,305.	,152.	; 3 TYPE
+	.word	L218$	,305.	,323.	; 3 VOLUME-VERIFY
+	.word	L219$	,306.	,95.	; 3 WILDCARDS
+	.word	L220$	,307.	,287.	; 2 FLOW-CONTROL
+	.word	L221$	,308.	,366.	; 2 HANDSHAKE
+	.word	L222$	,309.	,55.	; 3 CR
+	.word	L223$	,309.	,123.	; 3 NONE
+	.word	L224$	,309.	,169.	; 2 HOME
+	.word	L225$	,309.	,264.	; 2 INCOMPLETE-FILE-DISPOSITION
+	.word	L226$	,310.	,372.	; 2 LD:
+	.word	L227$	,310.	,510.	; 2 LINE
+	.word	L228$	,313.	,89.	; 2 LOCAL-ECHO
+	.word	L229$	,313.	,282.	; 2 LOGFILE
+	.word	L230$	,313.	,337.	; 2 LONG-PACKETS
+	.word	L231$	,315.	,118.	; 2 MODEM-TYPE
+	.word	L232$	,316.	,452.	; 2 NOATTRIBUTES
+	.word	L233$	,317.	,91.	; 2 NODEBUG
+	.word	L234$	,317.	,320.	; 2 NOLONG-PACKETS
+	.word	L235$	,317.	,392.	; 2 NOREPEAT-QUOTING
+	.word	L236$	,317.	,477.	; 2 NOUPDATE
+	.word	L237$	,318.	,154.	; 2 PARITY
+	.word	L238$	,319.	,506.	; 2 PAUSE
+	.word	L239$	,320.	,133.	; 2 PHONE
+	.word	L240$	,320.	,270.	; 3 ANSWER
+	.word	L241$	,321.	,425.	; 3 BLIND
+	.word	L242$	,322.	,262.	; 3 NOANSWER
+	.word	L243$	,323.	,103.	; 3 NUMBER
+	.word	L244$	,324.	,326.	; 3 PULSE
+	.word	L245$	,325.	,281.	; 3 TONE
+	.word	L246$	,326.	,236.	; 3 XMODE
+	.word	L247$	,327.	,256.	; 2 PROMPT
+	.word	L248$	,328.	,184.	; 2 RANDOM
+	.word	L249$	,329.	,7.	; 2 RECEIVE
+	.word	L250$	,329.	,124.	; 3 PACKET-LENGTH
+	.word	L251$	,330.	,133.	; 3 START-OF-PACKET
+	.word	L252$	,331.	,249.	; 3 TIME-OUT
+	.word	L253$	,332.	,99.	; 2 REPEAT-QUOTING
+	.word	L254$	,332.	,309.	; 2 RETRY
+	.word	L255$	,333.	,441.	; 2 SEED
+	.word	L256$	,334.	,81.	; 2 SEND
+	.word	L257$	,334.	,185.	; 3 NOXON
+	.word	L258$	,334.	,260.	; 3 PACKET-LENGTH
+	.word	L259$	,335.	,318.	; 3 PADCHARACTER
+	.word	L260$	,335.	,507.	; 3 PADDING
+	.word	L261$	,336.	,202.	; 3 START-OF-PACKET
+	.word	L262$	,337.	,318.	; 3 TIME-OUT
+	.word	L263$	,338.	,419.	; 3 XON
+	.word	L264$	,338.	,511.	; 2 SERVER
+	.word	L265$	,339.	,220.	; 2 SL
+	.word	L266$	,339.	,470.	; 2 SPEED
+	.word	L267$	,340.	,491.	; 2 START-OF-PACKET
+	.word	L268$	,341.	,256.	; 2 TERMINAL
+	.word	L269$	,342.	,507.	; 2 TT:
+	.word	L270$	,343.	,37.	; 2 UPDATE
+	.word	L271$	,343.	,404.	; 2 VLSWCH
+	.word	L272$	,344.	,192.	; 1 SHOW
+	.word	L273$	,344.	,423.	; 2 ALL
+	.word	L274$	,344.	,500.	; 2 ASSIGNS
+	.word	L275$	,345.	,64.	; 2 ATTRIBUTES
+	.word	L276$	,345.	,311.	; 2 BAUD
+	.word	L277$	,345.	,400.	; 2 BINARY-TYPE
+	.word	L278$	,345.	,486.	; 2 BLOCK-CHECK-TYPE
+	.word	L279$	,346.	,25.	; 2 CL:
+	.word	L280$	,346.	,167.	; 2 CONSOLE
+	.word	L281$	,346.	,336.	; 2 CONTROL-PREFIXING
+	.word	L282$	,346.	,505.	; 2 DATE
+	.word	L283$	,347.	,83.	; 2 DAYTIME
+	.word	L284$	,347.	,134.	; 2 DEBUG
+	.word	L285$	,347.	,227.	; 2 DEFAULT
+	.word	L286$	,347.	,276.	; 2 DELAY
+	.word	L287$	,347.	,381.	; 2 DIAL
+	.word	L288$	,348.	,373.	; 2 DTR
+	.word	L289$	,348.	,454.	; 2 DUPLEX
+	.word	L290$	,349.	,23.	; 2 END-OF-LINE
+	.word	L291$	,349.	,95.	; 2 EOF
+	.word	L292$	,349.	,276.	; 2 ESCAPE
+	.word	L293$	,349.	,372.	; 2 FILE-TYPE
+	.word	L294$	,349.	,471.	; 2 FLOW-CONTROL
+	.word	L295$	,350.	,54.	; 2 HANDSHAKE
+	.word	L296$	,350.	,112.	; 2 HOME
+	.word	L297$	,350.	,206.	; 2 INCOMPLETE-FILE-DISPOSITION
+	.word	L298$	,351.	,12.	; 2 LD:
+	.word	L299$	,351.	,82.	; 2 LINE
+	.word	L300$	,351.	,341.	; 2 LOCAL-ECHO
+	.word	L301$	,351.	,422.	; 2 LOGFILE
+	.word	L302$	,351.	,504.	; 2 LONG-PACKETS
+	.word	L303$	,352.	,74.	; 2 MEMORY
+	.word	L304$	,352.	,154.	; 2 MODEM-TYPE
+	.word	L305$	,352.	,301.	; 2 PACKETS
+	.word	L306$	,352.	,367.	; 2 PARAMETERS
+	.word	L307$	,352.	,437.	; 2 PARITY
+	.word	L308$	,352.	,493.	; 2 PAUSE
+	.word	L309$	,353.	,48.	; 2 PHONE
+	.word	L310$	,353.	,273.	; 2 RANDOM
+	.word	L311$	,353.	,364.	; 2 RECEIVE
+	.word	L312$	,353.	,446.	; 2 REPEAT-QUOTING
+	.word	L313$	,354.	,8.	; 2 RETRY
+	.word	L314$	,354.	,84.	; 2 SEED
+	.word	L315$	,354.	,154.	; 2 SEND
+	.word	L316$	,354.	,225.	; 2 SERVER
+	.word	L317$	,354.	,275.	; 2 SL
+	.word	L318$	,354.	,353.	; 2 SPEED
+	.word	L319$	,354.	,442.	; 2 START-OF-PACKET
+	.word	L320$	,355.	,3.	; 2 SUBMOUNTS
+	.word	L321$	,355.	,95.	; 2 TERMINAL
+	.word	L322$	,355.	,243.	; 2 TIME
+	.word	L323$	,355.	,482.	; 2 TIME-OUTS
+	.word	L324$	,356.	,32.	; 2 TT:
+	.word	L325$	,356.	,75.	; 2 UPDATE
+	.word	L326$	,356.	,162.	; 2 VERSION
+	.word	L327$	,356.	,229.	; 2 VLSWCH
+	.word	L328$	,356.	,363.	; 1 SL-Editor
+	.word	L329$	,358.	,149.	; 2 Function-Keys
+	.word	L330$	,359.	,481.	; 2 KED-Mode-Functions
+	.word	L331$	,361.	,415.	; 1 SPACE
+	.word	L332$	,362.	,16.	; 1 STATUS
+	.word	L333$	,363.	,69.	; 1 TAKE
+	.word	L334$	,364.	,68.	; 1 TIME
+	.word	L335$	,364.	,306.	; 1 TRANSMIT
+	.word	L336$	,365.	,322.	; 1 TYPE
+	.word	L337$	,366.	,345.	; 1 Upgrades
+	.word	L338$	,368.	,280.	; 1 XMODEM
+	.word	0			; null terminator
+
+L1$:	.asciz	"1 ?"
+L2$:	.asciz	"1 @"
+L3$:	.asciz	"1 ASCII-Set"
+L4$:	.asciz	"1 ASSIGN"
+L5$:	.asciz	"1 Binary-Files"
+L6$:	.asciz	"1 BUG"
+L7$:	.asciz	"1 BYE"
+L8$:	.asciz	"1 CD"
+L9$:	.asciz	"1 Character-Sets"
+L10$:	.asciz	"1 CLS"
+L11$:	.asciz	"1 CLX"
+L12$:	.asciz	"1 Common-Problems"
+L13$:	.asciz	"1 CONNECT"
+L14$:	.asciz	"1 Control-Chars"
+L15$:	.asciz	"1 COPY"
+L16$:	.asciz	"1 CWD"
+L17$:	.asciz	"1 DATE"
+L18$:	.asciz	"1 DAYTIME"
+L19$:	.asciz	"1 Debugging"
+L20$:	.asciz	"1 DELETE"
+L21$:	.asciz	"1 DIAL"
+L22$:	.asciz	"1 DIRECTORY"
+L23$:	.asciz	"1 DISCONNECT"
+L24$:	.asciz	"1 DISMOUNT"
+L25$:	.asciz	"1 EXAMINE"
+L26$:	.asciz	"1 EXIT"
+L27$:	.asciz	"1 File-Format-Info"
+L28$:	.asciz	"1 FINISH"
+L29$:	.asciz	"1 GET"
+L30$:	.asciz	"1 HANGUP"
+L31$:	.asciz	"1 HELP"
+L32$:	.asciz	"1 HOME"
+L33$:	.asciz	"1 HPRINT"
+L34$:	.asciz	"1 Installation-Notes"
+L35$:	.asciz	"2 Files-Required"
+L36$:	.asciz	"2 KM"
+L37$:	.asciz	"2 KRT.INI-Examples"
+L38$:	.asciz	"2 Modems"
+L39$:	.asciz	"3 Anchor"
+L40$:	.asciz	"3 Hayes-MNP"
+L41$:	.asciz	"3 Telebit-T2500"
+L42$:	.asciz	"3 Telebit-T3000"
+L43$:	.asciz	"3 US-Robotics"
+L44$:	.asciz	"2 RT-11"
+L45$:	.asciz	"2 TSX-Plus"
+L46$:	.asciz	"1 Introduction"
+L47$:	.asciz	"1 Local-vs-Remote"
+L48$:	.asciz	"1 LOGFILE"
+L49$:	.asciz	"1 LOGOUT"
+L50$:	.asciz	"1 Long-Packets"
+L51$:	.asciz	"1 MILNET-TAC"
+L52$:	.asciz	"2 Binary-Files"
+L53$:	.asciz	"2 Flow-Control"
+L54$:	.asciz	"2 Intercept-Character"
+L55$:	.asciz	"2 Time-Outs"
+L56$:	.asciz	"1 Modems"
+L57$:	.asciz	"1 MOUNT"
+L58$:	.asciz	"1 Parity"
+L59$:	.asciz	"1 PRINT"
+L60$:	.asciz	"1 PWD"
+L61$:	.asciz	"1 QUIT"
+L62$:	.asciz	"1 RECEIVE"
+L63$:	.asciz	"1 REDIAL"
+L64$:	.asciz	"1 Release-Notes"
+L65$:	.asciz	"2 KRTCDF.MAC"
+L66$:	.asciz	"2 KRTCMD.MAC"
+L67$:	.asciz	"2 KRTCM1.MAC"
+L68$:	.asciz	"2 KRTCOM.MAC"
+L69$:	.asciz	"2 KRTCON.MAC"
+L70$:	.asciz	"2 KRTCVT.MAC"
+L71$:	.asciz	"2 KRTDAT.MAC"
+L72$:	.asciz	"2 KRTDIA.MAC"
+L73$:	.asciz	"2 KRTDIR.MAC"
+L74$:	.asciz	"2 KRTEDI.MAC"
+L75$:	.asciz	"2 KRTERM.MAC"
+L76$:	.asciz	"2 KRTERR.MAC"
+L77$:	.asciz	"2 KRTHLP.MAC"
+L78$:	.asciz	"2 KRTIDX.MAC"
+L79$:	.asciz	"2 KRTKM.MAC"
+L80$:	.asciz	"2 KRTMAC.MAC"
+L81$:	.asciz	"2 KRTMDM.MAC"
+L82$:	.asciz	"2 KRTOSI.MAC"
+L83$:	.asciz	"2 KRTPAK.MAC"
+L84$:	.asciz	"2 KRTREC.MAC"
+L85$:	.asciz	"2 KRTRMS.MAC"
+L86$:	.asciz	"2 KRTSEN.MAC"
+L87$:	.asciz	"2 KRTSER.MAC"
+L88$:	.asciz	"2 KRTSHO.MAC"
+L89$:	.asciz	"2 KRTSTD.MAC"
+L90$:	.asciz	"2 KRTST0.MAC"
+L91$:	.asciz	"2 KRTST1.MAC"
+L92$:	.asciz	"2 KRTSUB.MAC"
+L93$:	.asciz	"2 KRTXMO.MAC"
+L94$:	.asciz	"1 REMOTE"
+L95$:	.asciz	"2 CD"
+L96$:	.asciz	"2 COPY"
+L97$:	.asciz	"2 CWD"
+L98$:	.asciz	"2 DELETE"
+L99$:	.asciz	"2 DIRECTORY"
+L100$:	.asciz	"2 HELP"
+L101$:	.asciz	"2 HOST"
+L102$:	.asciz	"2 LOGIN"
+L103$:	.asciz	"2 RENAME"
+L104$:	.asciz	"2 SPACE"
+L105$:	.asciz	"2 TYPE"
+L106$:	.asciz	"2 WHO"
+L107$:	.asciz	"1 RENAME"
+L108$:	.asciz	"1 SEND"
+L109$:	.asciz	"1 SERVER"
+L110$:	.asciz	"1 SET"
+L111$:	.asciz	"2 ATTRIBUTES"
+L112$:	.asciz	"3 ALL"
+L113$:	.asciz	"3 DATE"
+L114$:	.asciz	"3 EXACT-LENGTH"
+L115$:	.asciz	"3 LENGTH"
+L116$:	.asciz	"3 OFF"
+L117$:	.asciz	"3 ON"
+L118$:	.asciz	"3 PROTECTION"
+L119$:	.asciz	"3 SYSTEM-ID"
+L120$:	.asciz	"3 SYSTEM-INFO"
+L121$:	.asciz	"3 TYPE"
+L122$:	.asciz	"2 BAUD"
+L123$:	.asciz	"2 BINARY-TYPE"
+L124$:	.asciz	"2 BLOCK-CHECK-TYPE"
+L125$:	.asciz	"2 CL:"
+L126$:	.asciz	"2 CONSOLE"
+L127$:	.asciz	"3 7-BIT"
+L128$:	.asciz	"3 8-BIT"
+L129$:	.asciz	"3 BREAK"
+L130$:	.asciz	"3 MILNET"
+L131$:	.asciz	"3 PRIORITY"
+L132$:	.asciz	"2 CONTROL-CHARACTER"
+L133$:	.asciz	"3 PREFIXED"
+L134$:	.asciz	"3 UNPREFIXED"
+L135$:	.asciz	"2 DEBUG"
+L136$:	.asciz	"3 ALL"
+L137$:	.asciz	"3 CONSOLE"
+L138$:	.asciz	"3 CONNECT"
+L139$:	.asciz	"3 NONE"
+L140$:	.asciz	"3 NORPACK"
+L141$:	.asciz	"3 NOTERMINAL"
+L142$:	.asciz	"3 NOTT:"
+L143$:	.asciz	"3 OFF"
+L144$:	.asciz	"3 ON"
+L145$:	.asciz	"3 PACKET"
+L146$:	.asciz	"3 RAW"
+L147$:	.asciz	"3 RPACK"
+L148$:	.asciz	"3 TERMINAL"
+L149$:	.asciz	"3 TT:"
+L150$:	.asciz	"2 DEFAULT"
+L151$:	.asciz	"2 DELAY"
+L152$:	.asciz	"2 DIAL"
+L153$:	.asciz	"3 ABORT"
+L154$:	.asciz	"3 ANSWER"
+L155$:	.asciz	"3 BINARY-RESPONSE"
+L156$:	.asciz	"3 BLIND"
+L157$:	.asciz	"3 COMMENT"
+L158$:	.asciz	"3 CON300"
+L159$:	.asciz	"3 CON1200"
+L160$:	.asciz	"3 CON2400"
+L161$:	.asciz	"3 CON4800"
+L162$:	.asciz	"3 CON9600"
+L163$:	.asciz	"3 CON19200"
+L164$:	.asciz	"3 CON38400"
+L165$:	.asciz	"3 CONFIRM"
+L166$:	.asciz	"3 CONFIRM-ACKNOWLEDGE"
+L167$:	.asciz	"3 DIAL-ACKNOWLEDGE"
+L168$:	.asciz	"3 DIAL-PAUSE"
+L169$:	.asciz	"3 DIAL-RATE"
+L170$:	.asciz	"3 ECHO"
+L171$:	.asciz	"3 FAILURE"
+L172$:	.asciz	"3 FORMAT"
+L173$:	.asciz	"3 Format-effectors"
+L174$:	.asciz	"3 IDLE"
+L175$:	.asciz	"3 Important-Notes!"
+L176$:	.asciz	"3 INITIATE"
+L177$:	.asciz	"3 INITIATE-PROMPT"
+L178$:	.asciz	"3 INIT-ONCE"
+L179$:	.asciz	"3 NOANSWER"
+L180$:	.asciz	"3 NOBINARY-RESPONSE"
+L181$:	.asciz	"3 NOECHO"
+L182$:	.asciz	"3 NOINIT-ONCE"
+L183$:	.asciz	"3 PULSE"
+L184$:	.asciz	"3 RINGING"
+L185$:	.asciz	"3 SETTLE-TIME"
+L186$:	.asciz	"3 SUCCESS"
+L187$:	.asciz	"3 TIME-OUT"
+L188$:	.asciz	"3 TONE"
+L189$:	.asciz	"3 WAKE-ACKNOWLEDGE"
+L190$:	.asciz	"3 WAKE-RATE"
+L191$:	.asciz	"3 WAKE-STRING"
+L192$:	.asciz	"2 DTR"
+L193$:	.asciz	"2 DUPLEX"
+L194$:	.asciz	"2 END-OF-LINE"
+L195$:	.asciz	"2 EOF"
+L196$:	.asciz	"2 ESCAPE"
+L197$:	.asciz	"2 FILE-TYPE"
+L198$:	.asciz	"3 ASCII"
+L199$:	.asciz	"3 AUTO"
+L200$:	.asciz	"3 BINARY"
+L201$:	.asciz	"3 CREATE-SIZE"
+L202$:	.asciz	"3 CSI-PARSING"
+L203$:	.asciz	"3 DEC-MULTINATIONAL"
+L204$:	.asciz	"3 FIXED"
+L205$:	.asciz	"3 IMAGE"
+L206$:	.asciz	"3 NAMING"
+L207$:	.asciz	"4 CONVERTED"
+L208$:	.asciz	"4 FULL"
+L209$:	.asciz	"4 LOWER-CASE"
+L210$:	.asciz	"4 NOLOWER-CASE"
+L211$:	.asciz	"3 NOPROTECT"
+L212$:	.asciz	"3 NOREPLACE"
+L213$:	.asciz	"3 NOVOLUME-VERIFY"
+L214$:	.asciz	"3 PROTECT"
+L215$:	.asciz	"3 REPLACE"
+L216$:	.asciz	"3 TEXT"
+L217$:	.asciz	"3 TYPE"
+L218$:	.asciz	"3 VOLUME-VERIFY"
+L219$:	.asciz	"3 WILDCARDS"
+L220$:	.asciz	"2 FLOW-CONTROL"
+L221$:	.asciz	"2 HANDSHAKE"
+L222$:	.asciz	"3 CR"
+L223$:	.asciz	"3 NONE"
+L224$:	.asciz	"2 HOME"
+L225$:	.asciz	"2 INCOMPLETE-FILE-DISPOSITION"
+L226$:	.asciz	"2 LD:"
+L227$:	.asciz	"2 LINE"
+L228$:	.asciz	"2 LOCAL-ECHO"
+L229$:	.asciz	"2 LOGFILE"
+L230$:	.asciz	"2 LONG-PACKETS"
+L231$:	.asciz	"2 MODEM-TYPE"
+L232$:	.asciz	"2 NOATTRIBUTES"
+L233$:	.asciz	"2 NODEBUG"
+L234$:	.asciz	"2 NOLONG-PACKETS"
+L235$:	.asciz	"2 NOREPEAT-QUOTING"
+L236$:	.asciz	"2 NOUPDATE"
+L237$:	.asciz	"2 PARITY"
+L238$:	.asciz	"2 PAUSE"
+L239$:	.asciz	"2 PHONE"
+L240$:	.asciz	"3 ANSWER"
+L241$:	.asciz	"3 BLIND"
+L242$:	.asciz	"3 NOANSWER"
+L243$:	.asciz	"3 NUMBER"
+L244$:	.asciz	"3 PULSE"
+L245$:	.asciz	"3 TONE"
+L246$:	.asciz	"3 XMODE"
+L247$:	.asciz	"2 PROMPT"
+L248$:	.asciz	"2 RANDOM"
+L249$:	.asciz	"2 RECEIVE"
+L250$:	.asciz	"3 PACKET-LENGTH"
+L251$:	.asciz	"3 START-OF-PACKET"
+L252$:	.asciz	"3 TIME-OUT"
+L253$:	.asciz	"2 REPEAT-QUOTING"
+L254$:	.asciz	"2 RETRY"
+L255$:	.asciz	"2 SEED"
+L256$:	.asciz	"2 SEND"
+L257$:	.asciz	"3 NOXON"
+L258$:	.asciz	"3 PACKET-LENGTH"
+L259$:	.asciz	"3 PADCHARACTER"
+L260$:	.asciz	"3 PADDING"
+L261$:	.asciz	"3 START-OF-PACKET"
+L262$:	.asciz	"3 TIME-OUT"
+L263$:	.asciz	"3 XON"
+L264$:	.asciz	"2 SERVER"
+L265$:	.asciz	"2 SL"
+L266$:	.asciz	"2 SPEED"
+L267$:	.asciz	"2 START-OF-PACKET"
+L268$:	.asciz	"2 TERMINAL"
+L269$:	.asciz	"2 TT:"
+L270$:	.asciz	"2 UPDATE"
+L271$:	.asciz	"2 VLSWCH"
+L272$:	.asciz	"1 SHOW"
+L273$:	.asciz	"2 ALL"
+L274$:	.asciz	"2 ASSIGNS"
+L275$:	.asciz	"2 ATTRIBUTES"
+L276$:	.asciz	"2 BAUD"
+L277$:	.asciz	"2 BINARY-TYPE"
+L278$:	.asciz	"2 BLOCK-CHECK-TYPE"
+L279$:	.asciz	"2 CL:"
+L280$:	.asciz	"2 CONSOLE"
+L281$:	.asciz	"2 CONTROL-PREFIXING"
+L282$:	.asciz	"2 DATE"
+L283$:	.asciz	"2 DAYTIME"
+L284$:	.asciz	"2 DEBUG"
+L285$:	.asciz	"2 DEFAULT"
+L286$:	.asciz	"2 DELAY"
+L287$:	.asciz	"2 DIAL"
+L288$:	.asciz	"2 DTR"
+L289$:	.asciz	"2 DUPLEX"
+L290$:	.asciz	"2 END-OF-LINE"
+L291$:	.asciz	"2 EOF"
+L292$:	.asciz	"2 ESCAPE"
+L293$:	.asciz	"2 FILE-TYPE"
+L294$:	.asciz	"2 FLOW-CONTROL"
+L295$:	.asciz	"2 HANDSHAKE"
+L296$:	.asciz	"2 HOME"
+L297$:	.asciz	"2 INCOMPLETE-FILE-DISPOSITION"
+L298$:	.asciz	"2 LD:"
+L299$:	.asciz	"2 LINE"
+L300$:	.asciz	"2 LOCAL-ECHO"
+L301$:	.asciz	"2 LOGFILE"
+L302$:	.asciz	"2 LONG-PACKETS"
+L303$:	.asciz	"2 MEMORY"
+L304$:	.asciz	"2 MODEM-TYPE"
+L305$:	.asciz	"2 PACKETS"
+L306$:	.asciz	"2 PARAMETERS"
+L307$:	.asciz	"2 PARITY"
+L308$:	.asciz	"2 PAUSE"
+L309$:	.asciz	"2 PHONE"
+L310$:	.asciz	"2 RANDOM"
+L311$:	.asciz	"2 RECEIVE"
+L312$:	.asciz	"2 REPEAT-QUOTING"
+L313$:	.asciz	"2 RETRY"
+L314$:	.asciz	"2 SEED"
+L315$:	.asciz	"2 SEND"
+L316$:	.asciz	"2 SERVER"
+L317$:	.asciz	"2 SL"
+L318$:	.asciz	"2 SPEED"
+L319$:	.asciz	"2 START-OF-PACKET"
+L320$:	.asciz	"2 SUBMOUNTS"
+L321$:	.asciz	"2 TERMINAL"
+L322$:	.asciz	"2 TIME"
+L323$:	.asciz	"2 TIME-OUTS"
+L324$:	.asciz	"2 TT:"
+L325$:	.asciz	"2 UPDATE"
+L326$:	.asciz	"2 VERSION"
+L327$:	.asciz	"2 VLSWCH"
+L328$:	.asciz	"1 SL-Editor"
+L329$:	.asciz	"2 Function-Keys"
+L330$:	.asciz	"2 KED-Mode-Functions"
+L331$:	.asciz	"1 SPACE"
+L332$:	.asciz	"1 STATUS"
+L333$:	.asciz	"1 TAKE"
+L334$:	.asciz	"1 TIME"
+L335$:	.asciz	"1 TRANSMIT"
+L336$:	.asciz	"1 TYPE"
+L337$:	.asciz	"1 Upgrades"
+L338$:	.asciz	"1 XMODEM"
+	.even
+
+	.end

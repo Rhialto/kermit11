@@ -1,0 +1,154 @@
+	.title	KRTDSP.MIN  I/O dispatch and support
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.mcall	.CLOSE	,.GVAL	,.RCTRLO,.TTINR	,.TTYIN	,.TTYOU
+
+	$tcfig	=	424
+
+	.sbttl	Global data
+
+	.psect	packet	,rw,d,lcl,rel,con
+packet::.blkb	$allsiz
+
+
+	.psect	$code
+	.sbttl	Reset terminal after using it for file transfer
+
+ttyrst::mov	ttparm	,@#jsw
+	.rctrlo
+	.gval	#rtwork,#$tcfig
+	cmp	rt11ver	,#5
+	bge	135$
+	mov	ttpar2	,(r0)
+	br	137$
+135$:	mov	r0	,r1
+	MOV	#rtwork	,R0
+	MOV	#28.*^o400+3,@R0
+	MOV	r1	,2.(R0)
+	MOV	ttpar2	,4.(R0)
+	EMT	^o375
+137$:	.rctrlo
+	clr	r0
+	return
+
+
+	.sbttl	Get input from a printing terminal
+
+kbread::save	<r2>
+	bic	#10000!100,@#jsw
+	.rctrlo
+	mov	@r5	,r1
+	clrb	@r1
+	mov	#ln$max	,r2
+
+10$:	.ttyin
+	cmpb	r0	,#'Z&37
+	bne	11$
+	mov	#cmd$ex	,r0
+	br	100$
+11$:	cmpb	r0	,#'C&37
+	bne	13$
+	mov	#cmd$ab	,r0
+	br	100$
+13$:	cmpb	r0	,#cr
+	beq	40$
+	tst	r2
+	ble	10$
+	movb	r0	,(r1)+
+	dec	r2
+	br	10$
+
+40$:	emt	340
+	clrb	@r1
+	sub	@r5	,r1
+	clr	r0
+100$:	unsave	<r2>
+	bis	#10000!100,@#jsw
+	save	<r0>
+	.rctrlo
+	unsave	<r0>
+	return
+
+
+	.sbttl	Get one char from TT
+
+read1c::.ttinr
+	bcs	read1c
+90$:	return
+
+
+	.sbttl	TT output in various ways
+	.enabl	lsb
+
+writ1ch::save	<r1>
+	.ttyou
+	mov	xprint	,r1
+	beq	99$
+	save	<r0>
+	call	putcr0
+	unsave	<r0>
+99$:	unsave	<r1>
+	return
+
+wrtall::save	<r2,r1,r0>
+	mov	10(sp)	,r2
+
+loop:	tstb	(r2)
+	beq	199$
+	clr	r0
+	bisb	(r2)+	,r0
+	.ttyou
+	mov	xprint	,r1
+	beq	loop
+	call	putcr0
+	br	loop
+
+199$:	unsave	<r0,r1,r2>
+	mov	(sp)+	,(sp)
+	return
+
+l$nolf::save	<r1,r0>
+	tst	vttype
+	beq	299$
+	.ttyou	#cr
+	br	300$
+
+l$pcrlf::save	<r1,r0>
+
+299$:	.ttyou	#cr
+	.ttyou	#lf
+
+300$:	mov	xprint	,r1
+	beq	399$
+	mov	#cr	,r0
+	call	putcr0
+	mov	#lf	,r0
+	call	putcr0
+
+399$:	unsave	<r0,r1>
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Clear the console, hose all pending terminal input
+
+clrcns::call	chkabo
+	tst	r0
+	bne	clrcns
+	return
+
+
+	.sbttl	Check for abort, see if anything typed at the terminal
+
+chkabo::.ttinr
+	bcc	11$
+	clr	r0
+11$:	return
+
+	.end

@@ -1,0 +1,1272 @@
+	.title	KRTKM	Kermit-11 RT-11/TSX modem driver
+	.ident	"V03.63"
+
+	.ASECT
+. = 110					; for RESORC/V
+	.rad50	"V03"			; handler is for this version
+	.word	63.			; and this revision of Kermit
+	.word	0.			; patch level
+	.word	-1			; terminator
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+; Add SPFUNs to support Xmodem compatibly with the TSX CL handler:
+;
+;	CLSET	<250>	Set CL options (binin and binout only)
+;	CLRSET	<251>	Clear CL options (binin and binout only)
+;	CLIPND	<261>	Get number of input chars pending
+;	CLWBYT	<263>	Write with byte count
+;	CLCHAR	<266>	Get CL characteristics (options flags only)
+;
+; Enabling binin or binout does not in itself bypass XOFF flow control
+; processing in the input or output routines here, one must explicitly
+; set RTS/CTS flow control as well, or uncomment the appropriate lines
+; in the kiint (binin) and kmint/koint (binout) routines, below.
+;
+; This driver does not currrently support "no flow control" -- RTS/CTS
+; must be enabled when binin or binout is used.  Flow control may then
+; be ignored if desired by using a cable that doesn't connect pins 4 &
+; 5.
+;
+; Added .br macro for clarity.
+
+; /62/	27-Jul-93  Billy Y..  V03.62-7	(for KRT V03.62-8)
+;
+; KM is a "Kermit Modem" communications handler provided to support
+; TSX-Plus features not otherwise available under RT-11, as well as
+; older releases of TSX that preceded its CL handler.   KM combines
+; the best of both worlds, including the following under RT-11:
+;
+;	o  Works with DL(V), Falcon and PRO serial interfaces
+;	o  Speed may be SET and SHOWn from within Kermit
+;	o  Automatic fallback to the connected speed
+;	o  An eight-bit data path
+;	o  Selectable hardware (RTS/CTS) flow control
+;	o  Emulation of TSX's CLCLR (flush pending I/O)
+;	o  DTR toggling to support Kermit's HANGUP command
+;	o  Usable with RT-11 V4.0 and up, and TSX-Plus V5.0 and up
+;
+; To use KM you must first edit the appropriate conditional assembly
+; files for the serial line interface in your system:
+;
+;	KRTSJ .CND  -  for RT-11FB, RT-11SB, and RT-11SJ
+;	KRTXM .CND  -  for RT-11XB, RT-11XM, RT-11ZB and RT-11ZM
+;	KRTTSX.CND  -  for TSX-Plus
+;
+; Then assemble and link using KRTSYS.COM if being done under RT-11
+; V5.0 or above, or KRTSV4.COM if using any RT-11 V4 release.  This
+; will create KM.SYS, KMX.SYS and KM.TSX, which should be copied to
+; your system device (SY) where they may be INSTALLed and LOADed as
+; needed.  Note that KRTKM.MAC (the handler source file) must be on
+; the default disk for this assembly.  Under TSX you'll have to use
+; TSXMOD to add a definition for KM as shown below, or define it in
+; TSGEN.MAC and rebuild the system.  In either case you must reboot
+; as it only loads handlers when started.  KM may be mapped to save
+; low memory:
+;
+;	DEVDEF	<KM>,MAPH
+;
+; To build KM under RT-11 V5 (KRTSYS.COM):
+; MAC/OBJ:KM KRTSJ.CND+KRTKM
+; LINK/NOBIT/EXE:KM.SYS KM
+; MAC/OBJ:KMX KRTXM.CND+KRTKM
+; LINK/NOBIT/EXE:KMX.SYS KMX
+; MAC/OBJ:KMTSX KRTTSX.CND+KRTKM
+; LINK/NOBIT/EXE:KM.TSX KMTSX
+;
+; To build KM under RT-11 V4 (KRTSV4.COM):
+; MAC/OBJ:KM KRTSJ.CND+KRTKM	! KRT will only run under RT-11FB if V4
+; LINK/EXE:KM.SYS KM
+; MAC/OBJ:KMTSX KMTSX.CND+KRTKM
+; LINK/EXE:KM.TSX KMTSX
+;
+; Comments must be stripped to run these command files under RT-11.
+;
+; WARNING:   Earlier versions of RT-11 may choke on the "dma=no" in
+; the .drdef macro.  If it causes an error your system doesn't need
+; it and it should be dumped to allow successful assembly.
+;
+; KM supports the following SET commands from the monitor (KMON):
+;
+;	SET KM CSR=oct_address		! except on the PRO for
+;	SET KM VECTOR=oct_address	! which these are fixed
+;
+; Hardware flow control REQUIRES pins 4 and 5 be carried through in
+; the modem cable, 4 to 4 (RTS) and 5 to 5 (CTS), DTE (the port) to
+; DCE (the modem), in addition to those otherwise normally present.
+;
+; The port should be set up for 8 data bits and NO parity as Kermit
+; does parity in software.
+;
+; WARNING:  If the interface provides selectable interrupt priority
+; and your max speed will be greater than 4800 you will likely have
+; to use BIRQ 5 to avoid dropping chars.
+;
+; NOTE:  This handler does NOT support VTCOM, nor is it intended to
+; be used with anything other than KRT V03.62 or future releases.
+;
+; WARNING:  Because it's  impossible  to  bomb  an outstanding read
+; completion routine once KM has been assigned the  link  the  only
+; way to deassign KM is to exit Kermit.
+
+
+	.sbttl	Interface and operating system defaults
+
+	.iif ndf km$dve	km$dve = 0	; if <> DL(V)-11/E interface
+	.iif ndf km$pdt	km$pdt = 0	; if <> display holds on PDT-11 LEDs
+	.iif ndf km$pro	km$pro = 0	; if <> PRO-series modem interface
+	.iif ndf km$sbc	km$sbc = 0	; if <> Falcon SBC-11 interface
+			rte$m =: 0	; RTEM is not supported here
+	.iif ndf tsx$p  tsx$p  = 0	; if <> support TSX-Plus
+	.iif ne  km$dve	km$dve = 1	; ensure proper assembly
+	.iif ne  km$pdt	km$pdt = 1
+	.iif ne  km$pro	km$pro = 1
+	.iif ne  km$sbc	km$sbc = 1
+	.iif ne  tsx$p	mmg$t  = 1	; the "Plus" is 22-bit addressing
+	.iif gt	 <km$dve+km$pro+km$sbc-1> .error <; Too many interface types!>
+	.iif gt	 <km$pdt+km$pro-1> .error <; PDT LEDs don't exist on the PRO!>
+
+	.iif ndf km$csr km$csr = 176500	; default CSR
+	.iif ndf km$vec km$vec = 300	; and its interrupt vector
+	.iif ne  km$pro	km$csr = 173300	; PRO modem port CSR
+	.iif ne  km$pro	km$vec = 210	; and its vector
+	.iif ndf km$pri	km$pri = 4	; default interrupt priority
+	.iif ne  km$sbc	km$pri = 5	; Falcon must use priority 5
+	.iif ndf km$spd	km$spd = 9600.	  ; default speed
+	.iif ndf km$bsz	km$bsz = 256.	  ; default input buffer size in bytes
+	.iif ndf km$xof	km$xof = km$bsz/4 ; default low water mark, hold I/O
+	.iif ndf km$xon	km$xon = km$bsz/4 ; default hi water mark, resume I/O
+
+
+	.sbttl	Local macros
+
+.macro	.assume	a1 ,cnd ,a2 ,msg
+.if cnd <a1>-<a2>
+.iff
+.error	<; 'a1 is not 'cnd 'a2  'msg>
+.endc
+.endm	.assume
+
+.macro	.br to			; /63/ added..
+.if df	to
+.if ne	to-.
+.error	<; not at location to;>
+.endc
+.endc
+.endm	.br
+
+.macro	df.speed speedval	; get code for default speed
+.if eq speedval-50.		; not available on Falcon
+  .iif eq km$sbc b.code = 0	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-75.		; not available on Falcon
+  .iif eq km$sbc b.code = 1	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-110.		; not available on Falcon
+  .iif eq km$sbc b.code = 2	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-134.		; not available on Falcon
+  .iif eq km$sbc b.code = 3	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-150.		; not available on Falcon
+  .iif eq km$sbc b.code = 4	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-300.
+  .iif ne km$sbc b.code = 0	; Falcon
+  .iif eq km$sbc b.code = 5	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-600.
+  .iif ne km$sbc b.code = 1	; Falcon
+  .iif eq km$sbc b.code = 6	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-1200.
+  .iif ne km$sbc b.code = 2	; Falcon
+  .iif eq km$sbc b.code = 7	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-1800.		; not available on Falcon
+  .iif eq km$sbc b.code = 10	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-2000.		; not available on Falcon
+  .iif eq km$sbc b.code = 11	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-2400.
+  .iif ne km$sbc b.code = 3	; Falcon
+  .iif eq km$sbc b.code = 12	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-3600.		; not available on Falcon
+  .iif eq km$sbc b.code = 13	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-4800.
+  .iif ne km$sbc b.code = 4	; Falcon
+  .iif eq km$sbc b.code = 14	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-7200.		; not available on Falcon
+  .iif eq km$sbc b.code = 15	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-9600.
+  .iif ne km$sbc b.code = 5	; Falcon
+  .iif eq km$sbc b.code = 16	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-19200.
+  .iif ne km$sbc b.code = 6	; Falcon
+  .iif eq km$sbc b.code = 17	; DL(V)-11/E or PRO-series
+.endc
+.if eq speedval-38400.		; not available on PRO-series or DL(V)-11/E
+  .iif ne km$sbc b.code = 7	; Falcon
+.endc
+.if ge b.code			; speed is ok, set it
+  .iif ne km$dve b.deflt = <b.code*10000>!dve.en ; DL(V)-11/E
+  .iif ne km$pro b.deflt = <b.code*20>+b.code	 ; PRO-series
+  .iif ne km$sbc b.deflt = <b.code*10>!sbc.en	 ; Falcon SBC-11
+.iff
+.error	<; default speed ('speedval) isn't supported on interface specified>
+.endc
+.endm	df.speed
+
+.macro	picadr	src	,dst=r0	; position independent code addressing
+	mov	pc	,dst	; where we are now
+	add	src-.	,dst	; where we want to be
+.endm	picadr
+
+
+	.sbttl	Define the driver and its parameters
+
+	.mcall	.drdef	,.inten	,.mtps
+
+	.drdef	KM ,57 ,abtio$!hndlr$!spfun$ ,0 ,km$csr ,km$vec	,dma=no
+	q.job	= 30		; TSX+ queue element job (line) number offset
+	q$job	= q.job-4	; and its offset from Q.BLKN
+
+	psw	= 177776	; processor status word address
+	sysptr	= 54		; location of address of RMON base
+	    qcomp	= 270	;  offset to I/O exit routine address
+	    confg2	= 370	;  offset to second configuration word
+		pros$	= 20000	;   if <> it's a PRO-series system
+
+	b.code	= -1		; init as speed not settable
+	b.deflt = 0		; init as nothing to set for speed
+	sbc.en	= 2		; Falcon SBC-11 speed enable
+	dve.en	= 4000		; DL(V)-11/E speed enable
+
+	ctrlq	= 21		; ^Q (XON)  flow
+	ctrls	= 23		; ^S (XOFF) control
+	lowater	= km$xof	; hold when this # free bytes remain
+	hiwater	= km$bsz-km$xon	; resume when this # bytes become free
+
+				; SPFUNs
+	clrdrv	= 201		; flow control reset
+	brkdrv	= 202		; send a break
+	srddrv	= 203		; read at least 1 byte
+	stsdrv	= 204		; short and fast style driver status
+		rt.hold	= 2	; /63/ received flow control hold from remote
+		rt.dcd	= 10	; /63/ dcd
+	offdrv	= 205		; disable interrupts
+	dtrdrv	= 206		; set or clear DTR and RTS
+	clset	= 250		; /63/ set some TSX options
+	clrset	= 251		; /63/ reset some TSX options
+	clstat	= 255		; TSX style modem status
+		cl.dcd	= 2	; /63/ dcd
+		cl.dtr	= 4	; /63/ dtr
+		cl.rts	= 10	; /63/ rts
+		cl.cts	= 20	; /63/ cts
+		cl.flow	= 40	; /63/ <> for rts/cts flow control
+	clspeed	= 256		; get or set speed
+	clclr	= 257		; abort pending I/O
+	clipnd	= 261		; /63/ get number of input chars pending
+	clwbyt	= 263		; /63/ write with byte count
+	clchar	= 266		; /63/ get CL characteristics
+		t.form	= 1	; /63/ transmit form feed
+		t.tab	= 2	; /63/ transmit horizontal tab
+		t.lc	= 4	; /63/ transmit lower case
+		lfout	= 10	; /63/ transmit line feed
+		lfin	= 20	; /63/ receive line feed
+		binout	= 100	; /63/ transmit binary output
+		binin	= 200	; /63/ receive binary input
+		t.cr	= 400	; /63/ transmit carriage return
+		t.ctrl	= 1000	; /63/ transmit control chars
+		eightbit= 4000	; /63/ receive and transmit 8-bit chars
+	kmflow	= 277		; select XOFF/XON or RTS/CTS flow control
+
+				; DL style serial interface
+	in$csr	= 176		; installation CSR stored here
+	rx.dtr	= 2		; data terminal ready
+	rx.rts	= 4		; request to send
+	rx.ie	= 100		; interrupt enable
+	rx.dcd	= 10000		; data carrier detect
+	rx.cts	= 20000		; clear to send
+	tx.br	= 1		; break
+	tx.ie	= 100		; interrupt enable
+
+				; PRO serial interface
+	ic$buf	= 173200	; interrupt controller base
+	ic$csr	= ic$buf+2	; and its CSR
+		com.ie	= 33	;   enable comm port interrupts
+	km$buf	= km$csr	; rx/tx data register
+	km$csa	= km$csr+2	; CSR A
+	    sel.r0	= 0	;  goto reg 0
+		cmd.cr	= 30	;   reset channel
+		cmd.rt	= 50	;   reset xmit interrupt pending
+		cmd.er	= 60	;   reset error latches
+		cmd.ei	= 70	;   end of interrupt
+		cmd.tr	= 300	;   reset xmit underrun/end of message latch
+	    sel.r1	= 1	;  goto reg 1
+		w1.tie	= 2	;   xmit interrupt enable
+		w1.rie	= 30	;   receive interrupt enable
+	    sel.r2	= 2	;  goto reg 2
+		req.a2	= 0	;   _required_
+	    sel.r3	= 3	;  goto reg 3
+		w3.rxe	= 1	;   receive enable
+		rcl.8	= 300	;   8-bit receive char length
+	    sel.r4	= 4	;  goto reg 4
+		stp.1	= 4	;   1 stop bit
+		clk.16	= 100	;   16x rate multiplier
+	    sel.r5	= 5	;  goto reg 5
+		w5.txe	= 10	;   transmit enable
+		w5.brk	= 20	;   send a break
+		tcl.8	= 140	;   8-bit xmit char length
+	km$csb	= km$csr+6	; CSR B
+	    sel.r1	= 1	;  goto reg 1
+		req.b1	= 4	;   _required_
+	    sel.r2	= 2	;  goto reg 2
+		req.b2	= 0	;   _required_
+		cmd.re	= 20	;   reset ext/status interrupts
+		r2.imk	= 34	;   interrupt vector mask
+	km$mc0	= km$csr+10	; modem control 0
+		clk.bg	= 0	;  modem baud rate generator
+		m0.rts	= 10	;  request to send
+		m0.dtr	= 20	;  data terminal ready
+	km$mc1	= km$csr+12	; modem control 1
+		m1.dcd	= 20	;  data carrier detect
+		m1.cts	= 40	;  clear to send
+	km$bdr	= km$csr+14	; speed control
+
+	ledcsr	= 177420	; PDT LEDs display CSR
+		led.tx	= 100	; send hold (LED #1)
+		led.rx	= 200	; received hold (LED #2)
+		led.en	= 40000	; update enable
+
+
+	.sbttl	Installation code
+
+	.if ne km$pro!km$dve!km$sbc
+	df.speed km$spd			; calculate desired default speed
+	.endc
+
+	.ASECT
+. = 200
+	nop				; boot ept, unused here..
+	mov	@#sysptr,r0		; get RMON base
+	bit	#pros$	,confg2(r0)	; is this a PRO-series system?
+	.if eq km$pro
+	bne	o.bad			; a PRO, but handler not built for it
+	.iff
+	beq	o.bad			; built for PRO but not running on one
+	.ift
+	  .if ne km$dve!km$sbc
+	mov	in$csr	,r0		; recover base (rx$csr) address
+	mov	#b.deflt,4(r0)		; set default speed in tx$csr
+	  .endc
+	.iff
+	movb	#b.deflt     ,@#km$bdr	; set PRO default speed
+	mov	#km$csa	     ,r0	; CSR A (reg 0)
+	movb	#cmd.cr	     ,@r0	;  reset chan A
+	movb	#cmd.tr	     ,@r0	;  reset xmit underrun latch
+	movb	#sel.r4	     ,@r0	; goto reg 4
+	movb	#clk.16!stp.1,@r0	;  clock rate 16x, 1 stop bit
+	movb	#sel.r3	     ,@r0	; goto reg 3
+	movb	#w3.rxe!rcl.8,@r0	;  receive enable, 8-bit chars
+	movb	#sel.r5	     ,@r0	; goto reg 5
+	movb	#w5.txe!tcl.8,@r0	;  xmit enable, 8-bit chars
+	movb	#sel.r2	     ,@r0	; goto reg 2
+	movb	#req.a2	     ,@r0	;  _required_
+	movb	#cmd.re	     ,@r0	;  reset external/status interrupts
+	mov	#km$csb	     ,r0	; CSR B (reg 0)
+	movb	#cmd.cr	     ,@r0	;  reset chan B
+	movb	#sel.r2	     ,@r0	; goto reg 2
+	movb	#req.b2	     ,@r0	;  _required_
+	movb	#sel.r1	     ,@r0	; goto reg 1
+	movb	#req.b1	     ,@r0	;  _required_
+	movb	#com.ie	     ,@#ic$csr	; enable comm port interrupts
+	movb	#clk.bg	     ,@#km$mc0	; set PRO modem baud rate generator
+	.endc	; eq km$pro
+	tst	(pc)+			; installed OK, clear carry
+o.bad:	sec				; something failed, set carry
+	rts	pc
+
+	.assume	. le 400 msg=<;*** INSTALL CODE IS TOO LARGE ***>
+
+
+	.if eq km$pro			; these are not settable on PRO-series
+	.sbttl	SET CSR and VECTOR	; Kermit SETs everything else..
+
+	.drset	CSR	,160000	,o.csr	,oct	; SET KM CSR=oct_address
+	.drset	VECTOR	,474	,o.vec	,oct	; SET KM VECTOR=oct_address
+
+o.csr:	cmp	r0	,r3		; is address ok?
+	bcs	o.bad			; no, out of range..
+	bit	#7	,r0		; must also be multiple of 10 (octal)
+	bne	o.bad			; it wasn't..
+	mov	r0	,in$csr		; copy for installation code
+	mov	r0	,rx$csr		; receive (from modem) CSR address
+	add	#2	,r0
+	mov	r0	,rx$buf		; receive buffer address
+	add	#2	,r0
+	mov	r0	,tx$csr		; xmit (to modem) CSR address
+	add	#2	,r0		; this also clears the carry bit
+	mov	r0	,tx$buf		; xmit buffer address
+	rts	pc
+
+o.vec:	bit	#3	,r0		; multiple of 4?
+	bne	o.bad			; no, it's no good
+	cmp	r3	,r0		; ya, but is it within range?
+	bcs	o.bad			; nope..
+	mov	r0	,km$vtb		; input interrupt vector
+	add	#4	,r0		; this also clears carry
+	mov	r0	,km$vtb+6	; output interrupt vector
+	rts	pc
+	.endc	; eq km$pro
+
+	.assume	. le 1000 msg=<;*** SET CODE IS TOO LARGE ***>
+
+
+	.sbttl	Driver entry
+
+	.drbeg	KM
+	mov	kmcqe	,r4		; mon/handler current queue element
+	tst	q$blkn(r4)		; doing I/O to block 0?
+	bne	10$			; no
+	clr	kicqe			; ya, reset the input queue
+	clr	kocqe			; and the output queue
+10$:	.if eq km$pro
+	bis	#rx.ie	,@rx$csr	; enable receive interrupts
+	.iftf
+	asr	(pc)+			; are tx interrupts already enabled?
+stsflg: .word	1
+	bcc	20$			; hopefully..
+	.ift
+	bis	#tx.ie	,@tx$csr	; no, turn them on
+	  .if ne km$pdt
+	  jsr	pc	,setled		; update the PDT-11 lights
+	  .endc
+	.iff
+	bis	#w1.rie!w1.tie,sts$r1	; set tx and rx interrupts enable bits
+	mov	#sel.r1	      ,@#km$csa	; goto CSR A reg 1
+	mov	sts$r1	      ,@#km$csa	; turn them on
+	.iftf				; /63/
+20$:	movb	q$func(r4),r5		; check for a SPFUN
+	bne	spfun			; found one..
+	asl	q$wcnt(r4)		; words -> bytes, check & dump hi bit
+	.ift				; /63/ if not PRO branch is in range
+	bcc	km$err			; reads must be via SPFUN 203 only
+	.iff				; /63/ old PRO code + new SPFUN code
+	bcs	bwrite			; /63/ = too far to branch..
+	jmp	km$err			; /63/ reads via SPFUN 203 only
+	.iftf				; /63/
+bwrite:	inc	qchflg			; flag queue is about to be changed
+	jsr	r5	,enqueue	; place write on internal queue
+kocqe:	.word	0			;  output current queue element
+kolqe:	.word	0			;  output last queue element
+	clr	qchflg			; queue is no longer changing
+	.ift				; /63/
+	bis	#tx.ie	,@tx$csr	; enable interrupts
+	.iff
+	jsr	pc	,txproc		; try to get a char
+	beq	30$			; nothing there
+	movb	r5	,@#km$buf	; got one, send it
+	.endc	; eq km$pro
+30$:	rts	pc
+
+
+	.sbttl	Registers and vector tables
+
+	.if eq km$pro
+rx$csr:	.word	km$csr			; input (rx from modem) status
+rx$buf:	.word	km$csr+2		; input (rx) buffer
+tx$csr:	.word	km$csr+4		; output (tx to modem) status
+tx$buf:	.word	km$csr+6		; output (tx) buffer
+	.drvtb	KM,km$vec,kiint		; input interrupts
+	.drvtb	,km$vec+4,kmint		; output interrupts
+
+	.iff				; PRO CSR and vector are not settable
+sts$r1:	.word	0			; status reg 1
+sts$r5:	.word	w5.txe!tcl.8		; status reg 5  tx enable, 8-bit chars
+	.drvtb	KM,km$vec,kmint		; for PRO-series kmint
+	.drvtb	,km$vec+4,kmint		; dispatches everything..
+	.endc	; eq km$pro
+
+	.assume	. le kmstrt+1000 msg=<;*** BLOCK 1 CODE IS TOO LARGE ***>
+
+
+	.sbttl	Break request		; here so everything else can branch..
+
+s.brk:	tst	q$wcnt(r4)		; start break or stop break?
+	beq	10$			; stop it
+	inc	brkflg			; start it, flag it's being done
+	.if eq km$pro
+	bis	#tx.br	,@tx$csr	; begin the break
+	.iff
+	bis	#w5.brk	,sts$r5		; set the break enable bit
+	mov	#sel.r5	,@#km$csa	; goto CSR A reg 5
+	mov	sts$r5	,@#km$csa	; begin the break
+	.iftf
+	br	km$fin			; done
+10$:	.ift
+	bic	#tx.br	,@tx$csr	; stop the break
+	.iff
+	bic	#w5.brk	,sts$r5		; reset the break enable bit
+	mov	#sel.r5	,@#km$csa	; goto CSR A reg 5
+	mov	sts$r5	,@#km$csa	; stop the break
+	.iftf
+	clr	brkflg			; no longer doing a break
+	.ift
+	bis	#tx.ie	,@tx$csr	; re-enable output interrupts
+	.endc	; eq km$pro
+	br	km$fin			; done
+
+
+	.sbttl	Set CL options		; /63/ added to support xmodem..
+
+; NOTE:	If you add an option flagged in the hi byte uncomment the appropriate
+;	two lines here and in cl.clr (below).  Doing this will require making
+;	the bcs bwrite/jmp km$err code in the driver entry code unconditional
+;	as km$err will then be too far to branch.  Currently this driver only
+;	checks and uses the binin <000200> and binout <000100> option bits.
+
+cl.set:	.if eq mmg$t
+	bis	@q$buff(r4),clopts	; set the desired options
+	.iff
+	jsr	pc	,@$gtbyt	; recover low byte of options word
+	bisb	(sp)+	,clopts		; set it
+;	jsr	pc	,@$gtbyt	; recover hi byte of options word
+;	bisb	(sp)+	,clopts+1	; set it
+	.endc
+	br	km$fin			; done
+
+
+	.sbttl	Clear CL options	; /63/ added to support xmodem..
+
+cl.clr:.if eq mmg$t
+	bic	@q$buff(r4),clopts	; reset the desired options
+	.iff
+	jsr	pc	,@$gtbyt	; recover low byte of options word
+	bicb	(sp)+	,clopts		; reset it
+;	jsr	pc	,@$gtbyt	; recover hi byte of options word
+;	bicb	(sp)+	,clopts+1	; reset it
+	.endc
+	br	km$fin			; done
+
+
+	.sbttl	Get CL options		; /63/ added to support xmodem..
+
+; NOTE:	Functions which this driver provides by design are returned
+;	as enabled by setting same in the clopts configuration word.
+;	While it's possible to set or clear anything, and then view
+;	the results with this routine, currently only the the binin
+;	and binout bits actually do anything here..
+
+clopts:	.word	t.form!t.tab!t.lc!lfout!lfin!t.cr!t.ctrl!eightbit ; "defaults"
+
+cl.char:.if eq	mmg$t
+	mov	q$buff(r4),r5		; buffer address
+	clr	(r5)+			; handler status word unsupported here
+	mov	clopts	,(r5)		; options_status_word_offset = 2
+	.iff
+	clr	-(sp)			; handler status word unsupported here
+	jsr	pc	,@$ptwrd	; first word of data buffer
+	mov	clopts	,-(sp)		; put the options status word
+	jsr	pc	,@$ptwrd	; in second word of buffer
+	.endc
+	br	km$fin			; only options word is needed here..
+
+
+	.sbttl	SPFUN dispatching
+	.enabl	lsb
+
+spfun:	cmpb	r5	,#srddrv	; read at least 1 byte?
+	bne	10$			; no
+	jsr	r5	,enqueue	; ya, place on the internal queue..
+kicqe:	.word	0			;  input current queue element
+kilqe:	.word	0			;  input last queue element
+	jmp	rxproc			; ..then get whatever is ready now
+10$:	cmpb	r5	,#clipnd	; /63/ number of input chars pending?
+	bne	20$			; /63/ no
+	mov	#km$bsz	,r5		; /63/ size of the input ring buffer
+	sub	rxfree	,r5		; /63/ - bytes free = chars waiting
+	br	s.out			; return number of chars pending
+20$:	cmpb	r5	,#stsdrv	; /63/ moved this forward for speed
+	beq	s.stat			; driver status
+	cmpb	r5	,#clwbyt	; /63/ write with byte count?
+	beq	bwrite			; /63/ ya..
+	cmpb	r5	,#clrdrv	; /63/ moved forward
+	beq	s.clr			; flow control reset
+	cmpb	r5	,#clclr		; emulate TSX+ abort pending I/O?
+	bne	30$			; no
+	inc	stsflg			; ya, force reinit of interrupts
+	jmp	abort			; and go hose the queue
+30$:	cmpb	r5	,#brkdrv
+	beq	s.brk			; break
+	cmpb	r5	,#dtrdrv
+	beq	s.dtr			; set or clear DTR and RTS
+	cmpb	r5	,#clstat
+	beq	cl.stat			; TSX+ style get modem status
+	cmpb	r5	,#clset
+	beq	cl.set			; /63/ set some TSX+ options
+	cmpb	r5	,#clrset
+	beq	cl.clr			; /63/ reset some TSX+ options
+	.if ne km$pro!km$dve!km$sbc
+	cmpb	r5	,#clspeed
+	beq	s.speed			; TSX+ style get/set line speed
+	.endc
+	cmpb	r5	,#kmflow	; selecting flow control type?
+	beq	s.flow			; ya
+	cmpb	r5	,#offdrv	; disable interrupts?
+	bne	km$err			; /63/ no
+	inc	stsflg			; ya, revert to uninitialized state
+	br	km$fin			; done
+km$err:	bis	#hderr$	,@-(r4)		; set error bit if none of above cause
+km$fin:	.drfin	KM			; knowing's more important than noping
+
+	.dsabl	lsb
+
+
+	.sbttl	Set and/or clear flow control
+
+s.flow:	mov	q$wcnt(r4),ctsflg	; set it (0=XOFF,<>=CTS) then clear it
+s.clr:	clr	rxhold			; hose possible received hold
+	.if eq km$pro
+	bis	#tx.ie	,@tx$csr	; ensure output interrupts are on
+	.iftf
+	tst	ctsflg			; doing hardware flow control?
+	bne	x.dtr			; ya, go turn it on
+	.ift
+	mov	#-2	,txhold		; set flag to send an XON
+	  .if ne km$pdt
+	  jsr	pc	,setled		; update the PDT lights
+	  .endc
+	.iff
+	clr	txhold			; xmit XOFF is no longer pending
+	movb	#ctrlq	,@#km$buf	; send an XON
+	.endc	; eq km$pro
+	br	km$fin			; done
+
+	.sbttl	Set or clear DTR and RTS
+	.enabl	lsb
+
+s.dtr:	tst	q$wcnt(r4)		; set or clear?
+	bne	x.dtr			; set..
+	.if eq km$pro
+	bic	#rx.dtr!rx.rts,@rx$csr	; clear
+	.iff
+	bicb	#m0.dtr!m0.rts,@#km$mc0	; clear
+	.iftf
+	tst	ctsflg			; doing hardware flow control?
+	beq	20$			; no
+	mov	#1	,txhold		; flag RTS has been dropped
+	br	10$
+x.dtr:	.ift
+	bis	#rx.dtr!rx.rts,@rx$csr	; turn them on
+	.iff
+	bisb	#m0.dtr!m0.rts,@#km$mc0	; PRO turns them on this way
+	.iftf
+	tst	ctsflg			; doing hardware flow control?
+	beq	20$			; no
+	clr	txhold			; ya, xmit hold is no longer pending
+10$:	.ift
+	  .if ne km$pdt
+	  jsr	pc	,setled		; update the PDT lights
+	  .endc
+	.endc	; eq km$pro
+20$:	br	km$fin			; done
+
+	.dsabl	lsb
+
+
+	.sbttl	RT-11 style status
+
+; NOTE:	This is called by Kermit once every 0.5 second.
+;	Any added extra function(s) should go anywhere but here.
+
+s.stat:	clr	r5			; init
+	tst	rxhold			; has remote asserted flow control?
+	beq	10$			; no
+	bis	#rt.hold,r5		; /63/ ya, set bit 1
+10$:	.if eq km$pro
+	bit	#rx.dcd	,@rx$csr	; DCD asserted?
+	.iff
+	bit	#m1.dcd	,@#km$mc1	; DCD asserted?
+	.endc
+	beq	s.out			; no
+	bis	#rt.dcd	,r5		; /63/ ya, set bit 3
+s.out:	.if eq	mmg$t
+	mov	r5	,@q$buff(r4)	; return the status word
+	.iff
+	mov	r5	,-(sp)		; pass the status word to
+	jsr	pc	,@$ptwrd	; the $_put_word subroutine
+	.endc
+	br	km$fin			; done
+
+
+	.sbttl	TSX style status
+
+cl.stat:clr	r5			; init
+	.if eq km$pro
+	bit	#rx.dcd	,@rx$csr	; DCD asserted?
+	.iff
+	bit	#m1.dcd	,@#km$mc1	; DCD asserted?
+	.iftf
+	beq	10$			; no
+	bis	#cl.dcd	,r5		; /63/ ya, flag it
+10$:	.ift
+	bit	#rx.dtr	,@rx$csr	; DTR asserted?
+	.iff
+	bit	#m0.dtr	,@#km$mc1	; DTR asserted?
+	.iftf
+	beq	20$			; no
+	bis	#cl.dtr	,r5		; /63/ ya, flag it
+20$:	.ift
+	bit	#rx.rts	,@rx$csr	; RTS asserted?
+	.iff
+	bit	#m0.rts	,@#km$mc0	; RTS asserted?
+	.iftf
+	beq	30$			; no
+	bis	#cl.rts	,r5		; /63/ ya, flag it
+30$:	.ift
+	bit	#rx.cts	,@rx$csr	; CTS asserted?
+	.iff
+	bit	#m1.cts	,@#km$mc1	; CTS asserted?
+	.endc	; eq km$pro
+	beq	40$			; no
+	bis	#cl.cts	,r5		; /63/ ya, flag it
+40$:	tst	ctsflg			; RTS/CTS flow control?
+	beq	s.out			; no
+	bis	#cl.flow,r5		; /63/ ya, flag it
+	br	s.out			; common code..
+
+
+	.if ne km$pro!km$dve!km$sbc
+	.sbttl	Set or get speed
+
+s.speed:tst	q$wcnt(r4)		; set it or get it?
+	bmi	10$			; hi bit set flags get speed
+	  .if eq mmg$t
+	mov	@q$buff(r4),r1		; recover desired set speed value
+	  .iff
+	jsr	pc	,@$gtbyt	; recover desired set speed value
+	mov	(sp)+	,r1		; hi byte here is "undefined"..
+	  .endc
+	bic	#^c<37>	,r1		; hose any possible garbage in hi bits
+	  .if eq km$sbc
+	cmp	r1	,#16.		; if not a Falcon,
+	beq	km$err			; 38.4k is unavailable
+	  .endc
+	mov	r1	,curspd		; save to return speed when asked..
+	  .if ne km$pro			; speed = <b.code*20>+b.code
+	mov	r1	,-(sp)		; save copy of speed code for receive
+	asl	r1			; then shift it into xmit speed bits
+	asl	r1
+	asl	r1
+	asl	r1
+	bis	(sp)+	,r1		; restore the receive speed bits
+	movb	r1	,@#km$bdr	; set both tx and rx speeds
+	  .iff
+	    .if ne km$dve
+	swab	r1			; speed = <b.code*10000>!dve.en
+	asl	r1
+	asl	r1
+	asl	r1
+	asl	r1
+	bis	#dve.en	,r1		; now set the speed enable bit
+	    .endc
+	    .if ne km$sbc		; speed = <b.code*10>!sbc.en
+	picadr	#sbcspd			; get conversion table pointer
+	add	r1	,r0		; add speed offset
+	movb	(r0)	,r1		; copy real speed code from table
+	bmi	km$err			; not a valid SBC-11 speed
+	    .endc
+	mov	r1	,@tx$csr	; set the new speed
+	  .endc	; ne km$pro
+	br	km$fin			; done
+
+10$:	  .if eq mmg$t
+	mov	curspd	,@q$buff(r4)	; put current speed into user's buffer
+	  .iff
+	mov	curspd	,-(sp)		; pass speed value to $_put_word
+	jsr	pc	,@$ptwrd	; which places it into user's buffer
+	  .endc
+	br	km$fin			; done
+
+curspd:	.word	b.code			; the current speed, -1 if unsettable
+	  .if ne  km$sbc		; Falcon speed translation table
+sbcspd:	.byte	-1	,-1	,-1	,-1	,-1	,02
+	.byte	12	,22	,-1	,-1	,32	,-1
+	.byte	42	,-1	,52	,62	,72
+	.even
+	  .endc
+	.endc	; ne km$pro!km$dve!km$sbc
+
+
+	.if ne km$pdt
+	.sbttl	Display flow control status on PDT-11 lamps
+
+setled:	mov	#led.en	,r5		; enable with both LEDs preset off
+	tst	txhold			; is a sent XOFF or RTS hold pending?
+	ble	10$			; no
+	bis	#led.tx	,r5		; ya, illuminate LED #1
+10$:	tst	rxhold			; received XOFF or CTS hold pending?
+	beq	20$			; no
+	bis	#led.rx	,r5		; ya, illuminate LED #2
+20$:	mov	r5	,@#ledcsr	; send the results to the hardware
+	rts	pc
+	.endc
+
+
+	.sbttl	Driver reset
+
+abort:	mov	r0	,-(sp)
+	.if eq km$pro
+	bic	#rx.ie	,@rx$csr	; disable input interrupts
+	.iff
+	bic	#w1.rie	,sts$r1		; set to disable input interrupts
+	mov	#sel.r1	,@#km$csa	; goto CSR A reg 1
+	mov	sts$r1	,@#km$csa	; do it
+	.iftf
+	jsr	r4	,delink		; dump entries
+	.word	kicqe-q$link-del.pc	; from the input queue
+	tst	stsflg			; re-enable interrupts?
+	bne	10$			; no
+	.ift
+	bis	#rx.ie	,@rx$csr	; ya, turn them on
+	.iff
+	bis	#w1.rie	,sts$r1		; set to enable receive interrupts
+	mov	#sel.r1	,@#km$csa	; goto CSR A reg 1
+	mov	sts$r1	,@#km$csa	; do it
+	.iftf
+10$:	inc	qchflg			; flag queue is about to be changed
+	jsr	r4	,delink		; dump entries
+	.word	kocqe-q$link-del.pc	; from the output queue
+	clr	qchflg			; queue is no longer changing
+	tst	stsflg			; re-enable interrupts?
+	bne	30$			; no
+	.ift
+	bis	#tx.ie	,@tx$csr	; ya, turn them on
+	.iff
+	mov	r5	,-(sp)
+	jsr	pc	,txproc		; try to get an ouput char
+	beq	20$			; nothing there
+	movb	r5	,@#km$buf	; send it
+20$:	mov	(sp)+	,r5
+	.endc	; eq km$pro
+30$:	mov	(sp)+	,r0
+	tst	kmcqe			; any data in current queue element?
+	bne	40$			; ya, go unload it
+	rts	pc			; no, done
+40$:	jmp	km$fin
+
+
+	.if ne km$pro
+	.sbttl	PRO interrupt service dispatcher
+
+        br      abort			; abort entry point
+kmint:	jsr	r5	,@$inptr	; drop back to the
+        .word   ^c<km$pri*40>&340	; device priority
+	mov	#sel.r2	,@#km$csb	; goto CSR B reg 2
+	mov	@#km$csb,-(sp)		; recover the interrupt
+	bic	#^c<r2.imk>,@sp		; mask non-relevant data
+	asr	@sp			; word indexing
+	add	pc	,@sp		; calculate and add the
+	add	#inttab-.,@sp		; top of the table address
+	mov	@(sp)+	,-(sp)		; entry for this type interrupt
+	add	pc	,@sp		; calculate its address
+intdsp:	jmp	@(sp)+			; service the interrupt
+
+esint:	mov	#cmd.re	,@#km$csa	; reset external/status interrupts
+xxint:	mov	#cmd.ei	,@#km$csa	; end of interrupt
+	rts	pc
+
+srint:	mov	#cmd.er	,@#km$csa	; reset error latches and
+	jmp	kiint			; treat as a rec'd char
+
+inttab:	.word	xxint-intdsp		; unknown interrupts
+	.word	xxint-intdsp
+	.word	xxint-intdsp
+	.word	xxint-intdsp
+	.word	koint-intdsp		; xmit buffer empty
+	.word	esint-intdsp		; external/status interrupts
+	.word	kiint-intdsp		; rec'd char ready
+	.word	srint-intdsp		; special receive interrupt
+	.endc	; ne km$pro
+
+
+	.sbttl	Output (to modem) interrupt service
+	.enabl	lsb
+
+	.if eq km$pro
+	br	abort			; abort entry point
+	.iff
+koint:	.ift
+kmint:	jsr	r5	,@$inptr	; drop back to the
+	.word	^c<km$pri*40>&340	; device priority
+	.iftf
+	tst	(pc)+			; if sending a break..
+brkflg:	.word	0			;  <> if break is asserted
+	bne	40$			; ..then output can't be done
+	tst	(pc)+			; flow control status  -2=doRESUME
+txhold:	.word	0			;  -1=doHOLD, 0=RESUMEed, 1=onHOLD
+	bpl	20$			; nothing to do
+	tst	(pc)+			; check flow control type
+ctsflg:	.word	0			; if <> do RTS/CTS flow control
+	bne	10$			; go get CTS status into rxhold
+; /63/ use hardware flow control with binout or uncomment the next 2 lines
+;	bit	#binout	,clopts		; /63/ if doing binary output
+;	bne	10$			; /63/ don't send XOFF or XON chars
+	movb	#ctrlq	,r5		; preset an XON
+	add	#2	,txhold		; really need one?
+	beq	30$			; ya
+	movb	#ctrls	,r5		; no, thus it's an XOFF that's needed
+	br	30$
+10$:	clr	rxhold			; preset to no hold
+	.ift
+	bit	#rx.cts	,@rx$csr	; CTS asserted?
+	.iff
+	bit	#m1.cts	,@#km$mc1	; CTS asserted?
+	.iftf
+	bne	20$			; ya
+	mov	#1	,rxhold		; no, set the hold flag
+20$:	tst	(pc)+			; is other end ready for more data..?
+rxhold:	.word	0			;  <> if it sent an XOFF or CTS is low
+	bne	40$			; ..not yet
+	tst	(pc)+			; is the queue being changed?
+qchflg:	.word	0			;  <> if queue is being updated
+	bne	40$			; ya, output must wait..
+	jsr	pc	,txproc		; no, try to get something to output
+	beq	40$			; nothing was there..
+30$:	.ift
+	movb	r5	,@tx$buf	; something was there, send it
+	  .if ne km$pdt
+	  jmp	setled			; update the PDT lights
+	  .endc
+	rts	pc			; if not a PRO, done..
+	.iff
+	movb	r5	,@#km$buf	; something was there, send it
+	.iftf
+40$:	.ift
+	bic	#tx.ie	,@tx$csr	; disable xmit interrupts
+	.iff
+	mov	#cmd.rt	,@#km$csa	; reset xmit interrupt pending
+	mov	#cmd.ei	,@#km$csa	; end of interrupt
+	.endc	; eq km$pro
+	rts	pc
+
+	.dsabl	lsb
+
+
+	.sbttl	Get next output (to modem) character
+
+txproc:	mov	kocqe	,r4		; pointer to current queue element
+	beq	10$			; nothing is ready
+	.if eq mmg$t
+	add	#q$wcnt	,r4		; where word count lives
+	tst	@r4			; anything left?
+	beq	20$			; no, done
+	inc	@r4			; ya, decrement count
+	movb	@-(r4)	,r5		; get the char
+	inc	@r4			; point to possible next char
+	.iff
+	tst	q$wcnt(r4)		; anything left?
+	beq	20$			; no, done
+	inc	q$wcnt(r4)		; ya, decrement count
+	jsr	pc	,@$gtbyt	; get the char
+	mov	(sp)+	,r5		; save a copy
+	.endc	; eq mmg$t
+	bic	#^c<377>,r5		; mask to 8 bits
+	bne	10$			; /63/ not a null, something is left..
+	bit	#binout	,clopts		; /63/ ignore nulls?
+	beq	txproc			; yes
+10$:	rts	pc
+
+20$:	inc	qchflg			; flag queue is about to be changed
+	.if eq km$pro
+	bic	#tx.ie	,@tx$csr	; disable xmit interrupts
+	.iftf
+	mov	kocqe	,r4		; point to current queue element
+	mov	q$link(r4),kocqe	; put next element at top of queue
+	jsr	pc	,dequeue	; give current element to the os
+	clr	qchflg			; queue is no longer changing
+	.ift
+	bis	#tx.ie	,@tx$csr	; re-enable xmit interrupts
+	.endc	; eq km$pro
+	br	txproc			; always return a char if possible
+
+
+	.sbttl	Input (from modem) interrupt service
+
+	.if eq km$pro
+	rts	pc			; abort entry point
+	.iftf
+kiint:	.ift
+	jsr	r5	,@$inptr	; drop back to the
+	.word	^c<km$pri*40>&340	; device priority
+	movb	@rx$buf	,r5		; get a char
+	.iff
+	movb	@#km$buf,r5		; get a char
+	.iftf
+	bic	#^c<377>,r5		; mask to 8 bits, dump possible sxt
+	bne	10$			; /63/ not a null, something is left..
+	bit	#binin	,clopts		; /63/ was a null, check disposition
+	beq	30$			; ignore nulls
+10$:	tst	ctsflg			; doing hardware flow control?
+	bne	50$			; ya, ^Q and ^S are normal chars..
+; /63/ use hardware flow control with binin or uncomment the following 2 lines
+;	bit	#binin	,clopts		; /63/ or if doing binary input
+;	bne	50$			; /63/ they are normal here too
+	cmp	r5	,#ctrls		; no, is it an XOFF?
+	bne	40$			; no
+	mov	#1	,rxhold		; ya, flag it
+20$:	.ift
+	  .if ne km$pdt
+	  jmp	setled			; update the PDT lights
+	  .endc
+	.iftf
+30$:	.iff
+	mov	#cmd.ei	,@#km$csa	; end of interrupt
+	.iftf
+	rts	pc
+
+40$:	cmp	r5	,#ctrlq		; is it an XON?
+	bne	50$			; no
+	clr	rxhold			; ya, flag it
+	.ift
+	bis	#tx.ie	,@tx$csr	; re-enable xmit interrupts
+	.iff
+	clr	txhold			; flag xmit XOFF is no longer pending
+	movb	#ctrlq	,@#km$buf	; because this XON has just been sent
+	.iftf
+	br	20$			; common code..
+
+50$:	tst	rxfree			; input buffer full?
+	beq	70$			; ya, go send an XOFF
+	mov	rxputc	,r4		; no, point to where char goes in buff
+	add	pc	,r4		; calculate and add
+	add	#rxbuff-.,r4		; the top of the buffer's address
+	movb	r5	,@r4		; stuff the char into the buffer
+	dec	rxfree			; decrement the free byte count
+	inc	rxputc			; next char goes here
+	cmp	rxputc	,#km$bsz	; unless at the end
+	blo	60$			; not yet..
+	clr	rxputc			; wrap to top of the buffer
+60$:	cmp	rxfree	,#lowater	; time to put the brakes on yet?
+	bhi	100$			; no..
+	tst	txhold			; ya, done an XOFF or dropped RTS yet?
+	bgt	100$			; ya..
+
+70$:	tst	ctsflg			; no, doing hardware flow control?
+	bne	80$			; ya
+	.ift
+	mov	#-1	,txhold		; no, flag to send an XOFF
+	bis	#tx.ie	,@tx$csr	; enable output interrupts
+	br	100$
+	.iff
+	movb	#ctrls	,@#km$buf	; send an XOFF
+	br	90$			; go flag it's been sent
+	.iftf
+80$:	.ift
+	bic	#rx.rts	,@rx$csr	; clear RTS
+	.iff
+	bicb	#m0.rts	,@#km$mc0	; clear RTS
+	.iftf
+90$:	mov	#1	,txhold		; flag the hold
+
+100$:	tst	kicqe			; anything in the input queue?
+	beq	20$			; no
+	.iff
+	mov	#cmd.ei	,@#km$csa	; end of interrupt
+	.endc	; eq km$pro
+	.br	rxproc			; /63/ fall through to rxproc
+
+
+	.sbttl	Process chars from the modem
+
+rxproc:	inc	rx.proc			; is this process already running?
+	bne	80$			; ya..
+	jsr	r0	,90$		; no, but save r0-r3, drop pri first
+10$:	clr	rx.proc			; flag input is now being processed
+	cmp	rxfree	,#hiwater	; enough room to allow more input yet?
+	blo	40$			; no..
+	tst	txhold			; ya, has an XON been sent yet?
+	beq	40$			; ya..
+	tst	ctsflg			; doing hardware flow control?
+	bne	20$			; ya
+	.if eq km$pro
+	mov	#-2	,txhold		; no, flag to send an XON
+	bis	#tx.ie	,@tx$csr	; enable output interrupts
+	br	40$
+	.iff
+	movb	#ctrlq	,@#km$buf	; send an XON
+	br	30$
+	.iftf
+20$:	.ift
+	bis	#rx.rts	,@rx$csr	; set RTS
+	.iff
+	bisb	#m0.rts	,@#km$mc0	; set RTS
+	.endc	; eq km$pro
+30$:	clr	txhold			; xmit hold is no longer pending
+
+40$:	mov	kicqe	,r4		; is there input to do?
+	beq	70$			; no..
+	cmp	rxfree	,#km$bsz	; ya, check input ring buffer
+	beq	70$			; it's empty..
+	mov	rxgetc	,r5		; this is the offset to the next char
+	add	pc	,r5		; calculate and add
+	add	#rxbuff-.,r5		; the top of the buffer's address
+	movb	@r5	,r5		; get the char
+	inc	rxfree			; this byte is now free
+	inc	rxgetc			; next char will be here
+	cmp	rxgetc	,#km$bsz	; unless at the end
+	blo	50$			; not yet..
+	clr	rxgetc			; wrap to top of the buffer
+50$:	.if eq mmg$t
+	add	#q$wcnt	,r4		; get the word count
+	movb	r5	,@-(r4)		; return the char
+	inc	(r4)+			; next char goes here
+	dec	@r4			; done?
+	.iff
+	movb	r5	,-(sp)		; pass char to
+	jsr	pc	,@$ptbyt	; $_put_byte
+	dec	q$wcnt(r4)		; done?
+	.iftf
+	beq	60$			; ya..
+	cmp	rxfree	,#km$bsz	; no, is there more to do?
+	bne	10$			; ya..
+	bit	#binin	,clopts		; /63/ binary input mode enabled?
+	bne	60$			; /63/ ya, no need to terminate..
+	mov	kicqe	,r4		; no, restore pointer to current entry
+	.ift
+	add	#q$wcnt	,r4		; location of next free byte in buffer
+	clrb	@-(r4)			; null terminate the data
+	.iff
+	clrb	-(sp)			; pass a null byte to
+	jsr	pc	,@$ptbyt	; $_put_byte to terminate the data
+	.endc	; eq mmg$t
+60$:	mov	kicqe	,r4		; point to current queue element
+	mov	q$link(r4),kicqe	; put next element at top of queue
+	jsr	pc	,dequeue	; give current element to the os
+	br	10$			; next one..
+
+70$:	dec	rx.proc			; something new to do?
+	bpl	10$			; ya..
+80$:	rts	pc			; see code just below re: r0 vs. pc..
+
+90$:	mov	r1	,-(sp)		; r0 was just pushed by jsr r0 ,90$
+	mov	r2	,-(sp)		; note r0 is NOT preserved here as it
+	mov	r3	,-(sp)		; isn't needed in routine following..
+	mov	r0	,-(sp)		; save return address on top of stack
+	.mtps	#0			; drop priority, then
+	jsr	pc	,@(sp)+		; go back to the caller after which
+	mov	(sp)+	,r3		; we arrive here to pop the regs as
+	mov	(sp)+	,r2		; calling routine ends with rts pc
+	mov	(sp)+	,r1		;   ..all this saves a few words..
+	mov	(sp)+	,r0		; <- pushed by originating jsr r0,90$
+	rts	pc			; now return from whence we came..
+
+rx.proc:.word	-1			; -1=RXPROC is free, =>0 RXPROC is not
+rxbuff:	.blkb	km$bsz			; receive high speed ring buffer
+rxfree:	.word	km$bsz			; number of bytes free
+rxputc:	.word	0			; put_next_char pointer
+rxgetc:	.word	0			; get_next_char pointer
+
+
+	.sbttl	Place an entry on the internal queue
+
+enqueue:clr	kmcqe			; this is where it's coming from
+	clr	kmlqe			; also here, as never more than one..
+	tst	@r5			; anything in the internal queue?
+	bne	10$			; ya..
+	mov	r4	,(r5)+		; no, so this becomes the first
+	mov	r4	,(r5)+		; and the last one too
+	rts	r5
+
+10$:	mov	r4	,-(sp)		; address of the new element
+	tst	(r5)+			; get the pointer
+	mov	@r5	,r4		; to the last element
+	mov	@sp	,q$link(r4)	; link to the one being added
+	mov	(sp)+	,(r5)+		; which then becomes the last one..
+	rts	r5
+
+
+	.sbttl	Remove internal queue elements to monitor/handler queue
+
+delink:	mov	(r4)+	,r5		; get the queue to check (in or out)
+	mov	r4	,-(sp)		; r4 now has return address, save it
+	add	pc	,r5		; get queue's actual location
+del.pc	= .				; with respect to where we are now
+	mov	r5	,-(sp)		; and save a copy
+10$:	mov	q$link(r5),r4		; get link to next entry
+	beq	40$			; done
+	.if eq	tsx$p
+	movb	q$jnum(r4),r0		; recover the RT-11 job number
+	asr	r0
+	asr	r0
+	asr	r0
+	bic	#^c<17>	,r0		; got it..
+	.iff
+	movb	q$job(r4),r0		; support TSX job numbers >16
+	bic	#^c<77>	,r0		; but it'll never be >63.
+	.endc	; eq tsx$p
+	cmp	r0	,4(sp)		; does calling job own this entry?
+	beq	20$			; ya
+	mov	r4	,r5		; no, skip it
+	br	10$			; next..
+
+20$:	mov	q$link(r4),q$link(r5)	; unlink from the internal queue
+	tst	kmcqe			; any entries in the monitor queue?
+	bne	30$			; ya, add this at the end
+	mov	r4	,kmcqe		; no, make it the first
+	mov	r4	,kmlqe		; and thus the last as well
+	br	10$			; next..
+
+30$:	clr	q$link(r4)		; last entry must link to 0
+	mov	kmlqe	,r0		; pointer to last monitor queue entry
+	mov	r4	,q$link(r0)	; link in this new one
+	mov	r4	,kmlqe		; which is now the last one
+	br	10$			; next..
+
+40$:	mov	(sp)+	,r4		; back to top of the queue
+	mov	r5	,q$link+2(r4)	; queue now ends here
+	mov	(sp)+	,r4		; pop the return address
+	rts	r4
+
+
+	.sbttl	Non-exiting delink per RT-11 V5.5 SSM p. 7-22
+
+dequeue:.mtps	#340			; disable interrupts
+	tst	kmcqe-4			;;; need to wait?
+	bpl	10$			;;; no..
+	mov	@sp	,-(sp)		;;; ya, push the return address
+	.if eq mmg$t
+	clr	2(sp)			;;; and clear the PSW
+	.iff
+	mov	@#psw	,2(sp)		;;; under XM just hose
+	bic	#340	,2(sp)		;;; priority 7..
+	.iftf
+	.inten	km$pri	,pic		;;; goto the device priority
+	.fork	fkblk			; wait for system stuff to finish
+	.ift
+	.mtps	#340			; disable interrupts
+	.iff
+	bis	#340	,@#psw		; play it safe under XM ..
+	.endc	; eq mmg$t		; in case the monitor/handler queue
+10$:	mov	kmcqe	,-(sp)		; has an element, stash a copy then
+	mov	r4	,kmcqe		; put the internal queue element
+	mov	r4	,kmlqe		; on the monitor/handler queue
+	clr	q$link(r4)		; now delink from internal queue
+	picadr	#kmcqe	,r4		; emulate .drfin except
+	mov	@#sysptr,r5		; come back after the
+	jsr	pc	,@qcomp(r5)	; monitor/handler queue releases it
+	mov	@sp	,kmcqe		; recover the current element which is
+	mov	(sp)+	,kmlqe		; the first, last (and only) element
+	rts	pc
+
+fkblk:	.word	0 ,0 ,0 ,0		; fork queue element
+	.drend	KM
+
+	.end

@@ -1,0 +1,880 @@
+	.title	KRTCM1	Misc commands overlay
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	moved sph$xmode after set$modem so it will prevail..
+;	fixed problem caused by using errtxt buffer to store desired xmode
+;	where a "?" in a error message acted like SET PHONE XMODE ?
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	make type append a LF to CR if CR not followed by one
+;	hose hi bit and type anyway for VT100 and below in c$type
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	c$type defaults to .LST, error handling improved, does wildcards
+;	also sped up, types any size record, binary file filtering added
+;
+;	c$set - error handling fixed
+;	c$pwd, c$cls, c$clx, c$xmodem added..
+;	c$take parses file name, checks for/disallows wildcards, etc.
+;	c$conn - disallow connect to TT (since one is there already..)
+;	mount/dismount logical disks command interface, calls TSX emts
+;	added RT-11 style assign default device, for DK only
+;	remote disk_usage passes optional device argument
+;	reinit modem when exiting if DTR dropped during CONNECT
+;	added SET CLn LINE x support for TSX-Plus
+;	added search path for take files
+;	move sho$line here, added modem type, TSX line # and DCD status
+;	added call to c$idle in c$exit to reset modem on exit to monitor
+;	c$set now does multiple args, separated by commas
+
+;	Copyright 1983,1984 Change Software, Inc.
+;
+;	Creation: 16-Oct-84  15:38:44  Brian Nelson
+;
+;	This software is furnished under a license and may
+;	be  used  and  copied  only in accordance with the
+;	terms of such license and with  the  inclusion  of
+;	the  above copyright notice.  This software or any
+;	other copies thereof may not be provided or other-
+;	wise made available to any other person.  No title
+;	to and ownership of the software is hereby  trans-
+;	ferred.
+;
+;	The information in this  software  is  subject  to
+;	change  without notice and should not be construed
+;	as a commitment by the author.
+;
+;	12-Sep-86  10:39:27 BDN Convert for I/D space
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+	.mcall	.PURGE	,.SPFUN		; /62/
+
+
+	.sbttl	Local data		; /63/ consolidated here..
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+crflag:	.word	0			; /62/ TYPE uses to add LF to lone CR
+itsmine:.word	0			; device is already allocated flag
+tk.0:	.word	T10$ ,T30$ ,T50$ ,T70$ ,0	; addresses of names to try
+tk.1:	.word	T20$ ,T40$ ,T60$ ,T80$ ,0	; put actual file name here
+ T10$:	.ascii	"TAK:"				; this is the take file
+ T20$:	.asciz	"            "			; search path..
+ T30$:	.ascii	"KRT:"
+ T40$:	.asciz	"            "
+ T50$:	.ascii	"DK:"
+ T60$:	.asciz	"            "
+ T70$:	.ascii	"SY:"
+ T80$:	.asciz	"            "
+cl.nam:	.asciz	"CLn:"			; ascii copy of CL name with unit #
+	.even
+
+	.psect	$pdata
+parlst:	.word	P00$ ,P10$ ,P20$ ,P30$ ,P40$	; parity display in SHOW LINE
+ P00$:	.asciz	"NONE"
+ P10$:	.asciz	"ODD"
+ P20$:	.asciz	"EVEN"
+ P30$:	.asciz	"MARK"
+ P40$:	.asciz	"SPACE"
+cm1.01:	.asciz	" closed"<cr><lf>	; shared string: TAKE, defterm
+cm1.02:	.asciz	" opened"<cr><lf>
+cm1.03:	.asciz	" Files copied:"<cr><lf>
+cm1.04:	.asciz	"?TYPE-W-Binary file filter enabled"<cr><lf>
+cm1.05:	.asciz	" to TT:"<cr><lf>
+cm1.06:	.asciz	"Link device is "
+cm1.07:	.asciz	"TT:   "
+cm1.08:	.asciz	" via Line #"
+cm1.09:	.asciz	"   Priority: "
+cm1.10:	.asciz	"   Speed: "
+cm1.11:	.asciz	"N/A"
+cm1.12:	.asciz	"/"
+cm1.13:	.asciz	" modem is on-line   "
+cm1.14:	.asciz	"DTR: "
+cm1.15:	.asciz	"   DCD: "
+cm1.16:	.asciz	"   RTS: "
+cm1.17:	.asciz	"   CTS: "
+cm1.18:	.asciz	"Flow-Control: "
+cm1.19:	.asciz	"XOFF/XON   "
+cm1.20:	.asciz	"RTS/CTS    "
+cm1.21:	.asciz	"S/W Parity: "
+li.lo:	.asciz	"low"
+li.hi:	.asciz	"HIGH"
+takdef::.asciz	".COM"			; default take file extent, patchable
+typdef:	.asciz	".LST"			; default extent for type
+	.even
+
+
+	.psect	$code
+	.sbttl	The SET command		; /BBS/ just about all new..
+
+c$set::	upone	argbuf			; upper case just next arg
+	call	loaset			; load the set commands overlay
+	calls	getcm0	,<argbuf,r0>	; lookup address of desired command
+	mov	r0	,r2		; save a copy of it
+	bmi	60$			; some sort of error occurred
+	tst	wasnul			; were commands listed via "?"
+	bne	110$			; ya
+	call	loaset			; reload set commands overlay
+	calls	getcm1	,<argbuf,r0,r2>	; check possible argument to command
+	tst	r0			; well?
+	bmi	60$			; bad arg..
+
+10$:	scan	#comma	,argbuf		; look for a comma indicating
+	mov	r0	,restof		; stash pointer to remaining arg(s)
+	beq	20$			; no comma found
+	add	argbuf	,restof		; convert offset to address
+	mov	restof	,r0		; get pointer to put a null..
+	clrb	-(r0)			; ..where the comma was
+	mov	r1	,lastcmd	; save to dispatch when looping back
+
+20$:	jsr	pc	,@r1		; dispatch to command starting address
+	tst	r0			; did that succeed?
+	bne	40$			; nope..
+	mov	restof	,r0		; ya, any more arguments to process?
+	beq	110$			; nope..  note r0 is clear here too
+30$:	cmpb	(r0)+	,#space		; is first byte a blank?
+	beq	30$			; ya, skip past it
+	dec	r0			; back up to first non-blank char
+	copyz	r0  ,argbuf  ,#ln$max	; restore remaining as yet unused args
+	mov	lastcmd	,r1		; recover dispatch address pointer
+	br	10$			; loop back for more
+
+40$:	cmp	r0	,#cmd$un	; /62/ which kind of error occurred?
+	blt	80$			; it's not a cmd$.. error
+	bgt	50$			; not ambiguous either
+	mov	#er$aop	,r0		; it was an ambiguous option or value
+	br	80$
+50$:	cmp	r0	,#cmd$bad	; bad option or value?
+	bne	60$			; no, it's some other cmd$.. error
+	mov	#er$bad	,r0		; ya, say so
+	br	80$
+
+60$:	cmp	r0	,#cmd$ab	; ^C typed?
+	beq	100$			; /62/ ya
+	cmp	r0	,#cmd$nx	; /62/ ^Z but keep program running?
+	beq	100$			; /62/ ya
+	cmp	r0	,#cmd$ex	; a real ^Z?
+	beq	100$			; /62/ ya
+	cmp	r0	,#cmd$un	; ambiguous?
+	bne	70$			; nope
+	mov	#er$sam	,r0		; ya, make it an ambiguous SET command
+	br	90$
+70$:	cmp	r0	,#cmd$bad	; bad command?
+	bne	80$			; no
+	mov	#er$sun	,r0		; it's an unrecognizable SET command
+
+80$:
+	call	isitcl			; check for possible SET CLn
+	tst	r0			; was that it?
+	beq	110$			; ya
+90$:	direrr	r0			; no.. _ALL_ KRTST0/1 errors come here
+100$:	call	incsts			; set the global error flag
+110$:	return
+
+skipit::tst	restof			; was a comma in the arg string?
+	beq	120$			; no
+	strlen	argbuf			; ya, get length of part-one
+	add	argbuf	,r0		; point to its end
+	movb	#comma	,(r0)+		; stuff the comma back in !!
+	copyz	restof	,r0  ,#ln$max	; add in rest of original line and
+	clr	restof			; indicate it has been used here
+120$:	return
+
+
+	.sbttl	SET CLn LINE x		; /BBS/ this is all new..
+
+;	input:	entire command argbuf, .asciz
+
+isitcl:	mov	r0	,r4		; save incoming error
+	cmp	r0	,#er$pri	; error from SET CL PRIORITY?
+	beq	60$			; /BBS/ ya, bail out
+	upcase	argbuf			; make sure the whole buffer is ok
+
+10$:	scan	#'=	,argbuf		; /62/ look for an equals sign
+	tst	r0			; /62/ well?
+	beq	20$			; /62/ not there
+	add	argbuf	,r0		; /62/ found one, get pointer
+	movb	#space	,-(r0)		; /62/ and swap in a space for it
+	br	10$			; /62/ check for another "="
+
+20$:	mov	argbuf	,r2		; pointer to CLn:
+	beq	60$			; not there..
+	cmpb	#'C	,(r2)+		; is first byte a "C" ?
+	bne	60$			; nope..
+	cmpb	#'L	,(r2)+		; is second byte an "L" ?
+	bne	60$			; nope..
+
+	cmpb	(r2)	,#':		; is there a colon after CL?
+	beq	30$			; ya
+	cmpb	(r2)	,#space		; is there a space delimiter?
+	beq	30$			; ya
+
+	movb	(r2)+	,r0		; get unit #, sign bit should be zero
+	sub	#'7+1	,r0		; check unit is 0 - 7 only, and..
+	add	#7+1	,r0		; ..turn ascii into integer
+	bcs	40$			; good number crosses 0
+	br	60$			; bad number, bail out
+
+30$:	clr	r0			; set CL unit number to 0
+40$:	mov	r0	,cl.unit	; save CL unit number
+
+	mov	#^rCL0	,cl.r50		; rad50 name of "base" CL device
+	add	r0	,cl.r50		; make it the device at hand..
+
+	add	#'0	,r0		; now bump it up into an ascii digit
+	movb	r0	,cl.nam+2	; and stick that into "CLn:"
+
+	cmpb	(r2)	,#':		; is there a colon after CLn ?
+	bne	50$			; no
+	inc	r2			; ya, bump past it..
+50$:	cmpb	(r2)+	,#space		; is there a space delimiter?
+	beq	70$			; ya
+
+60$:	mov	r4	,r0		; no, revert to incoming err
+	br	100$
+
+70$:	cmpb	(r2)+	,#'L		; must be an "L"
+	bne	90$			; nope..
+	cmpb	(r2)	,#'I		; /62/ is this an "I" ?
+	bne	80$			; /62/ no
+	inc	r2			; /62/ ya, bump to next char
+	cmpb	(r2)	,#'N		; /62/ an "N" ?
+	bne	80$			; /62/ no
+	inc	r2			; /62/ ya, bump to next char
+	cmpb	(r2)	,#'E		; /62/ an "E" ?
+	bne	80$			; /62/ no
+	inc	r2			; /62/ ya, bump to next char
+80$:	cmpb	(r2)+	,#space		; /62/ a space?
+	bne	90$			; /62/ no, command is no good
+	tstb	@r2			; anything left?
+	beq	90$			; no, command is no good
+	tst	tsxsave			; running under TSX?
+	bne	110$			; ya
+	mov	#er$tsx	,r0		; no, load appropriate error
+	br	100$			; exit
+
+90$:	mov	#er$bad	,r0		; "bad option or value"
+100$:	jmp	260$			; goto the end, currently just return
+
+110$:	cmpb	(r2)	,#'*		; auto-assign?
+	bne	120$			; no
+	jmp	cl.wild			; ya
+
+120$:	clr	r3			; init a reg to hold line number
+130$:	movb	(r2)+	,r0		; next char
+	sub	#'9+1	,r0		; convert decimal ascii to integer
+	add	#9.+1	,r0		; whilst ensuring it's a valid digit
+	bcc	140$			; not a number, thus at end of digits
+	mul	#10.	,r3		; bump accumulator by 10s
+	add	r0	,r3		; add current digit to the answer
+	br	130$			; try for another numeric byte
+
+140$:	clr	itsmine			; init already allocated device flag
+	tst	r3			; assign or deassign?
+	bne	160$			; it's an assign
+	cmp	cl.r50	,r50dev		; dump it, if program owns it, that is
+	beq	150$			; only allow this on current dev
+	mov	cl.r50	,r0		; if .ne.
+	sub	#36	,r0		; try making possible "0" unit a space
+	cmp	r0	,r50dev		; and check it again
+	bne	220$			; /63/ not the same
+150$:	mov	argbuf	,r0		; copy pointer
+	movb	#'T&137	,(r0)+		; load argument to
+	movb	#'T&137	,(r0)+		; drop the CL
+	clrb	(r0)			; assign via
+	call	set$line		; "SET LINE TT"
+	br	200$			; no error possible here
+
+160$:	tst	r50dev			; is a link now in use?
+	bne	210$			; ya
+	mov	#alloerr,r1		; no, preser error allocate mapping
+	movb	#2	,d.allo		; prep to
+	mov	#d.allo	,r0		; check device
+	emt	375			; for activity
+	bcs	240$			; someone else has it
+	tst	r0			; or, perhaps you do on another line
+	beq	180$			; nope..
+	cmp	r0	,tsxsav		; check against current job # too
+	beq	170$			; ok  (same line #)
+	mov	#er$137	,r0		; not ok, in use by you on another job
+	br	260$			; bail out
+
+170$:	mov	sp	,itsmine	; allocate, except if already owned..
+180$:	mov	#atterr	,r1		; "attach" error mapping
+	mov	r3	,cl.line	; save the desired line number
+	mov	#attcl	,r0		; try to
+	emt	375			; attach it
+	bcs	240$			; didn't work
+	mov	sp	,z.atch		; ok, flag it was done from this pgm
+	tst	itsmine			; need to allocate the device?
+	bne	190$			; no, you already have it
+	mov	#alloerr,r1		; error mapping for allocate
+	clrb	d.allo			; make it ALLOCATE
+	mov	#d.allo	,r0		; try to
+	emt	375			; allocate the device
+	bcs	230$			; didn't work
+
+190$:	strcpy	argbuf	,#cl.nam	; /62/ give SET LINE CL unit's name
+	call	set$line		; same as "Kermit-11>SET LINE CLn"
+	bcc	200$			; it worked
+	call	cl.dump			; didn't work, clean up..
+	br	260$			; exit with error in r0
+
+200$:	clr	r0			; success
+	br	260$
+210$:	mov	#er$140	,r0		; must drop current assign first
+	br	260$
+220$:	mov	#er$own	,r0		; CL line not owned by this job
+	br	260$
+230$:	movb	@#errbyt,r2		; ya, save error
+	clr	cl.line			; prep to
+	mov	#attcl	,r0		; dump lingering
+	emt	375			; CL to term assign
+	movb	r2	,@#errbyt	; recover error
+240$:	movb	@#errbyt,r0		; get the error code
+	bpl	250$			; normal error
+	com	r0			; hard error code
+	mov	#faterr	,r1		; map into the hard errors
+250$:	asl	r0			; word addressing
+	add	r0	,r1		; map the error
+	mov	(r1)	,r0		; and return its address to caller
+260$:	return
+
+
+	.sbttl	SET CL LINE * processor
+
+cl.wild:tst	r50dev			; is there now a link device?
+	bne	80$			; ya, it has to go first..
+	tstb	ports			; any ports data supplied?
+	beq	90$			; no, can't do this
+	tstb	units			; any CL units specified?
+	beq	90$			; no, can't do this
+	mov	#units	,r2		; pointer to string of CL units
+	br	20$
+
+10$:	cmpb	(r2)+	,#space		; must be a space delimiter
+	bne	100$			; wasn't, no specified CL unit is free
+
+20$:	movb	(r2)+	,r0		; get unit #
+	sub	#'7+1	,r0		; check unit is 0 - 7 only, and..
+	add	#7+1	,r0		; ..turn ascii into integer
+	bcc	100$			; not a number
+	mov	r0	,cl.unit	; save CL unit number
+	mov	#^rCL0	,cl.r50		; rad50 name of "base" CL device
+	add	r0	,cl.r50		; make it the device at hand..
+	add	#'0	,r0		; now bump it up into an ascii digit
+	movb	r0	,cl.nam+2	; and stick that into "CLn:"
+
+	clr	itsmine			; init already allocated device flag
+	movb	#2	,d.allo		; prep to
+	mov	#d.allo	,r0		; check device
+	emt	375			; for activity
+	bcs	10$			; someone else has it
+	tst	r0			; or, perhaps you do on another line?
+	beq	30$			; nope..
+	cmp	r0	,tsxsav		; check against current job # too
+	bne	10$			; it's not this job..
+	mov	sp	,itsmine	; allocate, except if already owned..
+
+30$:	mov	#ports	,r4		; pointer to ports data
+	br	50$			; skip test for end on first pass thru
+
+40$:	tstb	(r4)			; anything left?
+	beq	110$			; nope..
+	cmpb	(r4)+	,#space		; is this a space delimiter?
+	bne	40$			; no, keep looking for one
+
+50$:	call	220$			; extract a number to try
+	tst	r3			; /62/ check for valid number
+	beq	90$			; /62/ line 0 doesn't exist
+	cmp	r3	,#40.		; max possible TSX line number
+	bhi	90$			; /62/ bad number
+	mov	r3	,cl.line	; good number, save it for attcl
+	mov	#attcl	,r0		; try to
+	emt	375			; attach it
+	bcc	60$			; it worked
+	movb	@#errbyt,r0		; it didn't work, find out why
+	cmpb	r0	,#3		; what to do?
+	bgt	40$			; something's busy, try next one
+	beq	90$			; errbyt=3, bad line
+	cmpb	r0	,#2		; is it 1 or 2?
+	beq	90$			; errbyt=2, bad unit
+	mov	#er$124	,r0		; terminal privilege is required
+	jmp	180$			; this is a fatal error..
+
+60$:	mov	sp	,z.atch		; flag TSX line was attached by Kermit
+	tst	itsmine			; need to allocate the device?
+	bne	120$			; no, you already have it
+	clrb	d.allo			; make it ALLOCATE
+	mov	#d.allo	,r0		; try to
+	emt	375			; allocate the device
+	bcc	120$			; ok
+	movb	@#errbyt,r0		; it didn't work, find out why
+	cmpb	r0	,#2		; what to do?
+	blt	40$			; device in use, try next one
+	beq	90$			; errbyt=2, bad device
+	cmpb	r0	,#4		; is it 3, 4 or 5?
+	beq	40$			; errbyt=4, in use by another job
+	bgt	70$			; needs allocate privilege
+	mov	#er$122	,r0		; TSX allocation table is full
+	br	180$			; which is a fatal error..
+
+70$:	mov	#er$123	,r0		; allocate privilege is required
+	br	180$			; fatal error..
+80$:	mov	#er$140	,r0		; must drop current assign first
+	br	180$
+90$:	mov	#er$141	,r0		; bad ports and/or units
+	br	180$
+100$:	mov	#er$142	,r0		; no specified CL unit is free
+	br	180$
+110$:	mov	#er$143	,r0		; no specified TSX line is free
+	br	180$
+
+120$:	strcpy	argbuf	,#cl.nam	; /62/ give SET LINE CL unit's name
+	mov	infomsg	,-(sp)		; save current state of SET TT [NO]QU
+	clr	infomsg			; suppress implicit sho$line in set$li
+	call	set$line		; same as "Kermit-11>SET LINE CLn"
+	mov	(sp)+	,infomsg	; restore SET TT [NO]QUIET state
+	bcc	130$			; the set$line worked
+	call	cl.dump			; it didn't work, clean up..
+	br	180$
+
+130$:	tstb	(r4)			; anything left in "PORTS" buffer?
+	beq	190$			; no, done
+	cmpb	(r4)	,#space		; is next byte a space?
+	beq	190$			; ya, thus no parameters given..
+	cmpb	(r4)+	,#'/		; is next byte a slash?
+	bne	160$			; no, it's an error
+	call	220$			; extract a speed value
+	calls	setspd	,<r3>		; give it a try
+	tst	r0			; well?
+	bne	170$			; it failed
+	clr	b4speed			; reset this if above succeeds..
+	cmpb	(r4)	,#space		; anything left in "PORTS" buffer?
+	ble	190$			; no
+	cmpb	(r4)+	,#'/		; is next byte a slash?
+	bne	160$			; no, it's an error
+	clrb	spare0			; /63/ init xmode buffer just in case
+	mov	argbuf	,r0		; /63/ save modem name here
+	call	250$			; copy modem name into spare buff
+	cmpb	(r4)	,#space		; anything left in "PORTS" buffer?
+	ble	140$			; no, try what was there
+	cmpb	(r4)+	,#'/		; is next byte a slash?
+	bne	160$			; no, it's an error
+	mov	#spare0	,r0		; /63/ pointer for 250$
+	call	250$			; copy xmode into a handy spare buffer
+
+140$:	mov	infomsg	,-(sp)		; save status of SET TT [NO]QUIET
+	clr	infomsg			; suppress display
+	call	set$modem		; try to SET to supplied string
+	mov	(sp)+	,infomsg	; restore SET TT [NO]QUIET
+	tst	r0			; did set$modem work?
+	bne	150$			; /63/ no
+	tstb	spare0			; /63/ was an xmode value saved?
+	beq	190$			; /63/ no, done
+	strcpy	argbuf	,#spare0	; /63/ put xmode where sph$xm needs it
+	call	sph$xm			; /63/ try to SET PHONE XMODE..
+	tst	r0			; did it work?
+	beq	190$			; /63/ ys
+	mov	#er$147	,r0		; SET PHONE XMODE failed
+	br	180$
+
+150$:	mov	#er$146	,r0		; no, bad ports string
+	br	180$
+160$:	mov	#er$144	,r0		; bad delimiter before speed or modem
+	br	180$
+170$:	mov	#er$145	,r0		; SET SPEED failed, bad ports string
+180$:	call	incsts			; set the global error flag
+	br	210$
+190$:	tst	infomsg			; time to say what's up?
+	beq	200$			; no
+	call	sho$line		; ya, display what was just done
+200$:	clr	r0			; flag success
+210$:	return
+
+220$:	clr	r3			; init an accumulator for the integer
+230$:	movb	(r4)+	,r0		; next char
+	sub	#'9+1	,r0		; convert ascii byte to integer value
+	add	#9.+1	,r0		; but use it only if a 0..9 digit
+	bcc	240$			; not a number
+	mul	#10.	,r3		; bump previous integer by 10s
+	add	r0	,r3		; then add in the current value
+	br	230$			; is next byte part of number?
+240$:	tstb	-(r4)			; park on first non-numeric byte
+	return
+
+250$:	cmpb	(r4)	,#space		; is next byte a space or less?
+	blos	260$			; /63/ ya, time to see if it will SET
+	cmpb	(r4)	,#'/		; no, but is it a slash?
+	beq	260$			; ya, try to SET..
+	movb	(r4)+	,(r0)+		; no, it's part of the modem name
+	br	250$			; check the next byte
+260$:	clrb	(r0)			; terminate
+	return
+
+
+	.sbttl	The CONNECT command	; /BBS/ heavily modified
+
+c$conn::tstb	ttname			; anything to connect ??
+	bne	10$			; ya
+	mov	#er$tt	,r0		; /62/ can't connect TT to TT
+	br	20$
+
+10$:	mov	mready	,-(sp)		; save modem's init status
+	call	doconn			; run the terminal emulator
+	tst	(sp)+			; was modem ever initialized?
+	beq	40$			; no
+	tst	mready			; ya, still initialized?
+	bne	40$			; ya
+	call	reinit			; no, go re-init it
+	tst	r0			; /62/ did it work?
+	beq	30$			; /62/ ya
+20$:	direrr	r0			; /62/ dump error message
+	call	incsts			; /62/ flag error so r0 can be cleared
+	br	40$
+30$:	.newline			; ensure prompt comes up in the clear
+40$:	clr	r0			; /62/ only do error message once
+	return
+
+
+	.sbttl	The TAKE command	; /BBS/ heavily hacked ..
+
+c$take::tst	cmdlun			; indirect file already open?
+	beq	30$			; no
+	tst	sy.ini			; here during init from KRT.INI?
+	beq	10$			; no
+	call	defterm			; ya, do end of init file stuff
+	br	20$			; continue
+
+10$:	tst	infomsg			; /41/ how verbose are we today?
+	beq	20$			; Not very
+	wrtall	#indnam			; dump file name
+	wrtall	#cm1.01			; /63/ " closed",cr
+20$:	calls	close	,<#lun.ta>	; close the file
+	clr	cmdlun			; clear the it's open flag for it
+
+30$:	clr	r4			; init try the path flag
+	upcase	argbuf			; upper case all args
+	scan	#'.	,argbuf		; look for a dot in the name
+	tst	r0			; find one?
+	bne	40$			; ya..
+	strcat	argbuf	,#takdef	; no, add .COM to it
+
+40$:	scan	#':	,argbuf		; look for device delimiter
+	tst	r0			; find one?
+	beq	50$			; no
+	copyz	argbuf	,#indnam,#16+1	; /62/ ya, try this file name
+	br	100$
+
+50$:	mov	#tk.1	,r3		; prep to build a list
+	mov	sp	,r4		; flag to try the path
+60$:	tst	@r3			; any more to open up?
+	beq	70$			; no
+	copyz	argbuf	,(r3)+	,#11.	; insert name in path stuff
+	br	60$			; try for a possible next one..
+
+70$:	mov	#tk.0	,r3		; the top of the list of stuff to try
+80$:	tst	@r3			; anything left?
+	bne	90$			; ya
+	mov	#er$fnf	,r0		; no, can't find it
+	br	140$			; bail out
+
+90$:	copyz	(r3)+	,#indnam,#16+1	; /62/ current name in list to opener
+100$:	calls	fparse	,<#indnam,#srcnam> ; parse the file name please
+	tst	r0			; did the $parse work?
+	bne	140$			; /62/ no
+	calls	iswild	,<#srcnam>	; wildcarded file spec?
+	tst	r0			; no support for it yet here..
+	bne	140$			; /62/ disallow wildcarded file name
+
+;	calls	chkext	,<#srcnam>	; check for binary file type
+;	tst	r0			; iz it binary?
+;	beq	110$			; nope
+;	mov	#er$fnm	,r0		; ya, bad file name
+;	br	130$			; bail out
+
+110$:	calls	open,<#srcnam,#lun.ta,#text> ; open file for input
+	tst	r0			; did the open for command file work?
+	bne	130$			; no, print error and exit
+	mov	#lun.ta	,cmdlun		; yes, stuff the unit number in
+	copyz	#srcnam	,#indnam ,#16+1	; /62/ stash a copy of the file name
+	tst	infomsg			; status of SET TT [NO]QUIET
+	beq	120$			; it's QUIET
+	wrtall	#indnam			; it's NOQUIET, display file name
+	wrtall	#cm1.02			; /63/ " opened",cr  r0 remains 0 here
+120$:	clr	exstal			; init take file line number pointer
+	br	150$			; take file will be read by readcmd..
+
+130$:	tst	r4			; if using the path list of names
+	bne	80$			; be sure they all get tried..
+140$:	direrr	r0			; print a error message and
+	call	incsts			; /62/ ensure global error flag is set
+	clrb	indnam			; zero out take file name buffer
+150$:	return
+
+
+	.sbttl	Local DIRECTORY and SPACE commands  ; /BBS/ modified a bit
+
+c$spac::mov	sp	,summary	; flag for summary only
+c$dir::	upcase	argbuf			; upper case all command args
+	calls	fixwild	,<argbuf>	; convert "?" to "%"
+	calls	dodir	,<argbuf>	; /62/ do the directory
+	tst	r0			; did it work?
+	beq	10$			; yes
+	direrr	r0			; no, print the error
+10$:	return
+
+
+	.sbttl	MOUNT, DISMOUNT a logical disk  (TSX+ only)  ; /BBS/ all new
+
+c$dismou::mov	sp	,r1		; set dismount flag
+	br	c.mnt			; and use common code
+
+c$mount::clr	r1			; flag to mount
+c.mnt:	tst	tsxsav			; /63/ running under TSX?
+	bne	10$			; ya
+	mov	#er$tsx	,r0		; no, load error
+	br	30$			; that's all
+
+10$:	cmp	tsxver	,#620.		; is this V6.20 or above?
+	bhis	20$			; ya
+	mov	#er$v62	,r0		; no
+	br	30$
+
+20$:	call	mount			; do the mount now
+	tst	r0			; did it work?
+	beq	40$			; yes
+30$:	direrr	r0			; no, print error message
+40$:	return
+
+
+	.sbttl	The local TYPE command	; /BBS/ heavily hacked..
+
+	.save
+	.psect	$pdata
+less:	.asciz	<cr><lf>		; only type these for a binary file
+more:	.asciz	<bell><bs><tab><cr><ff><lf><ctrl$n><ctrl$o><esc> ; ok in text
+	.even
+	.restore
+
+c$type::upcase	argbuf			; upper case all args
+	calls	fparse	,<argbuf,#srcnam> ; parse the file name please
+	tst	r0			; did the $parse work?
+	beq	10$			; ya
+	jmp	170$			; no
+
+10$:	clr	index			; init getnxt directory index
+	scan	#'.	,#srcnam	; look for a dot in the name
+	tst	r0			; find one?
+	bne	20$			; ya..
+	strcat	#srcnam	,#typdef	; no, add ".LST" to it
+
+20$:	calls	iswild	,<#srcnam>	; wildcarded?
+	mov	r0	,r4		; save copy of answer
+30$:	calls	lookup	,<#srcnam,#filnam> ; /62/
+	tst	r0			; did it work?
+	beq	70$			; yes
+	clr	r1			; clear try for another flag..
+	cmp	r0	,#er$nmf	; no more files matching name?
+	beq	40$			; yes, we are all done then
+	cmp	r0	,#er$fnf	; how about file not found?
+	bne	60$			; /62/ no, print error message
+40$:	tst	index			; sent any files yet?
+	beq	50$			; no
+	jmp	190$			; yes, that's ok then
+50$:	mov	#er$fnf	,r0		; no, change "no more" to "not found"
+60$:	jmp	180$			; /62/ go do error message
+
+70$:	mov	#more	,r3		; init for text file filtering
+	clr	r1			; init binary/text flag
+	calls	chkext	,<#filnam>	; check for binary file type
+	tst	r0			; iz it binary?
+	beq	80$			; no..
+	mov	#less	,r3		; ya, get binary file filter
+	inc	r1			; flag as binary
+80$:	clr	r2			; assume file not open
+	calls	open,<#filnam,#lun.in,r1> ; open file for input
+	tst	r0			; but did the open work?
+	bne	170$			; no
+	com	r2			; flag it as being open please
+	tst	r4			; wildcarded?
+	beq	90$			; nope
+	cmp	index	,#1		; is this the first file?
+	bne	90$			; nope
+	wrtall	#cm1.03			; /63/ " Files copied:",cr
+90$:	tst	r1			; iz binary filter active?
+	beq	100$			; nope
+	wrtall	#cm1.04			; /63/ "Binary file filter enabled",cr
+100$:	tst	r4			; more than one file possibly?
+	beq	110$			; no, skip naming of each one
+	wrtall	#filnam			; print the expanded name out
+	wrtall	#cm1.05			; /63/ " to TT:",cr
+110$:	calls	open,<#0,#lun.kb,r1>	; open (init) TT for putc output
+
+120$:	mov	#lun.in	,r0		; I/O chan to use
+	call	getcr0			; get a byte
+	tst	r0			; end of it all?
+	bne	170$			; ya
+	cmp	vttype	,#vt200		; can term do 8-bit stuff?
+	bge	130$			; ya..
+	bicb	#200	,r1		; /62/ hose hi bit for VT-100 or below
+130$:	cmpb	r1	,#space		; a "printable" char??
+	bge	140$			; ya, no problem..
+	scan	r1	,r3		; look for char in allowed list
+	tst	r0			; a hit?
+	beq	120$			; nope, so on to the next
+140$:	asr	crflag			; /62/ ya, was last byte a CR?
+	bcc	150$			; /62/ no
+	cmpb	r1	,#lf		; /62/ is this byte a LF?
+	beq	150$			; /62/ ya
+	calls	putc	,<#lf,#lun.kb>	; /62/ no, append LF to CR just typed
+150$:	cmpb	r1	,#cr		; /62/ is this byte a CR?
+	bne	160$			; /62/ no
+	inc	crflag			; /62/ ya, flag it is
+160$:	calls	putc	,<r1,#lun.kb>	; put char to TT
+	br	120$			; next char please
+
+170$:	mov	r0	,r1		; save copy for wildcard loop
+	cmp	r0	,#er$eof	; end of file?
+	beq	190$			; ya
+180$:	direrr	r0			; no, print the error out
+	clr	r1			; clear look for another flag
+190$:	calls	close	,<#lun.kb>	; flush TT out buffer
+	tst	r2			; is the type file open?
+	beq	200$			; no
+	calls	close	,<#lun.in>	; ya, close it
+200$:	cmp	r1	,#er$eof	; try for another match?
+	bne	210$			; nope, done
+	.newline			; ya, put possible next file in clear
+	jmp	30$			; then go try to type it out
+210$:	.purge	#lun.sr			; /62/ hose dir search channel
+	clr	r0			; /62/ any error was already handled
+	return
+
+
+	.sbttl	SHOW LINE		; /BBS/ moved here, added defterm
+
+defterm::tst	infomsg			; SET TT NOQ during init?
+	beq	10$			; no
+	wrtall	#indnam			; ya, say
+	wrtall	#cm1.01			; /63/ " closed",cr
+10$:	tst	signon			; need to do this?
+	bne	20$			; no
+	call	sho$line		; ya, SHOW LINE as part of pgm sign-on
+20$:	mov	qu.ini	,infomsg	; make the SET permanent
+	clr	sy.ini			; done with this now
+	return
+
+sho$li::wrtall	#cm1.06			; /63/ "Link device is "
+	tstb	ttname			; something besides TT?
+	bne	10$			; ya
+	wrtall	#cm1.07			; /63/ "TT:   "
+	jmp	170$			; skip speed, DTR, etc for TT
+
+10$:	wrtall	#ttname			; display link device name
+	mov	cl$line	,r0		; using a TSX port with it?
+	beq	20$			; not this time
+	wrtall	#cm1.08			; /63/ " via Line #"
+	call	L10266			; dump line # to TT
+20$:	tst	tsxsav			; running under TSX?
+	beq	30$			; no
+	wrtall	#cm1.09			; /63/ "   Priority: "
+	mov	cl.pri	,r0		; pass priority value to L10266
+	call	L10266			; dump priority to TT
+30$:	wrtall	#cm1.10			; /63/ "   Speed: "
+	call	ttspeed			; is current
+	tst	r0			; speed available?
+	bne	40$			; /62/ yes
+	wrtall	#cm1.11			; /63/ "N/A"
+	br	50$
+40$:	call	L10266			; print the speed
+	mov	b4speed	,r0		; did last call alter speed?
+	beq	50$			; nope
+	wrtall	#cm1.12			; /63/ "/"
+	call	L10266			; display the "SET" speed too
+
+50$:	.newline
+	tst	mready			; a modem on-line?
+	beq	60$			; /62/ no
+	wrtall	#modem			; ya
+	wrtall	#cm1.13			; /63/ " modem is on-line   "
+60$:	tst	sy.ini			; here for program initialization?
+	bne	170$			; ya, skip past DTR/DCD stuff
+	wrtall	#cm1.14			; /63/ "DTR: "
+	call	inqdtr			; see if DTR is up
+	tst	r0			; if < it's not supported
+	bmi	70$			; no good
+	bgt	80$			; DTR's up
+	wrtall	#li.lo			; /62/ "low"
+	br	90$
+70$:	wrtall	#cm1.11			; /63/ "N/A"
+	br	90$
+80$:	wrtall	#li.hi			; /62/ "HIGH"
+90$:	wrtall	#cm1.15			; /63/ "   DCD: "
+	call	inqcd			; see if DCD is up
+	tst	r0			; if > DCD is asserted
+	bgt	100$			; it's up
+	wrtall	#li.lo			; /62/ "low"
+	br	110$
+100$:	wrtall	#li.hi			; /62/ "HIGH"
+110$:	clr	r1			; /62/ preset to XOFF flow control
+	tst	km.lock			; /62/ only do these next two
+	beq	150$			; /62/ for the KM handler
+	clr	-(sp)			; /62/ a one word buffer
+	mov	sp	,r1		; /62/ pointer to it
+	.spfun	#rtwork,#xc.control,#clstat,r1,#0,#1 ; get the status
+	mov	(sp)+	,r1		; /62/ pop buffer, save a copy
+	wrtall	#cm1.16			; /63/ "   RTS: "
+	bit	#10	,r1		; /62/ is RTS asserted?
+	bne	120$			; /62/ ya
+	wrtall	#li.lo			; /62/ "low"
+	br	130$
+120$:	wrtall	#li.hi			; /62/ "HIGH"
+130$:	wrtall	#cm1.17			; /63/ "   CTS: "
+	bit	#20	,r1		; /62/ is CTS asserted?
+	bne	140$			; /62/ ya
+	wrtall	#li.lo			; /62/ "low"
+	br	150$
+140$:	wrtall	#li.hi			; /62/ "HIGH"
+
+150$:	.newline
+	wrtall	#cm1.18			; /63/ "Flow-Control: "
+	bit	#40	,r1		; /62/ if <> it's done in hardware
+	bne	160$
+	wrtall	#cm1.19			; /63/ "XOFF/XON   "
+	br	170$
+160$:	wrtall	#cm1.20			; /63/ RTS/CTS   "
+170$:	mov	parity	,r0		; display what's set in Kermit itself
+	wrtall	#cm1.21			; /63/ "S/W Parity: "
+	asl	r0			; word indexing into list
+	wrtall	parlst(r0)		; write appropriate word to TT
+	.newline			; format display
+	mov	sp	,signon		; sign-on has been done
+	clr	r0			; no error possible
+	return
+
+
+	.sbttl	Cleanup before exiting to monitor	; /BBS/ enhanced
+
+c$exit::call	sd$off			; close possibly open debug file
+	tst	outopn			; is an output file open?
+	beq	10$			; no
+	calls	close	,<#lun.ou>	; ya, close it
+10$:	mov	mready	,-(sp)		; save modem status
+	call	c$idle			; reset modem, if need be..
+	tst	(sp)+			; was there a modem?
+	beq	20$			; nope
+	calls	suspend	,<#0,settle>	; ya, let it settle
+20$:	call	xl.dump			; drop DTR, handler interrupts
+	tst	tsxcl			; using a CL line?
+	beq	30$			; no
+	call	cl.dump			; dump it
+30$:	jmp	exit			; goto hardware reset in KRTRMS
+
+	.end

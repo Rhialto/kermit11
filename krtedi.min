@@ -1,0 +1,804 @@
+	.title	KRTEDI.MIN  SL editor
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	IN$MODE	=	1
+	UP$MODE	=	2
+	DN$MODE	=	4
+	UP$END	=	10
+	FW$MODE	=	20
+
+	.sbttl	Local data
+
+	.psect	$pdata
+$ceol:	.asciz	<esc>"[K"
+$cz:	.asciz	"^Z"<cr><lf>
+$left:	.asciz	<esc>"[D"
+$resto:	.asciz	<esc>"8"
+$right:	.asciz	<esc>"[C"
+$rubout:.byte	bs ,space ,bs ,0
+$save:	.asciz	<esc>"7"
+$setvt:	.byte	esc ,'= ,0
+delimit:.byte	40 ,54 ,56 ,57 ,72 ,75 ,133 ,0
+	.even
+
+
+	.psect	$code
+	.sbttl	SL editor main loop
+
+kbredi::save	<r2,r3,r4>
+	tst	sl.on
+	bne	10$
+
+	wrtall	@r5
+	calls	kbread	,<2(r5)>
+	br	100$
+
+10$:	call	l$nolf
+	wrtall	@r5
+	tst	sl.ked
+	beq	15$
+	wrtall	#$setvt
+15$:	clr	edipos
+	clr	edilen
+	mov	2(r5)	,r4
+	clrb	@r4
+20$:	call	read1ch
+	mov	r0	,r3
+	beq	90$
+
+	tst	sl.ked
+	bne	50$
+	scan	r3	,#scanlst
+	asl	r0
+	jsr	pc	,@scandsp(r0)
+	br	70$
+50$:	scan	r3	,#kedlst
+	asl	r0
+	jsr	pc	,@keddsp(r0)
+70$:	bcs	20$
+	br	100$
+
+90$:	mov	#er$eof	,r0
+	clr	r1
+100$:	unsave	<r4,r3,r2>
+	return
+
+	.save
+	.psect	$pdata
+scanlst:.byte	'A&37	,'B&37	,'C&37	,'D&37	,'E&37	,'F&37	,lf
+	.byte	cr	,'R&37	,'U&37	,'V&37	,'W&37	,'Z&37	,33
+	.byte	177	,217	,233
+	.byte	0
+	.even
+scandsp:.word	insch
+	.word	toggle	,prev	,ctrlc	,left	,prev	,right	,lfproc
+	.word	done	,retype	,ctrlu	,next	,retype	,eof	,doesc
+	.word	dorub	,do220	,do220
+
+kedlst:	.byte	'C&37	,'H&37	,'I&37	,lf	,cr	,'R&37
+	.byte	'U&37	,'Z&37	,33	,177	,217	,233
+	.byte	0
+	.even
+keddsp:	.word	insch
+	.word	ctrlc	,dorub	,toggle	,lfproc	,done	,retype
+	.word	ctrlu	,eof	,doesc	,dorub	,do220	,do220
+	.restore
+
+
+	.sbttl	Process escape sequence
+
+doesc:	call	read1ch
+	cmpb	r0	,#'[
+	beq	do220
+	cmpb	r0	,#'O&137
+	bne	beep
+
+do220:	call	read1ch
+	tst	sl.ked
+	bne	10$
+	scan	r0	,#esclst
+	asl	r0
+	jmp	@escdsp(r0)
+10$:	scan	r0	,#k.lst
+	asl	r0
+	jmp	@k.dsp(r0)
+
+	.save
+	.psect	$pdata
+esclst:	.byte	'A&137	,'B&137	,'C&137	,'D&137	,'S&137	,'P&137	,'Q&137
+	.byte	0
+	.even
+escdsp:	.word	beep
+	.word	prev	,next	,right	,left	,pf$4	,pf$1	,pf$2
+
+k.lst:	.byte	'A&137	,'B&137	,'C&137	,'D&137	,'p!40	,'r!40	,'M&137
+	.byte	'q!40	,'s!40	,'t!40	,'u!40	,'S&137	,'m!40	,'l!40
+	.byte	'P&137	,'Q&137
+	.byte	0
+	.even
+k.dsp:	.word	beep
+	.word	prev	,next	,right	,left	,sol	,eol	,done
+	.word	kp$1	,kp$3	,kp$4	,kp$5	,pf$4	,kp$min	,kp$com
+	.word	pf$1	,pf$2
+	.restore
+
+
+	.sbttl	Ring the bell
+
+beep:	mov	#bell	,r0
+	call	writ1char
+	sec
+	return
+
+
+	.sbttl	PF2, Help
+	.enabl	lsb
+
+pf$2:	tst	pf2$ok
+	beq	5$
+	call	l$nolf
+	wrtall	#$ceol
+	message	<?KRTEDI-F-Can't overlay HELP from here>,cr
+	br	90$
+
+5$:	mov	#10$	,r0
+	tst	sl.ked
+	beq	30$
+	mov	#20$	,r0
+30$:	strcpy	argbuf	,r0
+	.newline
+	save	<r5,r4>
+	call	c$help
+	unsave	<r4,r5>
+90$:	call	retype
+	sec
+	return
+
+	.save
+	.psect	$pdata
+10$:	.asciz	"SL F"
+20$:	.asciz	"SL K"
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Post-PF1 processor
+
+pf$1:	call	read1ch
+	tst	sl.ked
+	bne	10$
+	scan	r0	,#pf1lst
+	asl	r0
+	jmp	@pf1dsp(r0)
+10$:	scan	r0	,#k1.lst
+	asl	r0
+	jmp	@k1.dsp(r0)
+
+	.save
+	.psect	$pdata
+pf1lst:	.byte	'C&37	,lf	,'U&37	,'Z&37
+	.byte	33	,177	,217	,233
+	.byte	0
+	.even
+pf1dsp:	.word	beep
+	.word	ctrlc	,.lfproc,.ctrlu	,eof
+	.word	.doesc	,.dorub	,.do220	,.do220
+
+k1.lst:	.byte	'C&37	,'H&37	,lf	,'U&37	,'Z&37
+	.byte	33	,177	,217	,233
+	.byte	0
+	.even
+k1.dsp:	.word	beep
+	.word	ctrlc	,.dorub	,.lfproc,.ctrlu	,eof
+	.word	.doesc	,.dorub	,.do220	,.do220
+	.restore
+
+.doesc:	call	read1ch
+	cmpb	r0	,#'[
+	beq	.do220
+	cmpb	r0	,#'O&137
+	beq	.do220
+	jmp	beep
+
+.do220:	call	read1ch
+	tst	sl.ked
+	bne	10$
+	scan	r0	,#pfxlst
+	asl	r0
+	jmp	@pfxdsp(r0)
+10$:	scan	r0	,#kx.lst
+	asl	r0
+	jmp	@kx.dsp(r0)
+
+	.save
+	.psect	$pdata
+pfxlst:	.byte	'S&137	,'P&137
+	.byte	0
+	.even
+pfxdsp:	.word	beep
+	.word	.pf$4	,pf$1
+
+kx.lst:	.byte	'S&137	,'m!40	,'l!40	,'P&137
+	.byte	0
+	.even
+kx.dsp:	.word	beep
+	.word	.pf$4	,.kp$min,.kp$com,pf$1
+	.restore
+
+
+	.sbttl	Two ways to undel a char
+
+.kp$com:call	.dorub
+	tst	r0
+	bne	10$
+	call	left
+10$:	sec
+	return
+
+.dorub:	movb	undchr	,r3
+	bne	10$
+	jmp	beep
+10$:	jmp	insch
+
+
+	.sbttl	Insert a char
+
+insch:	cmpb	r3	,#space
+	blt	1$
+	cmp	edilen	,#ln$max
+	blo	10$
+1$:	jmp	beep
+
+10$:	mov	edipos	,r1
+	add	r4	,r1
+	tstb	(r1)
+	bne	13$
+	movb	r3	,(r1)+
+	clrb	(r1)
+	dec	r1
+	wrtall	r1
+	inc	edilen
+	inc	edipos
+	br	90$
+
+13$:	bit	#in$mode,edists
+	bne	15$
+	movb	r3	,(r1)+
+	br	30$
+
+15$:	sub	#ln$max+2,sp
+	mov	sp	,r2
+	strcpy	r2	,r1
+	movb	r3	,(r1)+
+	strcpy	r1	,r2
+	add	#ln$max+2,sp
+	inc	edilen
+
+30$:	wrtall	#$save
+	dec	r1
+	wrtall	r1
+	wrtall	#$restore
+	call	right
+
+90$:	clr	r0
+	sec
+	return
+
+
+	.sbttl	Move to start of line (Keypad 0)
+
+sol:	tst	edipos
+	ble	100$
+	call	left
+	br	sol
+100$:	sec
+	return
+
+
+	.sbttl	Move to end of line (Keypad 2)
+
+eol:	cmp	edipos	,edilen
+	bhis	100$
+	call	right
+	br	eol
+100$:	sec
+	return
+
+
+	.sbttl	Move cursor one word
+
+kp$1:	mov	edists	,r2
+loop:	mov	edipos	,r1
+	bit	#fw$mode,r2
+	bne	10$
+	tst	r1
+	ble	100$
+	br	20$
+10$:	cmp	r1	,edilen
+	bhis	100$
+20$:	call	kp$3
+	mov	edipos	,r1
+	add	r4	,r1
+	scan	(r1)	,#delimit
+	tst	r0
+	bne	loop
+	scan	-1(r1)	,#delimit
+	tst	r0
+	beq	loop
+100$:	sec
+	return
+
+
+	.sbttl	Move cursor one char
+
+kp$3:	bit	#fw$mode,edists
+	beq	left
+
+
+	.sbttl	Move right one char
+
+right:	cmp	edipos	,edilen
+	bge	100$
+	wrtall	#$right
+	inc	edipos
+	cmp	edipos	,edilen
+	blt	100$
+	bic	#fw$mode,edists
+100$:	sec
+	return
+
+
+	.sbttl	Move left one char
+
+left:	tst	edipos
+	ble	100$
+	wrtall	#$left
+	dec	edipos
+	bne	100$
+	bis	#fw$mode,edists
+100$:	sec
+	return
+
+
+	.sbttl	Set advance mode
+
+kp$4:	bis	#fw$mode,edists
+	sec
+	return
+
+
+	.sbttl	Set backup mode
+
+kp$5:	bic	#fw$mode,edists
+	sec
+	return
+
+
+	.sbttl	Process ^C, ^Z
+	.enabl	lsb
+
+ctrlc:	call	sol
+	wrtall	#$ceol
+	clr	edilen
+	clrb	@r4
+	tst	edicmd
+	blt	10$
+	mov	#ln$cnt	,edicmd
+	dec	edicmd
+10$:	mov	#cmd$ab	,r0
+	br	110$
+
+eof:	call	eol
+	wrtall	#$cz
+	mov	#cmd$ex	,r0
+110$:	bic	#<up$mode!dn$mode!up$end!fw$mode>,edists
+	clr	r1
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Process CR, store command line
+
+done:	emt	340
+	.newline
+	tst	edilen
+	beq	100$
+
+	clr	r2
+	mov	#ln$cnt	,r3
+10$:	mov	lastli(r2),r0
+	tstb	@r0
+	bne	11$
+	tst	r2
+	beq	60$
+	mov	r2	,r3
+	asr	r3
+	br	13$
+11$:	add	#2	,r2
+	sob	r3	,10$
+	clr	r2
+	mov	#ln$cnt	,r3
+
+13$:	mov	r4	,-(sp)
+	dec	r3
+	asl	r3
+	mov	lastli(r3),r1
+	mov	edilen	,r0
+	cmpb	(r1)+	,r0
+	bne	20$
+15$:	cmpb	(r4)+	,(r1)+
+	bne	20$
+	sob	r0	,15$
+20$:	mov	(sp)+	,r4
+	asr	r3
+	tst	r0
+	bne	30$
+	mov	r3	,edicmd
+	br	100$
+
+30$:	tst	r2
+	bne	60$
+
+40$:	mov	lastli(r2),r0
+	mov	lastli+2(r2),r1
+50$:	movb	(r1)+	,(r0)+
+	bne	50$
+55$:	add	#2	,r2
+	sob	r3	,40$
+
+60$:	mov	lastli(r2),r1
+	movb	edilen	,(r1)+
+70$:	movb	(r4)+	,(r1)+
+	bne	70$
+80$:	asr	r2
+	mov	r2	,edicmd
+
+100$:	mov	edilen	,r1
+	bic	#<up$mode!dn$mode!up$end!fw$mode>,edists
+	clr	r0
+	return
+
+
+	.sbttl	Recall a command
+
+next:	mov	#edicmd	,r2
+	tst	@r2
+	bge	5$
+	call	beep
+	br	100$
+
+5$:	cmp	@r2	,#ln$cnt-1
+	blt	7$
+6$:	call	beep
+	br	90$
+
+7$:	inc	@r2
+
+	bit	#dn$mode,edists
+	beq	10$
+	bic	#dn$mode,edists
+	br	5$
+
+10$:	mov	@r2	,r2
+	asl	r2
+	mov	lastli(r2),r2
+	tstb	@r2
+	beq	6$
+
+30$:	call	recover
+
+	bis	#up$mode,edists
+	cmp	edicmd	,#ln$cnt
+	blt	100$
+	dec	edicmd
+	bic	#up$mode,edists
+	br	100$
+
+90$:	bic	#up$mode,edists
+	call	l$nolf
+	wrtall	#$ceol
+	wrtall	@r5
+	clrb	@r4
+	clr	edilen
+	clr	edipos
+
+100$:	bic	#up$end,edists
+	sec
+	return
+
+
+	.sbttl	Up-arrow key
+
+prev:	bit	#up$end,edists
+	beq	10$
+	call	beep
+
+10$:	mov	edicmd	,r2
+	bge	13$
+	call	beep
+	br	100$
+
+13$:	bit	#up$mode,edists
+	bne	15$
+
+	asl	r2
+	mov	lastli(r2),r2
+	tstb	@r2
+	bne	20$
+
+15$:	bic	#up$mode,edists
+	dec	edicmd
+	br	10$
+
+20$:	call	recover
+
+	tst	edicmd
+	bgt	70$
+	clr	edicmd
+	bic	#dn$mode,edists
+	bis	#up$end,edists
+	br	100$
+
+70$:	dec	edicmd
+	bis	#dn$mode,edists
+
+100$:	sec
+	return
+
+
+	.sbttl	Recover a command line
+
+recover:call	l$nolf
+	wrtall	#$ceol
+	wrtall	@r5
+	clrb	(r4)
+	movb	(r2)+	,r3
+	beq	50$
+	mov	r4	,r1
+30$:	movb	(r2)+	,(r1)+
+	bne	30$
+	wrtall	r4
+50$:	mov	r3	,edilen
+	mov	r3	,edipos
+	bic	#fw$mode,edists
+	return
+
+
+	.sbttl	Process ^U
+
+ctrlu:	mov	edipos	,r1
+	ble	100$
+	call	SOL
+	wrtall	#$ceol
+	clr	edilen
+	clr	r0
+	call	undwrt
+	mov	r4	,r2
+20$:	movb	(r0)+	,(r2)+
+	beq	30$
+	inc	edilen
+	inc	edipos
+	br	20$
+30$:	wrtall	r4
+	call	sol
+100$:	sec
+	return
+
+
+	.sbttl	Keypad minus
+
+kp$min:	cmp	edipos	,edilen
+	bge	100$
+	mov	edipos	,r3
+	call	savclr
+	mov	edists	,-(sp)
+	bis	#fw$mode,edists
+	call	kp$1
+	mov	(sp)+	,edists
+	mov	edipos	,r1
+	sub	r3	,r1
+	sub	r1	,edilen
+	mov	r3	,r0
+	call	undwrt
+	wrtall	#$restore
+	mov	r3	,edipos
+	call	outwrt
+100$:	sec
+	return
+
+
+	.sbttl	Line feed
+
+lfproc:	tst	edipos
+	ble	100$
+	mov	edipos	,r3
+	mov	edists	,-(sp)
+	bic	#fw$mode,edists
+	call	kp$1
+	mov	(sp)+	,edists
+	mov	r3	,r1
+	sub	edipos	,r1
+	sub	r1	,edilen
+	mov	edipos	,r0
+	call	undwrt
+	call	savclr
+	call	outwrt
+100$:	sec
+	return
+
+
+	.sbttl	Write buffers
+
+undwrt:	mov	#undlin	,r2
+	movb	r1	,(r2)+
+	add	r4	,r0
+10$:	movb	(r0)+	,(r2)+
+	sob	r1	,10$
+	clrb	(r2)
+	return
+
+outwrt:	wrtall	r0
+	wrtall	#$restore
+	mov	r4	,r2
+	add	edipos	,r2
+20$:	movb	(r0)+	,(r2)+
+	bne	20$
+	return
+
+
+	.sbttl	Un-do PF4, keypad comma
+
+.kp$min:
+.pf$4:	call	.ctrlu
+	tst	r0
+	bne	100$
+	movb	undlin	,r0
+10$:	call	left
+	sob	r0	,10$
+100$:	sec
+	return
+
+
+	.sbttl	Un-do ^U, line feed
+
+.lfproc:
+.ctrlu:	tstb	undlin
+	beq	3$
+	mov	#ln$max	,r0
+	sub	edilen	,r0
+	ble	3$
+	cmpb	undlin	,r0
+	ble	10$
+3$:	jmp	beep
+
+10$:	sub	#ln$max+2,sp
+	mov	sp	,r2
+
+	mov	edipos	,r1
+	add	r4	,r1
+
+	mov	#undlin	,r3
+	movb	(r3)+	,r0
+	add	r0	,edilen
+	add	r0	,edipos
+
+	strcpy	r2	,r1
+15$:	movb	(r3)+	,(r1)+
+	bne	15$
+	dec	r1
+	strcpy	r1	,r2
+
+30$:	wrtall	#undlin+1
+	wrtall	#$save
+	wrtall	r2
+	wrtall	#$restore
+	add	#ln$max+2,sp
+100$:	clr	r0
+	sec
+	return
+
+
+	.sbttl	Process PF4
+
+pf$4:	mov	edilen	,r1
+	sub	edipos	,r1
+	ble	100$
+	mov	#undlin	,r2
+	movb	r1	,(r2)+
+	mov	r4	,r0
+	add	edipos	,r0
+	mov	r0	,r1
+10$:	movb	(r0)+	,(r2)+
+	bne	10$
+	clrb	(r1)
+	wrtall	#$ceol
+	mov	edipos	,edilen
+100$:	sec
+	return
+
+
+	.sbttl	Erase char under cursor
+	.enabl	lsb
+
+kp$com:	cmp	edipos	,edilen
+	bge	100$
+	mov	r4	,r2
+	add	edipos	,r2
+	tstb	(r2)
+	beq	100$
+	br	20$
+
+
+	.sbttl	Erase char to left of cursor
+
+dorub:	tst	edipos
+	ble	100$
+	mov	r4	,r2
+	add	edipos	,r2
+	tstb	(r2)
+	bne	10$
+	movb	-(r2)	,undchr
+	clrb	(r2)
+	dec	edilen
+	wrtall	#$rubout
+	dec	edipos
+	br	100$
+
+10$:	call	left
+	dec	r2
+20$:	movb	(r2)	,undchr
+	mov	r2	,r1
+	mov	r2	,r3
+	inc	r1
+23$:	movb	(r1)+	,(r3)+
+	bne	23$
+	dec	edilen
+	call	savclr
+	wrtall	r2
+	wrtall	#$restore
+100$:	sec
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Process ^R
+
+retype:	call	l$nolf
+	wrtall	#$ceol
+	wrtall	@r5
+	tst	sl.ked
+	beq	5$
+	wrtall	#$setvt
+5$:	wrtall	r4
+	call	l$nolf
+	strlen	@r5
+	add	edipos	,r0
+10$:	wrtall	#$right
+	sob	r0	,10$
+	sec
+	return
+
+
+	.sbttl	Toggle insert/overstrike mode
+
+toggle:	mov	#in$mode,r0
+	xor	r0	,edists
+	sec
+	return
+
+	.sbttl	Save cursor then clear to EOL
+
+savclr:	wrtall	#$save
+	wrtall	#$ceol
+	return
+
+	.end

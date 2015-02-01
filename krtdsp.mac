@@ -1,0 +1,515 @@
+	.title	KRTDSP	I/O dispatch and support
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	leave comm handler chans open after assigning it as the link device
+;	add version testing to support RT-11 V4
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	this module has been extensively modified
+;
+;	moved kbread here, one copy is sufficient, cleaned up also
+;	streamlined jsw/nowait/single_char modes/setting/resetting/etc
+;	added writ1char routine - writes a single character to TT
+;	add entry for inqdtr, only works with CL handler
+;	assdev patched for new mapxl in krtxl
+;	made packet buffer length = $ALLSIZ to match checkpacket buffer
+;	ttyrst - resume TSX window processing, as after packets, connect
+;	added cl.dump to clean up CL stuff when exiting/modifying the line
+;	inqbuf patched to use MAXLNG for TSX+, MAXPAK for RT-11
+;	added inqcd
+;
+;	moved binread here so CONNECT can share it and XL can be left
+;	open under TSX and RT-11SJ where there is no hope of closing it
+;
+;	I/O is now dispatched this way:
+;	 1) if via the controlling terminal line, use routines in KRTERM
+;	    regardless of operating system.  that is, the t.tty... calls
+;	 2) if via a handler, use routines in KRTXL.  that is, the
+;	    x.tty... calls for CL XC or XL
+;	 3) RT-11 multi-terminal I/O has been pulled
+;
+;	moved set$line here, patched to reset modem to idle state and release
+;	a TSX CL line after SET LINE TT if same was acquired within Kermit
+;
+;	set$line won't write bad device to ttname
+;	SET LINE TT now reverts to remote mode
+
+;	08-Nov-84  16:16:40  Brian Nelson
+;
+;	 Collect  K11PRT  and  K11TSX  into  separate  overlays  in
+;	the same region (either disk or virtual).  Dispatch to  the
+;	correct one based on how the link device is SET.  While the
+;	cost in address  space  to create overlay table entries for
+;	all of the ept's in each module is about 300 words doing so
+;	saves me the need to create multiple save images every time
+;	I  change Kermit-11.  Additionally,  one save image for all
+;	systems sounds like a nice idea to me.
+;
+;	12-Sep-86  11:20:20 BDN Changed around to separate I/D space
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+; /62/	.ABTIO,.POKE bypassed for V4, also expanded to allow assy under same
+
+	.mcall	.CLOSE	,.GVAL	,.RCTRLO,.RSUM
+	.mcall	.SPFUN	,.TTINR	,.TTYIN	,.TTYOU	,.TWAIT
+
+
+	.macro	entry	ep		; dispatch to TT or handler as needed
+	.list me
+	.enabl	lsb
+ep::	mov	#200$	,r0
+	jmp	dispat
+	.save
+	.psect	$pdata
+200$:	.word	x.'ep,t.'ep		; dropped multi-term stuff
+	.restore
+	.dsabl	lsb
+	.nlist me
+	.endm	entry
+
+
+	.sbttl	Global and local data
+
+	CLHOSE	=	265		; reset for TSX V6.0 and up CL handler
+	DTRDRV	=	206		; RT-11 V5.2 and up, set/clear DTR
+	OFFDRV	=	205		; disable interrupts at program exit
+	$tcfig	=	424		; ADDR of SET TERM options status word
+
+	.psect	xcdata	,rw,d,gbl,rel,con
+attcl::	.byte	0 ,155			; attach a CL unit to a TSX line
+cl.unit::.word	0			; integer copy of CL unit number
+cl.line::.word	0			; connect CL unit to this TSX line #
+cl$line::.word	0			; perm copy, follows valid assign
+d.allo::.byte	0 ,156			; (de)allocate a device emt args
+	.word	cl.r50			; device to (de)allo..
+cl.r50::.word	0 ,0 ,0 ,0		; ..which lives here
+km.lock::.word	0			; /62/ if <> it's KM running
+r50dev::.word	0 ,0 ,0 ,0		; current link dev name, if handler
+suspnd::.word	0			; suspend count for CONNECT tasks
+xcdone::.word	0			; moved here, read is complete
+xk.con::.word	0			; if <>, reads to terminal emulator
+xkrd1:	.word	0 ,0 ,0 ,0 ,0 ,0	; work area for handler reads
+xksize	==	100			; size in bytes for handler reads
+xkbuff::.blkb	xksize+2		; read buffer for handler
+xkpoint::.word	xkbuff			; pointer to current position in buff
+xkspeed::.word	0			; moved here to live in root
+xl.lock::.word	0			; if <> XL can't do .close
+z.atch::.word	0			; if <> TSX line was gotten here
+
+	.psect	$pdata
+tsxwai:	.word	0 ,1			; ticks between reads from keyboard
+w$resume:.byte	4 ,161			; resume TSX window processing
+	.even
+
+	.psect	packet	,rw,d,lcl,rel,con
+packet::.blkb	$allsiz			; the packet buffer
+
+
+	.psect	$code			; /62/ missed this in the last edit..
+	.sbttl	SET LINE		; /BBS/ moved this here
+
+set$li::tst	xl.lock			; can current device go away?
+	beq	10$			; no problem
+	mov	#er$150	,r0		; big problem
+	br	30$			; go handle it
+
+10$:	upcase	argbuf			; ensure case is correct..
+	strlen	argbuf			; get length of device name
+	add	argbuf	,r0		; then point to end of it
+	cmpb	-(r0)	,#':		; is last byte a colon?
+	beq	20$			; ya
+	tstb	(r0)+			; no, bump to where colon goes
+	movb	#':	,(r0)+		; insert same after device name
+	clrb	@r0			; and re-terminate
+
+20$:	calls	assdev	,<argbuf>	; try to get the exec to allocate it
+	tst	r0			; did the allocation work?
+	beq	40$			; ya..
+30$:	direrr	r0			; no, print out the directive error
+	call	incsts			; /62/ flag there was an error
+	clr	r0			; error just handled
+	sec				; so CONNECT can detect error
+	br	80$			; done
+
+40$:	tst	tt$io			; /62/ talking to TT?
+	beq	50$			; no
+	clrb	ttname			; ya, clear the name
+	clr	cl$line			; not using a TSX port any more
+	mov	sp	,remote		; we are now the remote system
+	br	60$
+
+50$:	strcpy	#ttname	,argbuf		; /62/ moved this here..
+	mov	cl.line	,cl$line	; save perm copy of TSX port #
+	clr	remote			; no longer are we remote
+60$:	tst	infomsg			; SET TT QUIET?
+	beq	70$			; ya
+	call	sho$line		; no, display the new line
+70$:	clr	r0			; error handled above
+80$:	return
+
+
+	.sbttl	Assign the link device
+
+assdev::mov	@r5	,r0		; get the first character of the name
+	cmpb	#'T&137	,(r0)+		; a "T" ?
+	bne	10$			; nope..
+	cmpb	#'T&137	,(r0)+		; a second "T" ?
+	bne	10$			; nope..
+	tstb	@r0			; "TT"
+	beq	40$			; is okie..
+	cmpb	#':	,(r0)+		; so iz "TT:"
+	bne	10$			; this ain't it
+	tstb	@r0			; must be null
+	beq	40$			; ok
+
+10$:	tst	r50dev			; is something already in use?
+	beq	20$			; no
+	mov	#er$140	,r0		; ya, got to drop it first
+	br	30$
+20$:	call	x.assdev		; try to talk to it
+30$:	return
+
+40$:	mov	mready	,-(sp)		; save modem status
+	call	c$idle			; reset modem, if need be..
+	tst	(sp)+			; was there a modem?
+	beq	50$			; nope
+	calls	suspend	,<#0,settle>	; ya, let it settle
+50$:	call	xl.dump			; drop handler interrupts
+	tst	tsxcl			; was prior line a CL unit?
+	beq	60$			; nope
+	call	cl.dump			; dump possible CL cross-connect
+
+60$:	clr	r50dev			; not a handler now..
+	clr	xkspeed			; kludge, can't get from handler
+	clr	b4speed			; hose any fallback reset speed
+	clr	tsxcl			; can't be this now
+	mov	sp	,tt$io		; /62/ flag to do I/O via TT
+	tst	tsxsav			; real TSX+ ?
+	bne	80$			; /62/ ya, that's it..
+	tst	parity			; /BBS/ parity already set up?
+	bne	70$			; /39/ yes
+	mov	#par$space,parity	; /39/ need 8-bit quoting also
+70$:	mov	#60.	,senlen		; /62/ console port won't XOFF fast
+	movb	#60.	,senpar+p.spsiz	; /62/ enough, do receive size too
+	clr	dolong			; need this too..
+	clr	reclng			; and this just to be safe
+80$:	clr	r0
+	return
+
+
+	.sbttl	Drop the comm handler
+
+xl.dump::tst	r50dev			; /BBS/ newer better way to bomb it
+	beq	30$			; no device to hose
+	.spfun	#rtwork,#xc.control,#dtrdrv,#0,#0,#1 ; /62/ drop DTR and RTS
+	calls	suspend	,<#0,settle>	; let any external hardware settle..
+	mov	#offdrv	,r1		; preset for RT-11
+	tst	tsxcl			; TSX and CL?
+	beq	10$			; no
+	cmp	tsxver	,#600.		; ya, but is it V6.00 or above?
+	blo	10$			; no
+	mov	#clhose	,r1		; ya
+10$:	.spfun	#rtwork,#xc.control,r1,#0,#0,#1 ; /62/ disable interrupts
+	tst	xl.lock			; /62/ can monitor .close the handler?
+	bne	20$			; /62/ no
+	cmp	rt11ver	,#5		; /62/ is this RT-11 V5 or above?
+	blt	20$			; /62/ no, V4 can't abort I/O..
+; /62/	.abtio	#lun.xk			; /62/ ya, dump any lingering data
+	MOV	#lun.xk+<11.*^o400>,R0	; /62/ expanded for assy under V4
+	EMT	^o374			; /62/ even though V4 can't run it
+	.close	#lun.xk			; /62/ close its chan
+; /62/	.abtio	#xc.control		; /62/ hose control chan
+	MOV	#xc.control+<11.*^o400>,R0 ; /62/ expanded for assy under V4
+	EMT	^o374			; /62/ even though V4 can't run it
+	.close	#xc.control		; /62/ close it
+	clr	xcdone			; /62/ handler read no longer pending
+20$:	tst	tsxsav			; running under TSX?
+	beq	30$			; no
+	mov	r50dev	,cl.r50		; ya, copy name to
+	call	deallo			; deallocate the device
+30$:	return
+
+
+	.sbttl	Drop a CL unit
+
+cl.dump::save	<r0>			; /BBS/ added this..
+	mov	r50dev	,cl.r50		; copy for emt
+	mov	r50dev	,r0		; copy to extract CL unit number
+	sub	#^rCL	,r0		; got it
+	beq	10$			; using "space' for "0" in unit number
+	sub	#36	,r0		; using existing unit number
+10$:	mov	r0	,cl.unit	; save it
+	clr	cl.line			; SET CLn LIN=0
+	tst	z.atch			; did this pgm attach this line?
+	beq	20$			; no
+	mov	#attcl	,r0		; try to
+	emt	375			; deattach it
+	clr	z.atch			; nothing is now attached..
+20$:	call	deallo			; DEALLOCATE even if not ALLOC'd by us
+	unsave	<r0>			; restore caller's error
+	return
+
+
+	.sbttl	Deallocate the TSX+ comm handler
+
+deallo:	movb	#1	,d.allo		; set to drop it
+	mov	#d.allo	,r0		; try to
+	emt	375			; deallocate the device
+	return
+
+
+	.sbttl	Init the link device	; /63/ merged opentt and ttyini
+
+opentt::clr	r0			; /BBS/ preset to no error
+	tst	linksts			; already open?
+	bne	20$			; yes, ignore it then
+	mov	#L999$	,r0		; load dispatch addresses pointer
+	calls	dispat	,<#0>		; /63/ clear a flag and call the init
+	tst	r0			; did it work?
+	beq	10$			; /63/ ya
+	direrr	r0			; no, handle error here, right away..
+	call	incsts			; /62/ flag there was an error
+	br	20$			; /63/
+10$:	mov	sp	,linksts	; ya, flag it as being open
+20$:	return
+
+	.save
+	.psect	$pdata
+L999$:	.word	x.ttyini,t.ttyini
+	.restore
+
+
+	.sbttl	Close the link device	; /63/ moved this here..
+
+clostt::save	<r0>
+	call	ttyfin			; close the link
+	call	ttyrst			; /62/ reset the terminal
+	clr	linksts			; flag link is now closed
+	unsave	<r0>
+	return
+
+
+	.sbttl	Reset terminal after using it for file transfer or CONNECT
+
+ttyrst::mov	ttparm	,@#jsw		; restore jsw
+	.rctrlo				; force read of new jsw
+	tst	tsxsave			; running under TSX?
+	bne	30$			; ya, skip to TSX reset
+	.gval	#rtwork,#$tcfig		; restore terminal configuration
+	cmp	rt11ver	,#5		; /62/ is this RT-11 V5 or above?
+	bge	10$			; /62/ ya, .poke will work
+	tst	montyp			; /62/ if XM and V4..
+	bgt	20$			; /62/ ..tough luck
+	mov	ttpar2	,(r0)		; /62/ otherwise, this is it
+	br	20$
+10$:	mov	r0	,r1		; copy as poke eats r0
+; /62/	.poke	#rtwork,r1,ttpar2	; stuff back into memory
+	MOV	#rtwork	,R0		; /62/ expanded to assemble under V4
+	MOV	#28.*^o400+3,@R0	; /62/ even though V4 can't run it
+	MOV	r1	,2.(R0)		; /62/
+	MOV	ttpar2	,4.(R0)		; /62/
+	EMT	^o375			; /62/
+20$:	.rctrlo				; force update of $tcfig
+	br	60$			; skip TSX stuff
+
+30$:	save	<r2,r1>
+	mov	#1	,r1		; offset to second byte
+	mov	#11.	,r2		; 11 of 'em to do
+40$:	movb	#'P	,limits(r1)	; load deactivation prefix
+	add	#3	,r1		; bump to next string
+	sob	r2	,40$		; next one
+	wrtall	#limits			; reset TSX activation chars
+
+	tstb	vl$chr			; if 0 windowing was left on
+	beq	50$			; so no need to resume it here
+	mov	#w$resume,r0		; resume TSX
+	emt	375			; window processing
+50$:	unsave	<r1,r2>
+
+60$:	clr	r0			; success
+	return
+
+
+	.sbttl	I/O dispatch
+
+	ENTRY	BINREAD			; binary read, send XON if no char
+	ENTRY	BINWRITE		; binary write
+	ENTRY	CANTYP			; (try to) cancel type_ahead
+	ENTRY	HOSE			; 100% hose the link device
+	ENTRY	DCDTST			; /62/ check DCD during transfers
+	ENTRY	INQCD			; is DCD there?
+	ENTRY	INQDTR			; is DTR there? (CL/KM handlers only)
+	ENTRY	SETSPD			; set speed
+	ENTRY	TTSPEED			; get speed (CL/KM handlers only)
+	ENTRY	TTXON			; clear local XOFF, send a ^Q
+	ENTRY	TTYFIN			; finished with the link device
+	ENTRY	TTYHAN			; hang up
+	ENTRY	XBINREAD		; no-XON-if-no-char binary read
+
+dispatch:tst	tt$io			; /62/ talking to TT?
+	bne	tt.io			; ya..
+	jmp	@(r0)			; /62/ no, it's a handler
+
+tt.io:	tst	(r0)+			; bump to TT I/O address
+	jmp	@(r0)			; /62/ and call it
+
+
+	.sbttl	Shared read for XL .close problem
+
+	SRDDRV	=	203		; special read, wc is max # of bytes
+					; to read, always returns at least one
+					; byte, up to max if data are there
+	STATE	=	2		; <> flags scheduler to run the task
+
+readxk::tst	xcdone			; is there a read already queued?
+	bne	10$			; /62/ ya, can't queue more than one
+	mov	sp	,xcdone		; /62/ no, but there is now..
+	mov	#xkbuff	,xkpoint	; reset buffer pointer now
+	clrb	xkbuff			; and init it
+	.spfun	#xkrd1,#lun.xk,#srddrv,#xkbuff,#xksize,#1,#20$ ; read in data
+10$:	return
+
+20$:	clr	xcdone			; /62/ flag a read completion
+	tst	xk.con			; here from CONNECT?
+	beq	30$			; no
+	mov	sp	,xkhead+state	; /63/ ya, notify the scheduler
+	tst	suspnd			; need to resume?
+	beq	30$			; no
+	dec	suspnd			; ya, make sure no one else does this
+	.rsum				; resume mainline so xkproc can run
+30$:	return
+
+
+	.sbttl	Get input from a printing terminal
+
+kbread::save	<r2>			; /BBS/ rewritten a bit..
+	bic	#<10000!100>,@#jsw	; ditch single char input and nowait
+	.rctrlo				; force read of new jsw
+	tst	tsxsav			; running under TSX?
+	beq	10$			; nope..
+	wrtall	#m.tsxr			; if TSX, ensure LF echo is on
+10$:	mov	@r5	,r1		; a buffer to put the chars
+	clrb	@r1			; init buffer
+	mov	#ln$max	,r2		; size of the buffer here
+
+; /BBS/ NOTE: under TSX what actually happens here is the line is stored in
+;	an internal to TSX buffer until an "activation" character is received,
+;	in this case the return at the end of the line, then the whole thing
+;	is dumped into the program via .ttyin in one fell swoop..  this limits
+;	what might be done in advance of the return being typed, such as not
+;	echoing chars destined to be truncated - however on the whole it is
+;	all handled reasonably well by TSX as regards rubouts, retype, etc..
+
+20$:	.ttyin				; read a character please
+	cmpb	r0	,#'Z&37		; ^Z ?
+	bne	30$			; no
+	mov	#cmd$ex	,r0		; ya, distinguish it from ^C ..
+	br	60$			; bail out
+30$:	cmpb	r0	,#'C&37		; ^C ?
+	bne	40$			; no
+	mov	#cmd$ab	,r0		; ya, say it's an abort
+	br	60$			; bail out
+40$:	cmpb	r0	,#cr		; carriage return?
+	beq	50$			; ya, done
+	tst	r2			; any room left in buffer?
+	ble	20$			; nope, truncate the rest
+	movb	r0	,(r1)+		; return what we just got
+	dec	r2			; decrement what's left counter
+	br	20$			; and back for more
+
+50$:	emt	340			; .ttinr to eat the LF after CR
+	clrb	@r1			; null terminate the buffer
+	sub	@r5	,r1		; the length
+	clr	r0			; no error..
+60$:	unsave	<r2>
+	bis	#<10000!100>,@#jsw	; restore single char & nowait input
+	save	<r0>			; /62/ save error code
+	.rctrlo				; force read of new jsw
+	unsave	<r0>			; /62/ restore error code
+	tst	tsxsav			; running under TSX?
+	beq	70$			; no
+	wrtall	#m.tsxs			; if TSX, kill LF echo
+70$:	return
+
+
+	.sbttl	Get one char from TT
+
+read1c::.ttinr				; try to get a char
+	bcc	10$			; got one
+	.twait	#rtwork,#tsxwai		; nothing there, wait one tick
+	br	read1c			; and try again
+10$:	return
+
+
+	.sbttl	TT output in various ways ; /BBS/ heavily hacked
+
+writ1ch::save	<r1>
+	.ttyou				; dump char
+	mov	xprint	,r1		; send to LP?
+	beq	10$			; no
+	save	<r0>
+	call	putcr0			; channel is passed in r1
+	unsave	<r0>			; ignore any error..
+10$:	unsave	<r1>
+	return
+
+wrtall::save	<r2,r1,r0>
+	mov	10(sp)	,r2		; get string address
+loop:	tstb	(r2)			; done?
+	beq	10$			; yes, exit
+	clr	r0			; init reg to avoid sign extension
+	bisb	(r2)+	,r0		; the character to write out
+	.ttyou				; no, dump a byte
+	mov	xprint	,r1		; dump to LP?
+	beq	loop			; no, continue
+	call	putcr0			; channel is passed in r1
+	br	loop			; continue
+10$:	unsave	<r0,r1,r2>
+	mov	(sp)+	,(sp)		; move return address up
+	return
+
+l$nolf::save	<r1,r0>
+	tst	vttype			; unless it's a hard copy term
+	beq	L10$			; it is
+	.ttyou	#cr			; it isn't, just a CR, no line feed..
+	br	L20$
+
+l$pcrlf::save	<r1,r0>
+L10$:	.ttyou	#cr
+	.ttyou	#lf
+L20$:	mov	xprint	,r1		; dump to LP?
+	beq	L30$			; no
+	mov	#cr	,r0		; ya, add in a return
+	call	putcr0
+	mov	#lf	,r0		; and LP always gets a line feed
+	call	putcr0
+L30$:	unsave	<r0,r1>
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Clear the console, hose all pending terminal input
+
+clrcns::call	chkabo			; try to get a byte of input
+	tst	r0			; get it?
+	bne	clrcns			; ya, loop until nothing is left
+	return
+
+
+	.sbttl	Check for abort, see if anything typed at the terminal
+
+chkabo::.ttinr				; nowait TT input
+	bcc	10$			; got something
+	clr	r0			; got nothing
+10$:	return
+
+	.end

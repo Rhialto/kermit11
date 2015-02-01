@@ -1,0 +1,1240 @@
+V03.62-5_min 31-May-93
+1 ?
+
+ The question mark used as an argument dumps the dispatch
+ table for that command, thus listing all things possible:
+
+	Kermit-11>?	       ; display available commands
+	Kermit-11>SET ?        ; show all possible sets
+	Kermit-11>SET FILE ?   ; list all valid options
+
+1 @
+
+ Open an indirect file for command input.  Same as TAKE.
+ If no device is specified DK and SY  will  be  tried in
+ that order.  Either "!" or ";" may be used as a comment
+ delimiter in Kermit-11 TAKE files.  All Kermit commands
+ except control characters are ok,  and EXIT may be used
+ in place of ^Z.
+
+	Kermit-11>@ file    ; default type is .COM
+	Kermit-11>@file     ; RT-11 syntax is ok
+
+1 ASCII_Set
+
+	Table of Octal, Decimal and Hex values for ASCII characters
+
+ Char Key Oct Dec Hex    Ch Oct Dec Hex    Ch Oct Dec Hex    Ch Oct Dec Hex
+ ---- --- --- --- ---    -- --- --- ---    -- --- --- ---    -- --- --- ---
+ NUL  ^SP 000  0.  0     SP 040 32. 20     @  100 64. 40     `  140  96. 60
+ SOH  ^A  001  1.  1     !  041 33. 21     A  101 65. 41     a  141  97. 61
+ STX  ^B  002  2.  2     "  042 34. 22     B  102 66. 42     b  142  98. 62
+ ETX  ^C  003  3.  3     #  043 35. 23     C  103 67. 43     c  143  99. 63
+ EOT  ^D  004  4.  4     $  044 36. 24     D  104 68. 44     d  144 100. 64
+ ENQ  ^E  005  5.  5     %  045 37. 25     E  105 69. 45     e  145 101. 65
+ ACK  ^F  006  6.  6     &  046 38. 26     F  106 70. 46     f  146 102. 66
+ BEL  ^G  007  7.  7     '  047 39. 27     G  107 71. 47     g  147 103. 67
+
+ BS   ^H  010  8.  8     (  050 40. 28     H  110 72. 48     h  150 104. 68
+ HT   ^I  011  9.  9     )  051 41. 29     I  111 73. 49     i  151 105. 69
+ LF   ^J  012 10.  A     *  052 42. 2A     J  112 74. 4A     j  152 106. 6A
+ VT   ^K  013 11.  B     +  053 43. 2B     K  113 75. 4B     k  153 107. 6B
+ FF   ^L  014 12.  C     ,  054 44. 2C     L  114 76. 4C     l  154 108. 6C
+ CR   ^M  015 13.  D     -  055 45. 2D     M  115 77. 4D     m  155 109. 6D
+ SO   ^N  016 14.  E     .  056 46. 2E     N  116 78. 4E     n  156 110. 6E
+ SI   ^O  017 15.  F     /  057 47. 2F     O  117 79. 4F     o  157 111. 6F
+
+ DLE  ^P  020 16. 10     0  060 48. 30     P  120 80. 50     p  160 112. 70
+ DC1  ^Q  021 17. 11     1  061 49. 31     Q  121 81. 51     q  161 113. 71
+ DC2  ^R  022 18. 12     2  062 50. 32     R  122 82. 52     r  162 114. 72
+ DC3  ^S  023 19. 13     3  063 51. 33     S  123 83. 53     s  163 115. 73
+ DC4  ^T  024 20. 14     4  064 52. 34     T  124 84. 54     t  164 116. 74
+ NAK  ^U  025 21. 15     5  065 53. 35     U  125 85. 55     u  165 117. 75
+ SYN  ^V  026 22. 16     6  066 54. 36     V  126 86. 56     v  166 118. 76
+ ETB  ^W  027 23. 17     7  067 55. 37     W  127 87. 57     w  167 119. 77
+
+ CAN  ^X  030 24. 18     8  070 56. 38     X  130 88. 58     x  170 120. 78
+ EM   ^Y  031 25. 19     9  071 57. 39     Y  131 89. 59     y  171 121. 79
+ SUB  ^Z  032 26. 1A     :  072 58. 3A     Z  132 90. 5A     z  172 122. 7A
+ ESC  ^[  033 27. 1B     ;  073 59. 3B     [  133 91. 5B     {  173 123. 7B
+ FS   ^\  034 28. 1C     <  074 60. 3C     \  134 92. 5C     |  174 124. 7C
+ GS   ^]  035 29. 1D     =  075 61. 3D     ]  135 93. 5D     }  175 125. 7D
+ RS   ^~  036 30. 1E     >  076 62. 3E     ^  136 94. 5E     ~  176 126. 7E
+ US   ^?  037 31. 1F     ?  077 63. 3F     _  137 95. 5F    DEL 177 127. 7F
+
+1 ASSIGN
+
+ Like that of RT-11, except only DK (the default disk) is supported.
+ This specifies what Kermit will use as its default disk, it doesn't
+ modify the monitor's assignment for DK.
+
+	Kermit-11>ASS LD0 DK
+
+1 Binary_Files
+
+ Binary files include task or save images and other special types
+ requiring all eight bits in each byte.  Text  files like program
+ sources normally  only  use  the lower seven bits.  Binary files
+ should be transferred on an eight-bit line, which on most PDP-11
+ systems is the default.  Under RT-11 Kermit-11 defaults to space
+ parity as its handlers are 7-bit devices, and 8-bit quoting will
+ be required to transfer binary data.  This adds a byte for every
+ one with the high bit set and thus increases the transfer time.
+
+  Various Kermits are at different stages of  development.  Some
+  may NOT handle binary files automatically thus the command SET
+  FILE FIXED must be done on BOTH before a binary file transfer.
+  Versions 2.16 and up of Kermit-11 do automatically switch into
+  the binary mode.  Under RT-11 the file type must be defined in
+  sending Kermit's binary types list (see HELP SET BINARY) prior
+  to transmission.
+
+ Binary files are best exchanged using CRC error checking.  This
+ isn't the default and may need to be SET on the other Kermit if
+ it can't recover yours from the init packet.
+
+ Note that transferring a text file with one or both Kermits set
+ to binary mode may result in an unusable file due to the chance
+ of including embedded record control information.  If this does
+ occur KED may be used (open the file and then immediately EXIT)
+ to strip the hi bits from it.
+
+ Prior to Version 2.21 Kermit-11 didn't support 8-bit prefixing.
+ Before V2.23, repeat character encoding wasn't supported.
+
+   A problem was discovered with  attribute  packet  processing
+   in versions of Kermit-11  prior to  3.49.  This implies that
+   versions 3.49 or later of Kermit-11 will not  be  completely
+   compatible  with older versions.   The best workaround until
+   a copy of ver 3.49 or later can be obtained  is  to  disable
+   attribute packet processing with the SET NOATTR command then
+   SET FILE FIXED on BOTH ends before transferring binary data.
+
+1 BUG
+
+ Displays where to get help should one encounter a bug in this program.
+
+1 CD
+
+ Makes the specified device the default disk, directing to it
+ file operations for which no device is explicitly specified.
+ This only modifies Kermit, the monitor remains unchanged and
+ you'll be back where you started after exiting the program.
+
+1 CLS
+
+ CLear Screen, with numerous resets for VT-100 terminal.
+ CLX does the same, then enables the reverse video mode.
+
+1 CLX
+
+ Clears a VT-100 screen ala CLS, then sets the reverse video mode.
+
+1 COPY
+
+ Creates a copy of the input file.  Wildcards are not supported,
+ and it is more efficient to use COPY from the monitor.  You may
+ move a single file retaining the input file name with:
+
+	Kermit-11>COP file dev:
+
+1 CWD
+
+ Synonym for CD.
+
+1 Debugging
+
+ Various debug options are available.  See HELP SET DEBUG for
+ in depth information.  Try HELP SET RANDOM regarding a means
+ to deliberately force errors to test recovery from them, and
+ HELP EXAMINE for info about looking at data in memory.
+
+     Logging to a file:		    LOG file debug_mode
+	Packets/Files/States	    SET DEB PACKET file
+	Raw terminal I/O	    SET DEB RAW file
+
+     Turn off debugging		    SET DEB OFF
+
+1 DELETE
+
+ Deletes a single specified file.  Wildcards are not supported.
+ The entire command name "DELETE" must be used (no substring is
+ acceptable) as some small protection against accidents.
+
+1 DIRECTORY
+
+ Displays the default device directory, or that of a specified device.
+ Wildcarding is  implicit  regardless of how the monitor has been set.
+ Switches (/opt) are not implemented.
+
+  Kermit-11>DIR		   ; all files on DK: (default device)
+  Kermit-11>DIR .MAC	   ; all files of type .MAC (same as *.MAC)
+  Kermit-11>DIR KRT*.MAC   ; all beginning with KRT of type .MAC
+  Kermit-11>DIR LD0:.MAC   ; all files of type .MAC on LD0:
+  Kermit-11>DIR EDIT.	   ; file name must be just EDIT with no type
+  Kermit-11>DIR EDIT%	   ; 5 chars, first 4 are EDIT, any type
+  Kermit-11>DIR .MAP,.SAV  ; comma delimits, see HELP SET FILE CSI
+
+1 EXAMINE
+
+ Format and print global read/write data to the terminal:
+
+	Kermit-11>EXA PACKET	; dump packet buffer to TT
+	Kermit-11>EXA *		; all defined variables
+	Kermit-11>EXA 44	; address of your choice
+
+ Please  note  attempting  to  examine  an illegal address
+ will crash the program.  The .MAP file for the Kermit you
+ are using may be used to locate addresses not included in
+ the internal symbol table.  Some overlays are permanently
+ loaded (refer to the link command file for the version in
+ use) but most are not, and these most likely will be gone
+ by the time one has returned to Kermit's command line.
+
+1 EXIT
+
+ Terminates Kermit-11 and exits to the monitor, resetting the link
+ device and modem if same were assigned from within the program.
+
+1 HELP
+
+ Entering HELP alone prints the list of available topics.
+ For detailed information about a specific function:
+
+	Kermit-11>HELP topic [subtopic] ..
+
+ Should one prefer the printed page, this dumps help text
+ to LP to produce a handy reference:
+
+	Kermit-11>HPRINT topic [subtopic] ..
+
+ HELP and HPRINT also support wildcarding, as in:
+
+	Kermit-11>H *		; everything
+	Kermit-11>H SET *	; all sets
+	Kermit-11>H SET FIL *	; all file types
+
+ This modified Kermit-11 contains an internal index to its
+ help text file.  If KRTHLP.HLP is modified Kermit must be
+ rebuilt.  See KRTHLP.PRE for instructions.
+
+1 HOME
+
+ Resets the default device to the home directory.
+ This is, if not set otherwise, DK when Kermit-11
+ was started.  SHOW displays current assignments.
+
+1 HPRINT
+
+ Like HELP but also dumps text to LP to produce a handy reference:
+
+	Kermit-11>HPRINT topic [subtopic] ..
+	Kermit-11>HPRINT *
+
+ You may ASSIGN xx LP under RT-11 (where xx is a disk) then run KRT
+ and use HPRINT to create a disk file of the text formatted as it's
+ displayed by the program.  The file name KRTHLP.OUT will be used.
+
+1 LOGFILE
+
+ Creates the debug and session logging file.  One may optionally specify
+ a debug mode as an additional argument following the desired file name,
+ or must later select something to be written into the file.  When a log
+ file is closed all debug modes are reset (turned off).  If file size is
+ a consideration it may be specified via SET FILE CREATE_SIZE first.
+
+	Kermit-11>LOG TMP PACK	! default type is .LOG, logs packets
+	Kermit-11>LOG LP: ALL	! LP MUST be spooled, or very fast..
+	Kermit-11>LOG		! close file, turn off debugging
+
+ Check HELP Debug for a brief list or HELP SET DEBUG for detailed
+ descriptions of debugging modes.
+
+1 Long_Packets
+
+ Kermit-11 supports the use of packet lengths greater than 94.  This is
+ particularly useful in file transfers over links with delays exceeding
+ one second,  or whenever transmission errors are sufficiently low that
+ time saved in ACK packets (as opposed to time lost in resending longer
+ data packets) improves efficiency.  The main restriction on the packet
+ size is the link, a given circuit may not pass a given number of chars
+ in a single packet.  Also, BOTH Kermits must support this extension to
+ the protocol, it is always negotiated before any file transfer.
+
+ Long packets are enabled by setting the  receive  packet length on the
+ Kermit which will be receiving the transfer:
+
+	Kermit>SET RECEIVE PACKET_LENGTH 1024	; use 1kb packets
+	Kermit>SET BLO 3			; CRC error checking
+
+ Here the above may also be accomplished in one command with:
+
+	Kermit-11>SET LONG ON		; max packets, CRC error tests
+
+ It is highly recommended you use the CRC block check,  as the default
+ type one checksum is inadequate for such packet lengths.  Please note
+ it may be necessary to preset this on both sides, before invoking the
+ server.  The maximum packet size possible here may be determined with
+ SHOW PARAMETERS.
+
+ You may disable long packets at this end via SET NOLONG.
+
+ When talking to VMS Kermit or C-Kermit you will probably need to
+ also SET SEN PAC nnnn on them before long packets will function.
+
+1 Parity
+
+ Sometimes what appears to be valid packet is constantly rejected.
+ This usually happens when the requesting Kermit asks a server for
+ a file and then rejects the server's first packet until the retry
+ limit is reached.  This may  be caused by parity being introduced
+ somewhere, as when a modem is generating parity,  or by a private
+ or public net.  If the  communications  link is at fault a simple
+ fix is to SET PARITY SPACE on each Kermit, forcing removal of bit
+ seven from the incoming data.  Normally this will not stop binary
+ transfers since most Kermits can do eight bit prefixing, a method
+ of sending  eight  bit  data over a seven bit link.  You MUST use
+ parity (even if MARK or SPACE)  when using Kermit-11 with the IBM
+ CMS Series/1 or 7171 3270 emulator.  See HELP SET PARITY for info
+ about specific options.
+
+ Under RT-11 parity will default to SPACE, TT is a 7-bit device.
+
+1 PRINT
+
+ Copies a single (non-wildcarded) file to LP.
+
+1 PWD
+
+ Displays the current default device (DK), home directory and, if
+ running under TSX-Plus V6.2 or above, mounted logical disks.
+
+1 QUIT
+
+ Synonym for EXIT.
+
+1 RECEIVE
+
+ The RECEIVE command tells Kermit-11 to receive a file  or  file  group
+ from  the  other  system.  File names are taken from the incoming file
+ headers - that is, files to be sent are specified  on the other system
+ with its SEND command (wildcarding may be used if sender supports it):
+
+	Kermit>SEND afile	; a single file
+	Kermit>SEND *.MAC	; all .MAC files
+
+ Then one escapes back to one's local machine and initiates receive:
+
+	Kermit-11>RECEIVE	; note no file name argument is used
+
+ As files are created, their names will be displayed on your screen.
+
+ If a file arrives that you don't really want, you can try to cancel it
+ by typing Ctrl-X which sends the request to the remote Kermit.  A file
+ group can be bombed by typing Ctrl-Z.  These control chars are checked
+ at the end of each DATA packet.   Use Ctrl-C to abort before receiving
+ the beginning of the first file.
+
+ If the first file arrives too soon, use SET DELAY on the sending side.
+
+ If an incoming file has the same name as an existing file Kermit-11 by
+ default will create a new file.  To preserve existing files check HELP
+ SET FILE PROTECT.
+
+ When receiving text files from a non RT-11 system this Kermit will add
+ 25% to the received file size as record terminators are often excluded
+ from what is reported, or are of a different size (Unix).  Files close
+ to the maximum free space may be accommodated by SET FILE CREATE_SIZE,
+ which overrides any passed size attribute.
+
+ If you are trying to receive binary files from a Kermit which does not
+ support attribute transmission SET FILE TYPE FIXED and SET BLOCK_CHECK
+ on BOTH ends first, or the transmission may appear fine while all high
+ bits are actually being tossed.
+
+ Normally it is much easier to run the remote Kermit as a SERVER.  When
+ that isn't possible, the RECEIVE command is useful.
+
+1 RENAME
+
+ Renames a single, local (only) file.
+
+	Kermit-11>RENAME oldname newname
+
+1 SEND
+
+ Sends a file or group of files to the other system.   Wildcards may be
+ used, in which case files are sent in order of their directory entries
+ in the device containing them.  If you're SENDing on Kermit-11 running
+ in its remote mode,  SET DELAY governs the time allowed to escape back
+ to one's local Kermit to initiate the RECEIVE mode (default = 6 secs).
+ If you miss the first packet Kermit will retry it after timing out.
+
+ If the automatic binary file select is on (SET FILE AUTO, the default)
+ the transmission mode is determined by searching the binary types list
+ for each file.   If it is not possible to exchange attributes you will
+ need to SET FILE TYPE  and  SET BLOCK_CHECK  as required on both sides
+ before starting.
+
+ If parity is in use (see HELP SET PARITY) Kermit-11 will ask the other
+ Kermit to use a special kind of "prefixing" notation for binary files.
+ This is an advanced feature and not all Kermits have it.  If the other
+ Kermit can't accommodate this feature,  binary  files  can not be sent
+ correctly.  This includes executable programs, object modules, and any
+ text file containing characters with the high bit set.
+
+ Kermit-11 will also check the other side for a special prefix encoding
+ for repeated characters.  If supported, files with long strings of the
+ same character will be transmitted very  efficiently.   Columnar data,
+ highly indented text and binary files are the primary beneficiaries of
+ this technique.
+
+			SEND Command Summary:
+
+    Sends files to another Kermit.  If that Kermit isn't a server the
+    transmission begins after the number of seconds  specified by SET
+    DELAY.  This allows  time to escape back to your local Kermit and
+    issue a receive command.  The server is far easier to use, unless
+    your Kermit can't do remote commands.  Wildcarded renaming is not
+    supported.
+
+	Kermit-11>SEND *.MAC
+	Kermit-11>SEND afile asfile	; rename to asfile
+	Kermit-11>SEND afile,b*,cfile	; comma delimits file names
+
+1 SERVER
+
+ The SERVER command puts a remote Kermit into a server mode, so that it
+ expects further commands as packets from your own local client Kermit,
+ allowing various things to be done at the remote without the bother of
+ first connecting back to it.  This Kermit-11 when run as a server will
+ handle these commands:   CD,  COPY,  DELETE,  DIRECTORY,  FINISH, GET,
+ HELP, RENAME, SEND, SPACE and TYPE.
+
+ Kermit-11 will use the client's block check scheme,  packet length and
+ such as long as nothing affecting any of that has been shut off before
+ invoking the server.  The BINARY_TYPE list will be used to select text
+ or image mode when sending unless specific file type has been set.  If
+ your local Kermit doesn't support exchanging attributes, SET FILE TYPE
+ and SET BLOCK_CHECK as needed on BOTH ends before running the server.
+
+		SERVER Command Summary:
+
+	REMOTE COPY	Copy a file to another
+	REMOTE CWD	Changes server default
+	REMOTE DELETE	Erases specified  file
+	REMOTE DIR	Prints   a   directory
+	FINISH		Exit server, reconnect
+	GET		Send file(s) to remote
+	REMOTE HELP	Prints this  help text
+	REMOTE RENAME	Rename old file to new
+	SEND		Send file(s) to server
+	REMOTE SPACE	Shows blocks used/free
+	REMOTE TYPE	Types a specified file
+
+1 SET
+
+ The SET command is used to modify various parameters in Kermit.
+ Multiple arguments, including spaces between them, for the same
+ parameter may be delimited with commas.
+
+	Kermit-11>SET parameter keyword[, key words_1, keyword_2, ..]
+
+2 ATTRIBUTES
+
+ Part of the  Kermit  protocol  is  the  support  of  file  attributes.
+ Connected Kermits that support this can send information to each other
+ about size, date/time of creation, protection and other useful things.
+
+ Due to potential problems with incompatible implementations attributes
+ may be disabled.  In this case, Kermit will not send them, even though
+ the receiver may have indicated that it supports them.  The default is
+ attributes enabled.
+
+	Kermit-11>SET ATTR OFF
+	Kermit-11>SET ATTR ON
+
+ Note the determination of whether to send a file in the image mode is
+ by the state of SET FILE, and it may be necessary to select something
+ specific (besides AUTO, which defaults to text) for it when disabling
+ ATTRIBUTES.
+
+ When receiving text files from a non RT-11 system this Kermit will add
+ 25% to the received file size as record terminators are often excluded
+ from what is reported, or are of a different size (Unix).  Files close
+ to the maximum free space may be accommodated by SET FILE CREATE_SIZE,
+ which overrides any passed size attribute.
+
+ This modified Kermit-11 supports the following attributes:
+
+	!  (oct 41)   File length (1kb blocks)
+	"  (oct 42)   File type (ASCII, Binary, Image)
+	#  (oct 43)   Creation date (1972 to 2099 only)
+	-  (oct 55)   Protection code (within RT-11's limits)
+	.  (oct 56)   Machine and operating system of origin
+	0  (oct 60)   Special system-dependent parameters:
+	              "  (oct 42)  includes DEC_Multinational files
+	1  (oct 61)   Exact file length in bytes
+
+	Notes:	File protected when no write, append or delete access.
+
+2 BINARY_TYPE
+
+ Kermit-11 maintains a list of file types that's scanned to decide
+ if a file should be sent in the binary mode.   This list includes
+ commonly used binary file types, may be displayed with SHO BINARY
+ and appended up to 31 total types, one type per command line.
+
+	Kermit-11>SET BIN xyz
+
+ The state of SET FILE determines whether the binary list test will
+ be used to control the transmission mode for files.  Use SHOW FILE
+ to display it.
+
+2 BLOCK_CHECK_TYPE
+
+ Determines the block checking scheme to be used during transmission to
+ to detect errors.  There are three types available:  the one character
+ checksum (default), the two character checksum and the three character
+ CRC (cyclic redundancy check).   Both Kermits involved in the transfer
+ must agree on the block check type.   Kermit-11 will request the block
+ check set by this command be used for a transfer.  If the other Kermit
+ can't recover this from the init packet then the block check type must
+ be manually set on BOTH sides, otherwise the single character checksum
+ will be used.  Binary files should be sent with CRC block checking.
+
+	Kermit-11>SET BLO 1	; one char checksum
+	Kermit-11>SET BLO 2	; two char checksum
+	Kermit-11>SET BLO 3	; three char CRC
+
+2 DEBUG
+
+ Used to specify the type and level of debugging written to a disk
+ file, which must first have been created via the LOGFILE command,
+ or may be optionally specified as an additional argument for this
+ command.  There are also options to display debugging data on the
+ terminal with or without writing to a disk file.   When a logfile
+ is closed all debug modes are reset (turned off).
+
+	Kermit-11>SET DEBUG mode [logfile]
+
+3 NONE
+
+ Turns off all debugging and closes the logfile.
+
+3 OFF
+
+ Turns off all debugging and closes the logfile.
+
+3 ON
+
+ Enables PACKET logging to the disk file specified by the LOGFILE command.
+
+3 PACKET
+
+ Logs all packets sent and received to the file specified with LOGFILE
+ using headers indicating packet number, type and length.  An asterisk
+ "*" displayed as the packet type indicates a received checksum error.
+ If the type itself is bad (not A-Z) a "?" is substituted.
+
+ REC.SW = STA.DAT  Data
+ <<< RPACK - Paknum  54    Type  *    Length    82
+     40!100!200>,curatr; hose bits 0,2,5 and unused biuc 6,7#M#J#Ibeq#I10$#M#
+     J#Iclr#Ipr
+ BAD Checksum: RCV,CALC =  24670,  3312
+ >>> SPACK - Paknum  54    Type  N    Length     0
+
+ Numeric overflow is indicated by a "*" (in the most significant digit's
+ column) preceding the remainder of the value,  which is also displayed.
+ Received and calculated values of bad checksums are displayed following
+ any data present in the packet.
+
+ Severe telephone line noise and/or retraining of modems may cause a bad
+ packet length value, in which case data logged are truncated to fit the
+ maximum available ($ALLSIZ-2) buffer space.
+
+ Selecting this option cancels any other debug option(s) then in use.
+
+3 RAW
+
+ Logs everything received or sent as 8-bit data to a binary logfile.
+ This option is mutually exclusive of all other functions.
+
+2 DEFAULT
+
+ Makes the specified device the default disk, directing to it
+ file operations for which no device is explicitly specified.
+
+2 DELAY
+
+ Sets the number of seconds to wait before beginning sending a file
+ while in the remote mode.  This is the time allowed to escape back
+ to your local Kermit and issue a RECEIVE command.
+
+	Kermit-11>SET DELAY number_of_seconds
+
+2 END_OF_LINE
+
+ The END_OF_LINE parameter is the ASCII character used as a
+ line terminator for all packets sent to and  received from
+ the other Kermit.  This is normally not changed.  See HELP
+ ASCII for octal values.
+
+	Kermit-11>SET END octal_value_of_char
+
+2 FILE_TYPE
+
+ When it's started Kermit-11 defaults to automatically getting a file
+ type from the BINARY_TYPE list when sending  and incoming attributes
+ if receiving.   Some Kermits may not accommodate this, in which case
+ it's necessary to manually SET a particular FILE_TYPE, and match the
+ BLOCK_CHECK as well, on both sides before continuing.
+
+ The file type ASCII should be used to for text files which are to be
+ used as text files.  The file type BINARY should  be used for binary
+ files, such as save images, in which bit 7 must not be stripped when
+ transferred.  The file type  DEC_MULTINATIONAL  may be used for text
+ files containing 8-bit chars only when it is a supported type on the
+ other end.  Check HELP Binary_Files for important additional info.
+
+ Once a FILE_TYPE is SET that aspect of exchanging file attributes is
+ superseded by the designated type  regardless of whatever remains on
+ with the rest of attribute processing.  SET FILE AUTO to restore the
+ default.  SHOW FILE displays the current type.
+
+	Kermit-11>SET FILE ASCII
+	Kermit-11>SET FILE BINARY
+	Kermit-11>SET FILE DEC_MULTINATIONAL
+	Kermit-11>SET FILE AUTO
+
+3 ASCII
+
+ Force the file type to ASCII, for 7-bit text files.  For
+ text files containing 8-bit chars use DEC_MULTINATIONAL,
+ if supported by the other Kermit, or if not, use BINARY.
+
+ SET FILE AUTO restores automatic ASCII/Binary selection.
+
+3 AUTO
+
+ Decide if a file should be sent in the binary mode as determined
+ from an internal list of binary file types and use any type data
+ found in an incoming file's attributes.
+
+ Setting the FILE_TYPE to any particular value overrides both the
+ send and receive automatic type selection.
+
+3 BINARY
+
+ Force the file type to BINARY, for non-text files.  If parity is set to
+ anything besides NONE, the other Kermit must support eight bit quoting.
+
+ SET FILE AUTO restores automatic ASCII/Binary selection.
+
+3 CREATE_SIZE
+
+ The largest file RT-11 can open without specifying a particular size
+ is half the biggest piece of contiguous free space.  When talking to
+ a Kermit that doesn't support passing the file size with attributes,
+ SET CREATE_SIZE may be used to get a file that otherwise wouldn't be
+ possible.  If your largest free space is 3000 blocks and you need to
+ get a 2499 block file:
+
+	Kermit-11>SET FIL CRE 2499
+
+ Note that a SET size supersedes a received attribute value.
+
+	Kermit-11>SET FIL CRE 0  ; default, restores size attribute
+
+ This parameter is cleared (reset to its default) after the next open
+ (.enter) of ANY kind, and thus may also be used to set the size of a
+ log file.  Conversely, if meant to be used otherwise it shouldn't be
+ be set until AFTER a log file has been opened.
+
+3 CSI_PARSING
+
+ Determines whether multiple file specs provided to the local GET and
+ SEND commands delimited by commas are parsed by the real CSISPC call
+ (limit is six arguments) or by a software emulation (limited only by
+ command line length) useful when the other Kermit chokes on commas.
+
+	Kermit-11>SET FILE CSI EMULATED
+	Kermit-11>SET FILE CSI REAL	; the default
+
+ Directory listings and remote file name strings are always parsed by
+ the real RT-11 Command String Interpreter.
+
+3 DEC_MULTINATIONAL
+
+ Under RT-11 this is functionally the same as the BINARY type, and is
+ provided here for compatibility with other systems where it serves a
+ useful purpose.  DEC_Multinational is for text files (using carriage
+ control) with 8-bit records.
+
+ SET FILE AUTO restores automatic ASCII/Binary selection.
+
+3 FIXED
+
+ Synonym for SET FILE BINARY.
+
+3 IMAGE
+
+ Synonym for SET FILE BINARY under RT-11.
+
+3 NOPROTECT
+
+ Allows Kermit-11 to accept files regardless if the file then exists
+ on the receiving system, the default.  See HELP SET FILE PROTECT if
+ you wish to retain existing files.  In no case will Kermit ever zap
+ a file protected via PIP (rename/protect).
+
+3 NOREPLACE
+
+ Synonym for SET FILE PROTECT.
+
+3 NOVOLUME_VERIFY
+
+ Normally Kermit-11 checks the directory header of a disk to verify it
+ most likely contains a valid file structure before trying to read the
+ directory.  If for some reason your disk doesn't contain the standard
+ data at offset 760 in the header, Kermit will not read the directory.
+ SET FILE NOVOL bypasses this test.
+
+3 PROTECT
+
+ Forces Kermit-11 to bomb a incoming file  when one of the same name
+ then exists.   The main use of this is to resume getting a group of
+ files (as in KRT*.*) having lost the connection  after transferring
+ some of them.  If protection is set, any files already gotten won't
+ be again.  This assumes the sending Kermit can reject a single file
+ in a possible group.  When using long packets be advised the create
+ is not attempted until the first data packet has been received, and
+ this may take several seconds at slower speeds.  Files protected by
+ PIP (ren/prot) can not be deleted by Kermit.
+
+ SHOW FILE displays the status of Kermit's file protection.
+
+3 REPLACE
+
+ Synonym for SET FILE NOPROTECT.
+
+3 TEXT
+
+ Synonym for SET FILE ASCII.
+
+3 TYPE
+
+ SET FILE TYPE xxx is the same as the SET FILE xxx, the keyword TYPE
+ is ignored but provides compatibility with other implementations of
+ Kermit.
+
+3 VOLUME_VERIFY
+
+ Check the directory header of a disk to verify that it contains a
+ valid RT-11 file structure before trying to read it (the default).
+ DECRT11 and DECVMSEX are acceptable headers, otherwise you may SET
+ FILE NOVOL to disable this check (for "foreign" floppies).
+
+2 HOME
+
+ Modifies the home directory name to the specified device.
+
+2 INCOMPLETE_FILE_DISPOSITION
+
+ Allows determination of what is done with a file that is not completely
+ received.  If the disposition is KEEP, all files received will be kept,
+ even if only some fraction of the file is received.  If the disposition
+ is DISCARD (the default) anything not completely received is discarded.
+ If the other Kermit supports the  "D"  (discard)  byte in the "Z" (EOF)
+ packet, a file skipped or aborted when sending from this Kermit will be
+ treated according to this parameter as SET on the OTHER Kermit.
+
+	Kermit-11>SET INCOMPLETE_FILE_DISPOSITION action
+
+ Where 'action' is either DISCARD or KEEP.
+
+2 LINE
+
+ This special minimum version of Kermit-11 for floppy disk based systems
+ only supports TT.  Use KRT or KRTTSX if you need a comm handler.
+
+2 LOGFILE
+
+ Synonym for the LOGFILE command.
+
+2 LONG_PACKETS
+
+ Options are ON, OFF, or you may SET NOLONG_PACKETS.  This  may be used
+ to disable use of long packets regardless of packet length set locally
+ or received  from  a remote system.  Setting the packet length greater
+ than 94 on this end restores long packet operation if set off via this
+ command.
+
+ In the past, SET LONG ON merely restored use of long packets if they'd
+ first been enabled by SET REC PAC nnn, and wouldn't in itself actually
+ alter the packet length.  Here, it has been enhanced to accomplish and
+ is equivalent to this:
+
+	Kermit-11>SET BLOCK_CHECK_TYPE 3
+	You may need to SET BLO 3 on the other Kermit
+	Kermit-11>SET RECEIVE PACKET_LENGTH max_possible
+
+ See HELP Long_Packets for more info.  SHOW PACKET to check the maximum
+ available buffer length.
+
+2 NOATTRIBUTES
+
+ Disables automatic exchange of file attributes during transfers.
+
+2 NODEBUG
+
+ Turns off all debugging and closes the logfile.
+
+2 NOLONG_PACKETS
+
+ Disables use of packets longer than 94 bytes.
+
+2 NOREPEAT_QUOTING
+
+ Disables compression of repeated characters during file transfers.
+
+2 PARITY
+
+ Specifies the type of parity on the remote link.  It  defaults to
+ NONE and can also be ODD, EVEN, MARK or SPACE.  Parity generation
+ is  done  via  software,  no  special hardware is used.  Software
+ parity generation is restricted to 8-bit links only.  The format,
+ if parity is set to anything besides NONE, will be 7 bits of data
+ with the high bit set or cleared per the parity scheme in use.
+
+ SPACE parity is essentially nothing in the hi bit and thus may be
+ used to work around bottlenecks such as TT (a 7-bit handler).
+
+ When parity (other than NONE) is used Kermit-11 will be forced to
+ use 8-bit prefixing for binary files,  which  increases  transfer
+ time.  This modified Kermit checks the need to prefix before each
+ transaction, so one need not exit the program to turn it off.
+
+ See HELP Parity for application info.
+
+2 PAUSE
+
+ Specifies number of seconds to wait before each packet is sent.
+ This may be useful under situations of heavy system load.
+
+2 PROMPT
+
+ Useful if you are using two Kermit-11s to talk to each other.
+ By using the SET PROMPT command, you can change the prompt on
+ either or both Kermits to something indicative of the systems
+ in use.  The prompt string also prefixes error messages, sans
+ the last byte if it is a ">".  Prompts may be up to 30 chars.
+
+2 RECEIVE
+
+ Alters various parameters concerning receiving packets.
+
+	Kermit-11>SET REC parameter value
+
+3 PACKET_LENGTH
+
+ This serves two purposes.  The first is to reduce incoming packet length
+ in the event normal sized Kermit packets can  not  be passed through the
+ communications circuit.  There could be, perhaps, some "black box" some-
+ where in the link that has a very small buffer size.  This command would
+ be used to reduce the size that the SENDING Kermit will use.
+
+ Long_packets are also enabled by setting the receive packet length.  See
+ HELP Long_Packets for specific operational information.
+
+3 START_OF_PACKET
+
+ Modifies the character used for the RECEIVE (only) start of packet
+ to the specified octal_value from the default Ctrl-A.  Both  sides
+ must support the new value as it can't be negotiated in transfers.
+
+ The only reasons this should ever be changed are some piece of gear
+ somewhere between the two Kermit programs will not pass through the
+ Ctrl-A, or something similarly placed is echoing its input.  In the
+ latter case, the  recipient  can  change the packet outbound packet
+ prefix to be different from that of arriving  packets  so  the echo
+ will be ignored.  See HELP ASCII for octal values.
+
+3 TIME_OUT
+
+ This is the wait in seconds for a packet from the other Kermit, after
+ which it will be considered missing and appropriate action taken.  If
+ system loads are high or you are using a MNP protocol you may need to
+ increase this (and the SEND TIME_OUT on the other Kermit).
+
+ To disable it, SET RECEIVE TIME_OUT 0 (actually 65535. ticks).
+
+2 REPEAT_QUOTING
+
+ One may SET REPEAT OFF or ON (default) to control character compression
+ during packet transmission.  This might be necessary with older Kermits
+ that do not support this part of the protocol.
+
+2 RETRY
+
+ Sets the maximum number of times Kermit will try to send specific
+ packets.  There are  two  retry  parameters,  one for the initial
+ connection (the SEND_INIT or REC_INIT), the other comes into play
+ after this init succeeds, governing all further data packets.
+
+ The default value for the initial connection is 5, and 16 for all
+ other packets.
+
+	Kermit-11>SET RETRY type nn
+
+ Where "type" is either INITIAL_CONNECTION (for initial connection
+ packet) or PACKET (for all other packets), and "nn" is the number
+ of retries (decimal) to attempt.  Legal values are 3 to 30.  SHOW
+ RETRY to check the current settings.
+
+2 SEND
+
+ Alter various parameters concerning packets sent.
+
+	Kermit-11>SET SEND parameter value
+
+3 NOXON
+
+ Disables prefixing packets with a ^Q (the default).
+
+3 PACKET_LENGTH
+
+ This command may be used to reduce packet lengths in the event that
+ normal sized Kermit packets will not pass through the data circuit.
+ When Kermit-11 is started it defaults to the maximum possible size.
+ Once set, it limits sent packets to the specified length regardless
+ of what the other Kermit may request.  SHOW PACKET displays its SET
+ or default value.
+
+ LONG_PACKET operation is a completely separate function and must be
+ enabled at and requested by the receiving Kermit.  More information
+ is available via HELP Long_Packets.
+
+3 PADCHARACTER
+
+ The character used to delay the beginning of actual packet data.
+ See also SET SEND PADDING.  See HELP ASCII for octal values.
+
+	Kermit-11>SET SEN PADCHAR <octal_value>
+
+3 PADDING
+
+ The number of pad characters used to delay the beginning of each
+ packet sent.  One must first SET SEN PADCHAR <octal_value>.
+
+	Kermit-11>SET SEN PADDING <decimal_#_of_pad_chars>
+
+3 START_OF_PACKET
+
+ Modifies the character used for the SEND (only) start of packet to
+ the specified  octal_value  from the default Ctrl-A.  Both Kermits
+ must support the new value as it can't be negotiated in transfers.
+
+ The only reasons this should ever be changed are some piece of gear
+ somewhere between the two Kermit programs will not pass through the
+ Ctrl-A, or something similarly placed is echoing its input.  In the
+ latter case, the  recipient  can  change the packet outbound packet
+ prefix to be different from that of arriving  packets  so  the echo
+ will be ignored.  See HELP ASCII for octal values.
+
+3 TIME_OUT
+
+ This is the wait in seconds for a result from the other Kermit, after
+ which it will be considered missing and appropriate action taken.  If
+ system loads are high or you are using a MNP protocol you may need to
+ increase this (and the RECEIVE TIME_OUT on the other Kermit).  When a
+ slow speed and long packets are in use be aware that the timer starts
+ after the write is queued, which may be a few seconds before the last
+ byte of data is actually shipped out.  A longer time_out value should
+ be used if this presents a problem.
+
+ To disable it, SET SEND TIME_OUT 0 (actually 65535. ticks).
+
+3 XON
+
+ Prefixes packets with ^Q.  SET SEN NOXON returns to non-prefixed operation.
+
+2 SERVER
+
+ Controls the period at which an idle server times out and sends a NAK.
+
+	Kermit-11>SET SER TIME_OUT secs	; default is 60 secs
+	Kermit-11>SET SER NOTIME_OUT	; disables (actually 2 hrs)
+
+2 SL
+
+ Allows control of the Single-Line Editor:
+
+	Kermit-11>SET SL ON,KED	! turns SL on, enables Keypad mode
+	Kermit-11>SET SL NOKED	! offs Keypad mode
+	Kermit-11>SET SL OFF	! turns SL off
+
+ See HELP SL_Editor for operational details.
+
+2 START_OF_PACKET
+
+ Modifies the start_of_packet to the specified octal_value from the
+ default Ctrl-A for BOTH send and receive operations.  Both Kermits
+ must support the new value as it can't be negotiated in transfers.
+ Send and receive SOHs may also be SET individually.
+
+2 TERMINAL
+
+ Controls display formatting.  Kermit checks RT-11 for its SET TT
+ [NO]SCOPE status or TSX-Plus for a terminal type and uses it for
+ the default terminal.  This may be changed from Kermit's command
+ line:
+
+	Kermit-11>SET TT NOSCOPE  ! printing terminal
+	Kermit-11>SET TT TTY	  ! tube terminal, but not a VT-xxx
+	Kermit-11>SET TT VT100	  ! itself
+	Kermit-11>SET TT SCOPE	  ! here same as VT100
+	Kermit-11>SET TT VT200	  ! itself
+
+ Informational messages may be offed by SET TERM QUIET.  The default
+ is NOQUIET, allowing everything to be displayed.   The init file is
+ not usually echoed, you may SET TT NOQUIET in it to modify this.
+
+2 TT:
+
+ Synonym for SET TERMINAL.
+
+1 SHOW
+
+ The SHOW command will display the parameters Kermit uses to interpret
+ and process commands and data, some of which are modifiable with SET.
+
+	Kermit-11>SHOW parameter
+	Kermit-11>SHOW		; defaults to "SHOW ASSIGNS"
+
+2 ALL
+
+ Displays Kermit's most pertinent operating parameters.
+
+2 ASSIGNS
+
+ Displays the current home directory and default device.
+
+2 ATTRIBUTES
+
+ Displays the current status of attribute packet processing.
+
+2 BINARY_TYPE
+
+ Lists file types which are considered to be binary (8-bit).
+
+2 BLOCK_CHECK_TYPE
+
+ Displays the type of checksum in use.
+
+2 DEBUG
+
+ Shows debugging status.
+
+2 DEFAULT
+
+ Displays the default disk device.
+
+2 DELAY
+
+ Displays the number of seconds delay before
+ SEND begins when invoked in the remote mode.
+
+2 FILE_TYPE
+
+ Show the current file mode (ASCII, AUTO or BINARY) and various file options.
+
+2 INCOMPLETE_FILE_DISPOSITION
+
+ Shows what will be done with an arriving file when the transfer fails
+ before finishing.  When this Kermit is the remote your  local  Kermit
+ must support the "D" (discard) byte in the "Z" (EOF) packet if a file
+ skipped or aborted there is to be actually discarded when this is set
+ to discard here.
+
+2 LINE
+
+ Displays parameters associated with the current link device.
+
+2 PACKET
+
+ Displays current SOH, EOL and packet lengths.
+
+2 PARAMETERS
+
+ Displays various send, receive and packet parameters.
+
+2 PARITY
+
+ Shows the software parity scheme in use.
+
+2 PAUSE
+
+ Displays the pause time before sending each packet.
+
+2 REPEAT_QUOTING
+
+ Displays the current status of repeated character quoting.
+
+2 RETRY
+
+ Lists the current INITIAL_CONNECTION and PACKET retry limits.
+
+2 SERVER
+
+ Displays the current server time_out.
+
+2 SL
+
+ Displays SL_Editor status.
+
+2 START_OF_PACKET
+
+ Displays the current SOH (start_of_packet) character.
+
+2 TERMINAL
+
+ Displays the current Kermit terminal type and associated parameters.
+
+2 TIME_OUT
+
+ Displays the current packet time_out in seconds.
+
+2 TT:
+
+ Synonym for SHOW TERMINAL.
+
+2 VERSION
+
+ Displays current version and edit of this program.
+
+1 SL_Editor
+
+ A basic Single Line Editor is available at the command line.  Most
+ operations require a VT-100 terminal, although  SL  may be enabled
+ regardless of terminal type.
+
+	Kermit-11>SET SL ON,KED	! turns SL on, enables Keypad mode
+	Kermit-11>SET SL NOKED	! offs Keypad mode
+	Kermit-11>SET SL OFF	! turns SL off
+
+ The last 10 command lines are stored.  This editor flips direction
+ when hitting either end of the line.  Note the  undelete_word  and
+ undelete_line routines share a common buffer, and with the non-EIS
+ assembly the number of stored commands is limited to 3.
+
+ A list of currently defined function keys is available at any time
+ during entry of a command via  the  PF2  key,  and the contents of
+ your command line buffer will be restored and retyped afterwards.
+
+2 Function_Keys
+
+	Left arrow   =	cursor left
+	Right arrow  =	cursor right
+	Up arrow     =	recall previous command lines
+	Down arrow   =	move back after up arrow use
+	Delete	     =	delete char to left of cursor
+	Line Feed    =  delete word to left of cursor
+	PF1          =  prefix to undelete char, word, or line
+	PF2          =  prints this list then retypes command line
+	PF4          =  delete line, from cursor to end
+	Ctrl-A       =  toggle insert mode off/on
+	Ctrl-B       =  recall previous command lines
+	Ctrl-C	     =	cancel command
+	Ctrl-D       =  cursor left
+	Ctrl-E       =  recall previous command lines
+	Ctrl-F       =  cursor right
+	Ctrl-R	     =	retype line
+	Ctrl-U	     =	delete line, from top to char left of cursor
+	Ctrl-V       =  move back after up_arrow/^B/^E use
+	Ctrl-W       =  retype line
+
+2 KED_Mode_Functions
+
+	Left arrow   =	cursor left
+	Right arrow  =	cursor right
+	Up arrow     =	recall previous command lines
+	Down arrow   =	move back after up arrow use
+	Tab	     =	toggle insert mode off/on
+	Backspace    =	delete char to left of cursor
+	Delete	     =	delete char to left of cursor
+	Keypad Enter =	return
+	Keypad 0     =	goto start of line
+	Keypad 1     =  move one word
+	Keypad 2     =	goto end of line
+	Keypad 3     =  move one char
+	Keypad 4     =  set ADVANCE mode
+	Keypad 5     =  set BACKUP mode (default)
+	Keypad ,     =  delete char
+	Keypad -     =  delete word starting from cursor
+	Line Feed    =  delete word to left of cursor
+	PF1          =  prefix to undelete char, word, or line
+	PF2          =  prints this list then retypes command line
+	PF4          =  delete line, from cursor to end
+	Ctrl-C	     =	resets recall pointer
+	Ctrl-R	     =	retype line
+	Ctrl-U	     =	delete line, from top to char left of cursor
+
+1 SPACE
+
+ Shows a summary of used and free disk space available.
+ A device or files argument is optional.
+
+1 STATUS
+
+ Displays packet transaction statistics.
+
+1 TAKE
+
+ The TAKE command tells Kermit-11 to execute commands from the specified
+ file.  The RT-11 syntax "@file" may also be used:
+
+	Kermit-11>TAKE file
+	Kermit-11>@file
+
+ "File" is any normal RT-11 file specification.  The default type is .COM
+ and if no device is given DK and SY will be tried in that order.  "!" or
+ ";" may prefix comments in Kermit TAKE files,  and  all  commands except
+ control characters are supported.
+
+1 TYPE
+
+ Types files to your terminal.  Switches (/opt) are not implemented.
+ When typing a binary file most non-printing characters are filtered
+ to prevent  possible  interference  with one's terminal attributes.
+ If the terminal type is VT100 or lower, the hi bit will be stripped
+ from everything typed.  Use VT200 to see all eight bits.
+
+	Kermit-11>TY GUIDE   ; default type is .LST
+	Kermit-11>TY .MAC    ; type all .MAC files
+	Kermit-11>TY *	     ; type all .LST files
+	Kermit-11>TY *.*     ; types the world..
+
+1 Upgrades
+
+ This special version of Kermit-11 for  RT-11  and TSX-Plus may be from
+ time to time updated/upgraded, or various bugs may be found and fixed.
+ The latest revision may be had by calling the system on which the work
+ is done:
+
+    Host:             Billy's Place, Culver City, California
+    Available:        24 hours, 3 lines, immediate access
+    Phone:            +1.310.837.0892
+    Local Out-dials:  BT North America: 9203, SprintNet: CALAN
+    Logon/Password:   1000/moving_target
+    Modem speeds:     300/1200/2400 only
+    Protocols:        Kermit, VTCOM/TRANSF, Xmodem
+
+ Access is free other than whatever it costs to place the call.  Any bug
+ found will be fixed.  Please leave mail regarding same to account #1 on
+ the above.  Also on-line here are the complete Kermit-11 T3.60 sources,
+ along with a massive amount of RT-11 SIG and other public domain/gratis
+ software.  Mail to youdelman@eisner.decus.org or billy@mix.com may also
+ be used to report bugs.  A fairly recent edition of this package may be
+ gotten from ftp.utoledo.edu in their [PDP11-KERMIT.K-RT11] directory.
+

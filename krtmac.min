@@ -1,0 +1,358 @@
+	.sbttl	KRTMAC.MIN  Various handy constants and macros
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Brian Nelson  01-Dec-83  13:56:12
+
+	.NLIST	BEX
+	.LIST	MEB
+
+	KRTINC	=	1
+
+	.psect	$code	,ro,i,lcl,rel,con
+	.psect	$pdata	,ro,d,lcl,rel,con
+
+	SOH	= 1
+	BELL	= 7
+	BS	= 10
+	TAB	= 11
+	LF	= 12
+	FF	= 14
+	CR	= 15
+	CTRL$N	= 16
+	CTRL$O	= 17
+	XON	= 'Q&37
+	ESC	= 33
+	SPACE	= 40
+	COMMA	= 54
+	DEL	= 177
+
+	JSW	= 44
+	ERRBYT	= 52
+
+	P.SPSIZ	= 0
+	P.TIME	= 1
+	P.NPAD	= 2
+	P.PADC	= 3
+	P.EOL	= 4
+	P.QCTL	= 5
+	P.QBIN	= 6
+	P.CHKT	= 7
+	P.REPT	= 10
+	P.CAPAS	= 11
+		CAPA.A	= 10
+		CAPA.S	= 4
+		CAPA.L	= 2
+	P.WINDS	= 12
+	P.MXL1	= 13
+	P.MXL2	= 14
+	P.VEND	= 17
+
+	LOG$PA	= 1
+	LOG$IO	= 10
+	LOG$AL	= LOG$PA
+	LOG$OP	= 100000
+
+	PAR$NO	=: 0
+	PAR$OD	=: 1
+	PAR$EV	=: 2
+	PAR$MA	=: 3
+	PAR$SP	=: 4
+
+	TERMINAL=: -1
+	TEXT	=:  0
+	BINARY	=:  1
+	DECNAT	=:  2
+
+	NOSCOPE	= 0
+	TTY	= 1
+	VT100	= 2
+	VT200	= 3
+
+	C.CRLF	= 4
+	C.LSPA	= 10
+	C.SSPA	= 20
+	C.LCUC	= 40
+	C.TSPA	= 200
+
+	ERBFSIZ	= 120.
+
+	LN$MAX	=  80.
+	LN$CNT	=   3.
+
+	MAXPAK	==: 94.
+	MAXLNG	==  1920.
+	$ALLSIZ	= <MAXLNG+14>&177776
+
+
+	.sbttl	Utility macros
+
+	.macro	.chksp	arg
+	.ntype	$$5	,arg
+	.iif eq <<$$5&7>-6> .error arg <; Illegal use of SP (r6) in call>
+	.endm	.chksp
+
+	.macro	calls	name	,arglst
+	$$ = 0
+	  .irp x ,<arglst>
+	  $$ = $$+1
+	  .endr
+	.if eq $$
+	jsr	pc	,name
+	.iff
+	push	r5
+	  .if eq $$-1
+	  .chksp	arglst
+	  mov	arglst	,-(sp)
+	  mov	sp	,r5
+	  jsr	pc	,name
+	  tst	(sp)+
+	  pop	r5
+	  .iff
+	  $$2 = $$
+	    .rept	$$
+	    $$1 = 0
+	      .irp x ,<arglst>
+	      $$1 = $$1+1
+	        .if eq $$2-$$1
+	        .chksp	x
+	        mov	x	,-(sp)
+	        .mexit
+	        .endc
+	      .endr
+	    $$2 = $$2-1
+	    .endr
+	  mov	sp	,r5
+	  jsr	pc	,name
+	  .iif eq <$$-2>  cmp	(sp)+	,(sp)+
+	  .iif gt <$$-2>  add	#$$*2	,sp
+	  pop	r5
+	  .endc
+	.endc
+	.endm	calls
+
+	.macro	copyz	from ,to ,maxlen
+	.if  b	<maxlen>
+	clr	-(sp)
+	.iff
+	mov	maxlen	,-(sp)
+	.endc
+	mov	from	,-(sp)
+	mov	to	,-(sp)
+	call	copyz$
+	.endm	copyz
+
+	.macro	ctl	src ,dst
+	clr	-(sp)
+	bisb	src	,@sp
+	call	l$xor
+	movb	(sp)+	,dst
+	.endm	ctl
+
+	.macro	deccvt	val ,buf ,width
+	mov	r5	,-(sp)
+	.if  b	<width>
+	clr	-(sp)
+	.iff
+	mov	width	,-(sp)
+	.endc
+	mov	val	,-(sp)
+	mov	buf	,-(sp)
+	mov	sp	,r5
+	call	l$cvtnum
+	add	#6	,sp
+	mov	(sp)+	,r5
+	.endm	deccvt
+
+	.macro	decout	val
+	mov	r5	,-(sp)
+	mov	val	,-(sp)
+	mov	sp	,r5
+	call	l$wrdec
+	mov	(sp)+	,r5
+	.endm	decout
+
+	.macro	direrr	val
+	mov	val	,-(sp)
+	call	direr$
+	.endm	direrr
+
+	.macro	incm64	val
+	inc	val
+	bic	#^c77	,val
+	.endm	incm64
+
+	.macro	indexm	reg
+	.ntype	$$$0	,reg
+	.if  ne	$$$0-27
+	$$$0 =	<$$$0&177770>/10
+	.ift
+	  .if  ge $$$0-2
+	  .iif ge <5-$$$0> .error      <; Can't use auto inc/dec mode here>
+	  .endc
+	.endc
+	.endm	indexm
+
+	.macro	ixor	reg ,dst
+	.chksp	reg
+	.chksp	dst
+	indexm	reg
+	indexm	dst
+	mov	reg	,-(sp)
+	bic	dst	,@sp
+	bic	reg	,dst
+	bis	(sp)+	,dst
+	.endm	ixor
+
+	.macro	message	txt ,docr
+	.if  b	<txt>
+	.newline
+	.iff
+	.list me
+	.save
+	.psect	$pdata
+	$$ = .
+	.asciz	@txt@
+	.even
+	.restore
+	wrtall	#$$
+	.nlist me
+	.endc
+	.if  nb <txt>
+	.iif nb <docr>	.newline
+	.endc
+	.endm	message
+
+	.macro	.newline
+	call	l$pcrlf
+	.endm	.newline
+
+	.macro	octout	val
+	calls	l$wroct	,<val>
+	.endm	octout
+
+	.macro	pop	reg
+	mov	(sp)+	,reg
+	.endm	pop
+
+	.macro	prsbuf	dst
+	mov	dst	,r0
+	call	prsarg
+	.endm	prsbuf
+
+	.macro	push	reg
+	mov	reg	,-(sp)
+	.endm	push
+
+	.macro	rpack	len.a ,pakn.a ,msg.a ,max.len
+	sub	#10	,sp
+	mov	sp	,r1
+	calls	rpack$	,<msg.a,r1,max.len>
+	mov	(r1)+	,len.a
+	mov	(r1)+	,pakn.a
+	mov	@r1	,r1
+	add	#10	,sp
+	.endm	rpack
+
+	.macro	save	list
+	.if  b	<list>
+	 save	<r0,r1,r2,r3,r4,r5>
+	.iff
+	.irp	x ,<list>
+	 mov	x	,-(sp)
+	.endr
+	.endc
+	.endm	save
+
+	.macro	scan	ch ,str
+	mov	str	,-(sp)
+	clr	-(sp)
+	bisb	ch	,@sp
+	call	scanch
+	.endm	scan
+
+	.macro	setpar	src ,dst
+	movb	src	,-(sp)
+	call	dopari
+	movb	(sp)+	,dst
+	.endm	setpar
+
+	.macro	spack	type ,pnum ,len ,msg
+	.if  b	<len>
+	.iif nb	<msg>	.error	<; bad call to SPACK macro>
+	calls	spack$	,<type,pnum,#0,#null>
+	.iff
+	calls	spack$	,<type,pnum,len,msg>
+	.endc
+	.endm	spack
+
+	.macro	strcat	dst ,src
+	mov	src	,-(sp)
+	mov	dst	,-(sp)
+	jsr	pc	,strcat
+	.endm	strcat
+
+	.macro	strcpy	dst ,src
+	mov	src	,-(sp)
+	mov	dst	,-(sp)
+	jsr	pc	,strcpy
+	.endm	strcpy
+
+	.macro	strlen	string
+	mov	string	,r0
+	call	l$len
+	.endm	strlen
+
+	.macro	textsrc	text
+	.if  b	<text>
+	clr	getcroutine
+	clr	tgetaddr
+	.iff
+	mov	#tgetcr0,getcroutine
+	mov	text	,tgetaddr
+	.endc
+	.endm	textsrc
+
+	.macro	tochar	src ,dst
+	clr	-(sp)
+	bisb	src	,@sp
+	add	#40	,@sp
+	movb	(sp)+	,dst
+	.endm	tochar
+
+	.macro	unchar	src ,dst
+	clr	-(sp)
+	bisb	src	,@sp
+	sub	#40	,@sp
+	movb	(sp)+	,dst
+	.endm	unchar
+
+	.macro	unsave	list
+	.if b <list>
+	unsave	<r5,r4,r3,r2,r1,r0>
+	.iff
+	.irp	x ,<list>
+	 mov	(sp)+	,x
+	.endr
+	.endc
+	.endm	unsave
+
+	.macro	upcase	s
+	mov	s	,r0
+	call	upcase
+	.endm	upcase
+
+	.macro	upone	s
+	mov	s	,r0
+	call	upone
+	.endm	upone
+
+	.macro	wrtall	arg
+	mov	arg	,-(sp)
+	call	wrtall
+	.endm	wrtall
+
+	.macro	xor	reg ,dst
+	ixor	reg	,dst
+	.endm	xor

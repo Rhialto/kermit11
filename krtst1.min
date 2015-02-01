@@ -1,0 +1,699 @@
+	.title	KRTST1.MIN  SET command overlay one
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984 Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTCDF.MIN"
+	.iif ndf  KRTCDF  .error 	<; .include for IN:KRTCDF.MIN failed>
+
+	$CMGLOB	= 0
+
+
+	.psect	$code
+	.sbttl	SET BLOCK_CHECK_TYPE
+	.enabl	lsb
+
+set$bl::upcase	argbuf
+	calls	getcm0	,<argbuf,#blklst>
+	tst	r0
+	bmi	110$
+	tst	wasnul
+	bne	110$
+	jsr	pc	,@r1
+	mov	r1	,setchkt
+	movb	r1	,senpar+p.chkt
+	tst	infomsg
+	beq	100$
+	message	<You may need to SET BLO >
+	movb	r1	,r0
+	call	writ1char
+	message	< on the other Kermit>,cr
+100$:	clr	r0
+110$:	return
+
+	.dsabl	lsb
+
+	command	blklst	,1_CHARACTER_CHECKSUM	,1	,sbl$1
+	command	blklst	,2_CHARACTER_CHECKSUM	,1	,sbl$2
+	command	blklst	,3_CHARACTER_CRC_CCITT	,1	,sbl$3
+	command	blklst	,CRC_CCITT		,1	,sbl$3
+	command	blklst
+
+sbl$1:	movb	#'1	,r1
+	return
+
+sbl$2:	movb	#'2	,r1
+	return
+
+sbl$3:	movb	#'3	,r1
+	return
+
+
+	.sbttl	SET FILE_TYPE
+	.enabl	lsb
+
+set$fi::upcase	argbuf
+	calls	getcm0	,<argbuf,#setfil>
+	tst	r0
+	bmi	10$
+	tst	wasnul
+	bne	10$
+	jsr	pc	,@r1
+10$:	return
+
+	command	setfil	,ASCII		,2	,sf$asc
+	command	setfil	,AUTOMATIC	,2	,sf$aut
+	command	setfil	,BINARY		,1	,sf$bin
+	command	setfil	,CREATE_SIZE	,2	,srt$cr	,<Blocks: >
+	command	setfil	,CSI_PARSING	,2	,srt$cs
+	command	setfil	,DEC_MULTINATIONAL,1	,sf$dec
+	command	setfil	,FIXED		,1	,sf$bin
+	command	setfil	,IMAGE		,1	,sf$bin
+	command	setfil	,NOPROTECT	,3	,sf$sup
+	command	setfil	,NOREPLACE	,2	,sf$nos
+	command	setfil	,NOVOLUME_VERIFY,3	,srt$nv
+	command	setfil	,PROTECT	,1	,sf$nos
+	command	setfil	,REPLACE	,1	,sf$sup
+	command	setfil	,TEXT		,2	,sf$asc
+	command	setfil	,TYPE		,2	,sf$typ
+	command	setfil	,VOLUME_VERIFY	,1	,srt$vo
+	command	setfil
+
+sf$typ:	mov	argpnt	,r0
+20$:	tstb	@r0
+	beq	90$
+	cmpb	(r0)+	,#space
+	bne	20$
+	mov	r0	,argpnt
+	calls	getcm0	,<r0,#setfil>
+	tst	r0
+	bmi	99$
+	tst	wasnul
+	bne	99$
+	jmp	@r1
+90$:	mov	#er$bad	,r0
+99$:	return
+
+sf$asc:	mov	#text	,$image
+	clr	doauto
+	tst	infomsg
+	beq	100$
+	message	<ASCII text mode set>,cr
+	br	100$
+
+sf$bin:	mov	#binary	,$image
+	clr	doauto
+	tst	infomsg
+	beq	100$
+	message	<Binary mode set>,cr
+	call	xbin
+	br	100$
+
+sf$dec:	mov	#decnat	,$image
+	clr	doauto
+	tst	infomsg
+	beq	100$
+	message	<DEC_Multinational mode set>,cr
+	call	xbin
+	br	100$
+
+sf$aut:	mov	sp	,doauto
+	mov	#text	,$image
+	tst	infomsg
+	beq	100$
+	message	<Auto ASCII/Binary mode set>,cr
+	call	xbin
+	br	100$
+
+sf$sup:	clr	filprot
+	br	100$
+
+sf$nos:	mov	sp	,filprot
+	br	100$
+
+xbin:	tst	parity
+	beq	100$
+	message	<Caution: Binary files will require 8-bit prefixing>,cr
+100$:	clr	r0
+	return
+
+srt$cr:	mov	argpnt	,r1
+112$:	tstb	@r1
+	beq	111$
+	cmpb	(r1)+	,#space
+	bne	112$
+	calls	l$val	,<r1>
+	tst	r0
+	bne	111$
+	mov	r1	,en$siz
+	br	120$
+111$:	mov	#er$bad	,r0
+120$:	return
+
+srt$vo:	mov	sp	,rtvol
+	clr	r0
+	return
+
+srt$nv:	clr	rtvol
+	clr	r0
+	return
+
+srt$cs:	mov	argpnt	,r0
+210$:	tstb	@r0
+	beq	290$
+	cmpb	(r0)+	,#space
+	bne	210$
+	calls	getcm0	,<r0,#cstype>
+	tst	r0
+	bmi	300$
+	tst	wasnul
+	bne	300$
+	jsr	pc	,@r1
+	clr	r0
+	br	300$
+290$:	mov	#er$bad	,r0
+300$:	return
+
+	command	cstype	,EMULATED	,1	,scs$em
+	command	cstype	,REAL		,1	,scs$re
+	command	cstype
+
+scs$re:	clr	csi.fake
+	return
+
+scs$em:	mov	sp	,csi.fake
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET BINARY_TYPE
+	.enabl	lsb
+
+set$bi::save	<r1,r2,r3>
+	strlen	bintyp
+	cmp	r0	,#120.
+	ble	1$
+	mov	#er$bnl	,r0
+	br	100$
+1$:	sub	#100	,sp
+	mov	sp	,r3
+	clrb	@r3
+	upcase	argbuf
+	mov	argbuf	,r2
+	cmpb	@r2	,#'.
+	beq	10$
+	movb	#'.	,(r3)+
+	clrb	@r3
+10$:	mov	sp	,r3
+	strcat	r3	,r2
+	strlen	r3
+	mov	#4	,r1
+	sub	r0	,r1
+	beq	20$
+	bgt	11$
+	mov	#er$one	,r0
+	br	99$
+
+11$:	mov	r3	,r2
+	add	r0	,r2
+13$:	movb	#space	,(r2)+
+	sob	r1	,13$
+	clrb	@r2
+20$:	mov	sp	,r3
+30$:	strcat	bintyp	,r3
+	tst	infomsg
+	beq	90$
+	message	<The BINARY_TYPE list has been appended>,cr
+90$:	clr	r0
+99$:	add	#100	,sp
+100$:	unsave	<r3,r2,r1>
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	ASSIGN, CWD, HOME
+	.enabl	lsb
+
+c$assign::scan	#space	,argbuf
+	tst	r0
+	beq	90$
+	add	argbuf	,r0
+	clrb	-(r0)
+	tstb	(r0)+
+	bicb	#40	,@r0
+	cmpb	(r0)+	,#'D
+	bne	90$
+	bicb	#40	,@r0
+	cmpb	(r0)+	,#'K
+	bne	90$
+	tstb	@r0
+	beq	c$cwd
+	cmpb	(r0)+	,#':
+	bne	90$
+	tstb	@r0
+	beq	c$cwd
+
+90$:	mov	#er$ass	,r0
+	br	36$
+
+c$cwd::	strlen	argbuf
+	cmp	r0	,#4
+	ble	31$
+30$:	mov	#er$dev	,r0
+	br	36$
+
+31$:	add	argbuf	,r0
+	cmpb	-(r0)	,#':
+	beq	32$
+	inc	r0
+	movb	#':	,(r0)+
+	clrb	(r0)
+
+32$:	upcase	argbuf
+	calls	fparse,<argbuf,#spare1>
+	tst	r0
+	beq	10$
+
+36$:	direrr	r0
+	br	100$
+
+10$:	copyz	#spare1	,#defdir,#5
+100$:	clr	r0
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET HOME
+
+set$ho::upcase	argbuf
+	strlen	argbuf
+	add	argbuf	,r0
+	cmpb	-1(r0)	,#':
+	beq	37$
+	movb	#':	,(r0)+
+	clrb	@r0
+
+37$:	sub	argbuf	,r0
+	cmp	r0	,#4
+	ble	39$
+	mov	#er$iln	,r0
+	return
+
+39$:	copyz	argbuf	,#dkname,#5
+100$:	clr	r0
+	return
+
+
+	.sbttl	SET SEND, RECEIVE
+	.enabl	lsb
+
+set$rc::mov	#reclst	,r3
+	br	200$
+set$sn::mov	#senlst	,r3
+200$:	upcase	argbuf
+	calls	getcm0	,<argbuf,r3>
+	tst	r0
+	bmi	300$
+	tst	wasnul
+	bne	300$
+220$:	calls	getcm1	,<argbuf,r3,r0>
+	tst	r0
+	bmi	300$
+	jsr	pc	,@r1
+300$:	return
+
+	.dsabl	lsb
+
+	command reclst	,PACKET_LENGTH	,1	,str$pl	,<Value: >
+	command reclst	,START_OF_PACKET,1	,str$so	,<Octal 1-36: >
+	command	reclst	,TIME_OUT	,1	,str$ti	,<Seconds: >
+	command reclst
+
+	command	senlst	,NOXON		,1	,sts$nx
+	command	senlst	,PACKET_LENGTH	,3	,sts$pl	,<Value: >
+	command	senlst	,PADCHARACTER	,4	,sts$pd	,<Octal value: >
+	command	senlst	,PADDING	,4	,sts$pn	,<Number: >
+	command senlst	,START_OF_PACKET,1	,sts$so	,<Octal 1-36: >
+	command	senlst	,TIME_OUT	,1	,sts$ti	,<Seconds: >
+	command	senlst	,XON		,1	,sts$xo
+	command	senlst
+
+sts$so:	call	setsop
+	tst	r0
+	bne	100$
+	mov	r1	,sensop
+100$:	return
+
+str$so:	call	setsop
+	tst	r0
+	bne	100$
+	mov	r1	,recsop
+100$:	return
+
+set$so::call	setsop
+	tst	r0
+	bne	100$
+	mov	r1	,sensop
+	mov	r1	,recsop
+100$:	return
+
+setsop:	calls	octval	,<argbuf>
+	tst	r0
+	bne	90$
+	tst	r1
+	ble	90$
+	cmp	r1	,#36
+	ble	100$
+90$:	mov	#er$oct	,r0
+100$:	return
+
+str$ti:	call	settim
+	tst	r0
+	bne	100$
+	mov	r1	,rectim
+100$:	return
+
+sts$ti:	call	settim
+	tst	r0
+	bne	100$
+	mov	r1	,sentim
+100$:	return
+
+settim:	calls	l$val	,<argbuf>
+	tst	r0
+	bne	110$
+	tst	r1
+	blt	110$
+	cmp	r1	,#maxpak
+	bgt	110$
+	return
+110$:	mov	#er$tim	,r0
+	return
+
+sts$xo:	mov	sp	,prexon
+	clr	r0
+	return
+
+sts$nx:	clr	prexon
+	clr	r0
+	return
+
+	.enabl	lsb
+
+sts$pl:	calls	l$val	,<argbuf>
+	tst	r0
+	bne	1$
+	cmp	r1	,#20.
+	blt	2$
+	cmp	r1	,#maxpak
+	ble	101$
+	call	st$.pl
+101$:	mov	r1	,senlen
+	br	90$
+
+str$pl:	calls	l$val	,<argbuf>
+	tst	r0
+	bne	1$
+	cmp	r1	,#maxpak
+	bgt	str.pl
+	cmp	r1	,#20.
+	blt	2$
+	movb	r1	,senpar+p.spsiz
+	clrb	senpar+p.mxl1
+	clrb	senpar+p.mxl2
+	clr	reclng
+	clr	dolong
+	br	90$
+
+1$:	mov	#er$bad	,r0
+	return
+2$:	mov	#er$txp	,r0
+	return
+
+str.pl:	call	st$.pl
+	mov	r1	,reclng
+	mov	sp	,dolong
+	clr	r0
+	div	#95.	,r0
+	movb	r0	,senpar+p.mxl1
+	movb	r1	,senpar+p.mxl2
+90$:	clr	r0
+100$:	return
+
+st$.pl:	cmp	r1	,#maxlng
+	blos	16$
+	mov	#maxlng	,r1
+	tst	infomsg
+	beq	16$
+	message	<Packet length truncated to buffer maximum of >
+	mov	r1	,r0
+	call	L10266
+	message	<. bytes>,cr
+16$:	cmp	r1	,#maxpak
+	blos	20$
+	tst	infomsg
+	beq	20$
+	message	<Caution: Data may be lost at speeds greater than 2400>,cr
+20$:	cmpb	setchkt	,#'3
+	beq	30$
+	tst	infomsg
+	beq	30$
+	message	<Remember to SET BLO 3 for long_packets>,cr
+30$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET END_OF_LINE
+
+set$eo::call	setsop
+	tst	r0
+	bne	100$
+	movb	r1	,senpar+p.eol
+100$:	return
+
+
+	.sbttl	SET PAUSE
+
+set$ps::calls	l$val	,<argbuf>
+	tst	r0
+	beq	10$
+	mov	#er$bad	,r0
+	br	100$
+10$:	mov	r1	,pauset
+100$:	return
+
+
+	.sbttl	SET DELAY
+
+set$dl::calls	l$val	,<argbuf>
+	tst	r0
+	beq	10$
+	mov	#er$bad	,r0
+	br	100$
+10$:	mov	r1	,sendly
+100$:	return
+
+
+	.sbttl	SET SEND PADDING, PADCHARACTER
+	.enabl	lsb
+
+sts$pd::calls	octval	,<argbuf>
+	tst	r0
+	bne	5$
+	movb	r1	,senpar+p.padc
+	return
+
+sts$pn::calls	l$val	,<argbuf>
+	tst	r0
+	beq	10$
+5$:	mov	#er$bad	,r0
+	br	100$
+10$:	mov	r1	,senpar+p.npad
+100$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET ATTRIBUTES, LONG_PACKETS
+
+set$at::upcase	argbuf
+	calls	getcm0	,<argbuf,#onoff>
+	tst	r0
+	bmi	110$
+	tst	wasnul
+	bne	110$
+	jsr	pc	,@r1
+	mov	r0	,doattr
+	clr	r0
+110$:	return
+
+set$lp::upcase	argbuf
+	calls	getcm0	,<argbuf,#onoff>
+	tst	r0
+	bmi	110$
+	tst	wasnul
+	bne	110$
+	jsr	pc	,@r1
+	mov	r0	,dolong
+	beq	100$
+	mov	argbuf	,r0
+	movb	#'3	,(r0)+
+	clrb	@r0
+	call	set$bl
+	mov	#maxlng	,r1
+	mov	r1	,senlen
+	call	str.pl
+100$:	clr	r0
+110$:	return
+
+	command	onoff	,OFF	,2	,s$of
+	command	onoff	,ON	,2	,s$on
+	command	onoff
+
+s$of:	clr	r0
+	return
+
+s$on:	mov	sp	,r0
+	return
+
+st$nat::clr	doattr
+	clr	r0
+	return
+
+st$nlp::clr	dolong
+	clr	senlng
+	cmp	senlen	,#maxpak
+	ble	200$
+	mov	#maxpak	,senlen
+200$:	clr	r0
+	return
+
+
+	.sbttl	SET PROMPT
+
+set$pr::call	skipit
+	copyz	argbuf	,#prompt,#31.
+	clr	r0
+	return
+
+
+	.sbttl	SET REPEAT
+
+set$rp::upcase	argbuf
+	calls	getcm0	,<argbuf,#relst>
+	tst	r0
+	bmi	110$
+	tst	wasnul
+	bne	110$
+	jsr	pc	,@r1
+	clr	r0
+110$:	return
+
+	command	relst	,OFF	,2	,rep$of
+	command	relst	,ON	,2	,rep$on
+	command	relst
+
+set$nrp::clr	r0
+rep$of:	clr	setrpt
+	return
+
+rep$on:	mov	sp	,setrpt
+	return
+
+
+	.sbttl	SET TERMINAL
+
+set$tt::upcase	argbuf
+	calls	getcm0	,<argbuf,#ttlst>
+	tst	r0
+	bmi	110$
+	tst	wasnul
+	bne	110$
+	jsr	pc	,@r1
+	clr	r0
+110$:	return
+
+	command	ttlst	,NOQUIET,3	,svt$nq
+	command	ttlst	,NOSCOPE,3	,svt$ns
+	command	ttlst	,QUIET	,1	,svt$qu
+	command	ttlst	,SCOPE	,1	,svt$vt
+	command	ttlst	,TTY	,1	,svt$tt
+	command	ttlst	,VT100	,3	,svt$vt
+	command	ttlst	,VT101	,3	,svt$vt
+	command	ttlst	,VT102	,3	,svt$vt
+	command	ttlst	,VT200	,3	,svt$22
+	command	ttlst	,VT220	,3	,svt$22
+	command	ttlst
+
+	.enabl	lsb
+
+svt$ns:	mov	#noscope,r0
+	br	3$
+svt$tt:	mov	#tty	,r0
+3$:	mov	r0	,vttype
+	return
+
+	.dsabl	lsb
+
+svt$vt:	mov	#vt100	,vttype
+	return
+
+svt$22:	mov	#vt200	,vttype
+	return
+
+svt$qu:	clr	qu.ini
+	clr	infomsg
+	return
+
+svt$nq:	mov	sp	,qu.ini
+	mov	sp	,infomsg
+	tst	sy.ini
+	beq	100$
+	.newline
+100$:	return
+
+
+	.sbttl	Clear a VT-100's screen
+	.enabl	lsb
+
+c$cls::	movb	#'l!40	,nrm.rev
+	br	10$
+c$clx::	movb	#'h!40	,nrm.rev
+10$:	wrtall	#clstxt
+	clr	r0
+	return
+
+	.save
+	.psect	$rwdata	,rw,d,lcl,rel,con
+clstxt:	.ascii	<esc>"<"
+	.ascii	<esc>"[?1l"
+	.ascii	<esc>"[?3l"
+	.ascii	<esc>"[?4l"
+	.ascii	<esc>"[?5"
+nrm.rev:.byte	0
+	.ascii	<esc>"[?6l"
+	.ascii	<esc>"[?7h"
+	.ascii	<esc>"[?8h"
+	.ascii	<esc>"(B"
+	.ascii	<ctrl$o>
+	.ascii	<esc>"[1;24r"
+	.ascii	<esc>"[J"
+	.ascii	<esc>"[m"
+	.ascii	<esc>"[q"
+	.ascii	<esc>"[v"
+	.ascii	<esc>">"
+	.byte	0
+	.even
+	.restore
+
+	.dsabl	lsb
+
+	.end

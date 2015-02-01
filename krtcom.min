@@ -1,0 +1,52 @@
+	.title	KRTCOM.MIN  Main_loop and REMOTE command lists overlay
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984 Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTCDF.MIN"
+	.iif ndf  KRTCDF  .error 	<; .include for IN:KRTCDF.MIN failed>
+
+	$CMGLOB	=	1
+
+	.psect	$code
+	.sbttl	Define the main_loop commands
+
+loacmd::mov	#cmdlst	,r0
+	return
+
+command	cmdlst	,@		,1  ,c$take  ,<File: >
+command	cmdlst	,ASSIGN		,2  ,c$assign
+command	cmdlst	,BUG		,2  ,c$bug
+command	cmdlst	,CD		,2  ,c$cwd   ,<Directory: >
+command	cmdlst	,CLS		,3  ,c$cls
+command	cmdlst	,CLX		,3  ,c$clx
+command	cmdlst	,COPY		,3  ,c$copy  ,<From: >
+command	cmdlst	,CWD		,2  ,c$cwd   ,<Directory: >
+command	cmdlst	,DELETE		,6  ,c$del   ,<File: >
+command	cmdlst	,DIRECTORY	,3  ,c$dir
+command	cmdlst	,EXAMINE	,3  ,c$disp  ,<Symbol or address: >
+command	cmdlst	,EXIT		,2  ,c$exit
+command	cmdlst	,HELP		,1  ,c$help
+command	cmdlst	,HOME		,2  ,c$home
+command	cmdlst	,HPRINT		,2  ,prihlp
+command	cmdlst	,LOGFILE	,3  ,c$logf
+command	cmdlst	,PRINT		,2  ,c$print ,<File: >
+command	cmdlst	,PWD		,2  ,c$pwd
+command	cmdlst	,QUIT		,1  ,c$exit
+command	cmdlst	,RECEIVE	,1  ,c$rec
+command	cmdlst	,RENAME		,3  ,c$rena  ,<From: >
+command	cmdlst	,SEND		,1  ,c$send  ,<Files: >
+command	cmdlst	,SERVER		,3  ,c$serv
+command	cmdlst	,SET		,3  ,c$set   ,<What: >
+command	cmdlst	,SHOW		,2  ,c$show
+command	cmdlst	,SPACE		,2  ,c$spac
+command	cmdlst	,STATUS		,2  ,c$stat
+command	cmdlst	,TAKE		,2  ,c$take  ,<File: >
+command	cmdlst	,TYPE		,2  ,c$type  ,<Files: >
+command	cmdlst
+
+	.end

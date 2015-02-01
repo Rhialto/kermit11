@@ -1,0 +1,373 @@
+	.title	KRTDEB	Examine data in memory
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	use erbfsiz to size errtxt buffer
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	added new variables to data displayable with EXAMINE
+;	display ascii chars when dumping byte values
+;	fixed error handling
+;	fixed addressing bug in pint (displays word values)
+
+;	Copyright 1984 Change Software, Inc.
+;
+;	21-May-84  22:07:50  Brian Nelson
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+
+	CHR	=	1		; string (byte) data
+	INT	=	2		; integer (word) data
+
+	.macro	entry	name ,type ,size
+	.save
+	.if  b	<name>
+	.psect	$addr
+	.word	0
+	.iff
+	.dsabl	lc
+	.psect	$name	,ro,d,lcl,rel,con
+	$$ = .
+	.asciz	#name#
+	.psect	$addr
+	.word	$$
+	.psect	$addr1
+	.word	name
+	.psect	$type
+	.word	type
+	.psect	$size
+	.word	size
+	.enabl	lc
+	.endc
+	.restore
+	.endm	entry
+
+
+	.sbttl	Local data			; /63/ consolidated here..
+
+	.psect	$pdata
+deb.01:	.word	pbyte ,pint
+deb.02:	.word	deb.03 ,deb.04
+deb.03:	.asciz	<tab>"Byte data, size"	; /BBS/ added tabs
+deb.04:	.asciz	<tab>"Word data, size"
+deb.05:	.asciz	<tab>"  Starting address: "
+deb.06:	.asciz	"?KRTDEB-E-"			; /62/
+deb.07:	.asciz	"Symbol not in internal STB"	; /62/
+deb.08:	.asciz	"Bad octal value"		; /62/
+deb.09:	.asciz	". ("			; /BBS/ added decimal point
+deb.10:	.asciz	")   "			; /BBS/ added spaces for formatting
+octpad:	.asciz	"    "			; /BBS/ dummy octal number element
+	.even
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+togo:	.word	0			; /BBS/ number of bytes
+ascbuf:	.blkb	24			; /BBS/ ascii buffer for byte dump
+	.even
+
+
+	.sbttl	Symbol name data table
+
+	.psect	$addr	,ro,d,lcl,rel,con
+texadr:
+	.psect	$addr1	,ro,d,lcl,rel,con
+virtad:
+	.psect	$type	,ro,d,lcl,rel,con
+symtyp:
+	.psect	$size	,ro,d,lcl,rel,con
+symsiz:
+	.psect	$code
+
+	entry	<$image>, int, 1
+	entry	<$limit>, int, 2
+	entry	<albuff>, int, 1
+	entry	<argbuf>, int, 1
+	entry	<argpnt>, int, 1
+	entry	<asname>, chr, ln$max
+	entry	<at$len>, int, 1
+	entry	<at$sys>, chr, 2
+	entry	<b4speed>,int, 1
+	entry	<blknum>, int, 5
+	entry	<buflst>, int, 5
+	entry	<bufp>,   int, 5
+	entry	<bufs>,   int, 5
+	entry	<cc$max>, int, 1
+	entry	<chksiz>, int, 1
+	entry	<chktyp>, chr, 1
+	entry	<cl$line>,int, 1
+	entry	<cl.line>,int, 1
+	entry	<cl.pri>, int, 1
+	entry	<cl.r50>, int, 4
+	entry	<cl.unit>,int, 1
+	entry	<clkflg>, int, 1
+	entry	<cmdbuf>, int, 1
+	entry	<conpar>, chr, 20
+	entry	<context>,int, 1
+	entry	<date.a>, int, 5
+	entry	<do8bit>, int, 1
+	entry	<doattr>, int, 1
+	entry	<dorpt> , int, 1
+;	entry	<doslid>, int, 1
+	entry	<edists>, int, 1
+	entry	<ebquot>, chr, 1
+	entry	<errtxt>, chr, erbfsiz
+	entry	<fetpt>,  int, 1
+	entry	<fetptm>, int, 1
+	entry	<filnam>, chr, ln$max
+	entry	<filtyp>, int, 5
+	entry	<freept>, int, 1
+	entry	<hilimit>,int, 1
+	entry	<image>,  int, 1
+	entry	<imgtyp>, int, 1
+	entry	<index>,  int, 1
+	entry	<indnam>, chr, 16+2	; /63/
+	entry	<ininam>, chr, 16+2	; /63/
+	entry	<jobsts>, int, 10
+	entry	<jobtyp>, int, 1
+	entry	<km.lock>,int, 1
+	entry	<limits>, chr, 34.
+	entry	<linksts>,int, 1
+	entry	<logfil>, chr, 26+2	; /63/
+	entry	<lokdate>,int, 1
+	entry	<loklen>, int, 1
+	entry	<lokstat>,int, 1
+	entry	<loktime>,int, 1
+	entry	<maxtop>, int, 1
+	entry	<mcrcmd>, int, 1
+	entry	<mode>,   int, 5
+	entry	<modtype>,int, 1
+	entry	<montyp>, int, 1
+	entry	<mready>, int, 1
+	entry	<numtry>, int, 1
+	entry	<outlun>, int, 1
+	entry	<outopn>, int, 1
+	entry	<packet>, chr, $allsiz	; /BBS/
+	entry	<paknum>, int, 1
+	entry	<pcnt.r>, int, 2*34
+	entry	<pcnt.s>, int, 2*34
+	entry	<pnhead>, int, 1
+	entry	<prexon>, int, 1
+	entry	<prot.a>, int, 5
+	entry	<qedtst>, int, 1	; /63/
+	entry	<qu.ini>, int, 1
+	entry	<r50dev>, int, 4
+	entry	<r50out>, int, 4	; /63/
+	entry	<remote>, int, 1
+	entry	<restof>, int, 1
+	entry	<rptlast>,chr, 2	; /63/
+	entry	<rptquo>, chr, 2	; /63/
+	entry	<rptsave>,chr, 2	; /63/
+	entry	<rt11upd>,int, 1
+	entry	<rt11ver>,int, 1
+	entry	<rtwork>, int, 10
+	entry	<senwin>, int, 1
+	entry	<senpar>, chr, 20
+	entry	<size>,   int, 1
+	entry	<sizof>,  int, 5
+	entry	<snd8bit>,int, 1
+	entry	<spare1>, chr, 256.
+	entry	<sparsz>, int, 1
+	entry	<srcnam>, chr, ln$max
+	entry	<stklim>, chr, stksiz	; /62/ dump the stack, backwards!
+	entry	<time.a>, int, 5
+	entry	<times>,  int, 10	; /BBS/ wuz 4
+	entry	<totp.r>, int, 1	; pointer
+	entry	<totp.s>, int, 1	; pointer
+	entry	<tsxcl>,  int, 1
+	entry	<tsxsav>, int, 1
+	entry	<tsxver>, int, 1
+	entry	<tt$io>,  int, 1
+	entry	<ttbuf>,  int, ttbsiz+2
+	entry	<ttparm>, int, 1
+	entry	<ttpar2>, int, 1
+	entry	<undchr>, chr, 2
+	entry	<undlin>, chr, ln$max+2
+	entry	<vbgexe>, int, 1
+	entry	<xcdone>, int, 1
+	entry	<xkbuff>, chr, <xksize+2>
+	entry	<xklgbu>, int, 1
+	entry	<xkpoint>,int, 1
+	entry	<xl.lock>,int, 1
+	entry	<xmfetp>, int, 1
+	entry	<z.atch>, int, 1
+	entry
+
+
+	.sbttl	EXAMINE data in memory
+
+c$exam::upcase	argbuf			; /63/ more appropriate name..
+	cmpb	@r0	,#'0		; /45/ numeric?
+	blo	10$			; /45/ no
+	cmpb	@r0	,#'9		; /62/ numeric?
+	bhi	10$			; /45/ no
+	calls	octval	,<r0>		; /45/ yes, get the address
+	tst	r0			; /BBS/ ok?
+	bne	50$			; /BBS/ nope
+	bic	#1	,r1		; /62/ ensure it's word aligned
+
+; /BBS/ WARNING: This only works for valid addresses.
+;	Consult the link map and assembly listings to
+;	determine what is valid.  Attempting to access
+;	an illegal address will trap to the monitor.
+
+	octout	@r1			; /45/ dump the data
+	br	60$			; /45/ exit
+
+10$:	cmpb	@r0	,#'*		; dump everything today?
+	bne	30$			; no
+	clr	r0			; yes, start with first one
+20$:	tst	texadr(r0)		; keep going until address of zero
+	beq	70$			; exit /BBS/ skip extra newline at end
+	call	prtsym			; print the symbol out
+	add	#2	,r0		; next please
+	.newline
+	br	20$
+
+30$:	call	findsy			; find the symbol now
+	tst	r0			; found it?
+	bmi	40$			; no
+	call	prtsym			; dump it please
+	br	60$
+
+40$:	wrtall	#deb.06			; /63/ "?KRTDEB-E-"
+	wrtall	#deb.07			; /63/ "Symbol not in internal STB"
+	br	60$
+50$:	wrtall	#deb.06			; /63/ "?KRTDEB-E-"
+	wrtall	#deb.08			; /63/ "Bad octal value"
+60$:	.newline
+70$:	clr	r0			; /62/
+	return
+
+
+	.sbttl	Print symbol
+
+;	input:	r0	offset
+
+prtsym:	save	<r0>
+	sub	#20	,sp		; allocate a small text buffer
+	mov	sp	,r3		; and a pointer
+	mov	r0	,r5		; ensure we don't zap offset
+	wrtall	texadr(r5)		; print the symbol name
+	mov	symtyp(r5),r4		; get the class of symbol
+	asl	r4			; word indexing
+	wrtall	deb.02-2(r4)		; /63/ format it a bit
+	deccvt	symsiz(r5),r3,#5	; get the data item's size
+	clrb	5(r3)			; null terminate
+	wrtall	r3			; print that out
+	mov	#'.	,r0
+	call	writ1ch			; /BBS/ add decimal point
+	wrtall	#deb.05			; /BBS/ address header
+	octout	virtad(r5)		; /BBS/ display starting address
+	.newline
+	.newline
+	jsr	pc	,@deb.01-2(r4)	; /63/ call appropriate format routine
+	add	#20	,sp
+	unsave	<r0>
+	return
+
+
+	.sbttl	Format byte data
+
+pbyte:	sub	#20	,sp		; a buffer to use today
+	mov	symsiz(r5),togo		; number of bytes to dump
+	beq	90$			; nothing to do..
+	mov	virtad(r5),r5		; get the base address
+10$:	mov	#20	,r3		; maximum of 16 items per line
+	mov	#ascbuf	,r1		; /BBS/ for ascii display of line
+20$:	mov	sp	,r2		; pointer to local buffer
+	clr	r4			; get the next byte please
+	bisb	(r5)+	,r4		; without sign extension
+	clrb	(r1)			; /BBS/ prep to ..
+	bisb	r4	,(r1)		; /BBS/ ..copy sans sign extension
+	bicb	#^c<177>,(r1)		; /BBS/ hose hi bit
+	cmpb	(r1)	,#space		; /BBS/ printable?
+	blt	30$			; /BBS/ no
+	cmpb	(r1)	,#177		; /BBS printable?
+	blt	40$			; /BBS/ ya
+30$:	movb	#'.&77	,(r1)+		; /BBS/ no, stuff a dot
+	br	50$			; /BBS/ and continue
+40$:	tstb	(r1)+			; /BBS/ save char, bump to next byte
+50$:	mov	r4	,r0		; copy it
+	ash	#-6	,r0		; get the high two bits now
+	bic	#^c<3>	,r0		; mask the lower bits please
+	add	#'0	,r0		; convert
+	movb	r0	,(r2)+		; and copy
+	mov	r4	,r0		; copy it
+	ash	#-3	,r0		; get the high two bits now
+	bic	#^c<7>	,r0		; mask the lower bits please
+	add	#'0	,r0		; convert
+	movb	r0	,(r2)+		; and copy
+	mov	r4	,r0		; copy it
+	bic	#^c<7>	,r0		; mask the lower bits please
+	add	#'0	,r0		; convert
+	movb	r0	,(r2)+		; and copy
+	movb	#space	,(r2)+		; /BBS/ a trailing space
+	clrb	@r2			; at last, .asciz
+	mov	sp	,r2		; restore buffer pointer and print
+	wrtall	r2			; simple
+	dec	togo			; anything else to print
+	beq	60$			; no
+	sob	r3	,20$		; yes, next on the line please
+	call	100$			; /BBS/ dump ascii list next then goto
+	br	10$			; next line
+60$:	dec	r3			; /BBS/ adj r3 for last pass thru loop
+	ble	80$			; /BBS/ r3 now contains pad count
+70$:	wrtall	#octpad			; /BBS/ blanks where "000" would be
+	sob	r3	,70$		; /BBS/ until padded to a full line
+80$:	call	100$			; /BBS/ now dump ascii chars
+90$:	add	#20	,sp		; release the local buffer
+	return
+
+100$:	movb	#cr	,(r1)+		; /BBS/ stuff a CR
+	movb	#lf	,(r1)+		; /BBS/ and LF in buffer
+	clrb	@r1			; /BBS/ terminate it
+	wrtall	#ascbuf			; /BBS/ dump it to screen
+	return
+
+
+	.sbttl	Format integer data
+
+pint:	mov	symsiz(r5),r1		; get the number of data elements
+	beq	40$			; nothing to do at all
+	mov	virtad(r5),r2		; get the address of what to print
+10$:	mov	#4	,r3		; number of items per line
+20$:	mov	(r2)+	,r4		; /BBS/ get word while in this segment
+	decout	r4			; dump it /BBS/ wuz (r2)
+	wrtall	#deb.09			; /63/ ". ("
+	octout	r4			; /BBS/ (r2)+ can return BAD values!!
+	wrtall	#deb.10			; /63/ ")   "
+	dec	r1			; all done?
+	beq	30$			; yes, exit
+	sob	r3	,20$		; not done, print next item
+	.newline
+	br	10$			; next line of printing
+30$:	.newline
+40$:	return
+
+
+	.sbttl	Locate symbol offset in index
+
+findsy:	clr	r3			; init index
+10$:	mov	texadr(r3),r1		; point to the text now
+	beq	50$			; if eq, we hit the end of it all
+	mov	r0	,r2		; /BBS/ refresh pointer
+20$:	cmpb	(r2)+	,(r1)+		; check for exact match on characters
+	bne	30$			; no
+	tstb	(r2)			; ya, anything left?
+	bne	20$			; ya, keep checking
+	br	40$			; no, it's a match
+30$:	add	#2	,r3		; no match, advance to the next addr
+	br	10$			; next please
+
+40$:	mov	r3	,r0		; return index in r0
+	br	60$
+50$:	mov	#-1	,r0		; no match, return index of -1
+60$:	return
+
+	.end

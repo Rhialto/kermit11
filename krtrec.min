@@ -1,0 +1,554 @@
+	.title	KRTREC.MIN  Receive file processing
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1983,1984  Change Software, Inc.
+;
+;	This software is furnished under a license and may
+;	be  used  and  copied  only in accordance with the
+;	terms of such license and with  the  inclusion  of
+;	the  above copyright notice.  This software or any
+;	other copies thereof may not be provided or other-
+;	wise made available to any other person.  No title
+;	to and ownership of the software is hereby  trans-
+;	ferred.
+;
+;	The information in this  software  is  subject  to
+;	change  without notice and should not be construed
+;	as a commitment by the author.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTDEF.MIN"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MIN failed>
+
+	.mcall	.PURGE
+
+
+	.sbttl	Local data
+
+	.psect	$pdata
+RD22$:	.byte	abt$cur	,0
+RE2$:	.asciz	"REC.SW"
+	.even
+
+
+	.psect	$code
+	.sbttl	Receive file(s)
+
+c$rec::	call	opentt
+	tst	outopn
+	beq	10$
+	calls	close	,<#lun.ou>
+10$:	calls	recsw	,<#sta.rin>
+	tst	r0
+	beq	100$
+	inc	status
+100$:	call	clostt
+	jmp	clrcns
+
+
+	.sbttl	State controller for receive file processing
+	.enabl	lsb
+
+recsw::	clr	paknum
+rec.sw::movb	@r5	,state
+	mov	$image	,image
+	movb	#defchk	,chktyp
+	mov	#1	,chksiz
+	clr	numtry
+	clr	outopn
+	call	rechdr
+	movb	rectim	,senpar+p.time
+
+10$:	call	recdeb
+	scan	state	,#200$
+	asl	r0
+	jsr	pc	,@210$(r0)
+	bcc	10$
+
+100$:	movb	#defchk	,chktyp
+	mov	#1	,chksiz
+	save	<r0>
+	tst	outopn
+	bpl	110$
+	calls	close	,<#lun.ou>
+110$:	clr	outopn
+	.purge	#lun.sr
+	unsave	<r0>
+	return
+
+	.save
+	.psect	$pdata
+200$:	.byte	sta.abo	,sta.com,sta.dat,sta.fil,sta.rin
+	.byte	0
+	.even
+210$:	.word	recs.$
+	.word	recs$$	,recs.c	,recs.d	,recs.f	,recs.r
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	State routines for RECSW
+	.enabl	lsb
+
+recs$$:	tst	outopn
+	bge	80$
+	mov	incfile	,skipfile
+80$:	mov	sp	,r0
+	br	90$
+
+recs.$:	call	recx.$
+	br	100$
+
+recs.c:	clr	r0
+90$:	sec
+	return
+
+recs.d:	call	rdata
+	br	100$
+
+recs.f:	call	rfile
+	br	100$
+
+recs.r:	call	rinit
+100$:	movb	r1	,state
+	clc
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Received bad ACK/NAK and error handling
+
+recx.e:
+r$sync:
+r$retry:
+rabort:	movb	#sta.abo,r1
+	return
+
+recx$$:	spack	#msg$nak,paknum
+	br	deja$$
+deja$vu:spack	#msg$ack,r3
+recx.$:
+deja$$:	movb	state	,r1
+	return
+
+
+	.sbttl	Receive debugging and logging
+
+recdeb:	bit	#log$pa	,trace
+	beq	50$
+	save	<r1,r2>
+	sub	#100.	,sp
+	mov	sp	,r1
+	mov	#RE2$	,r2
+	call	paksta
+	sub	sp	,r1
+	mov	sp	,r2
+	calls	putrec	,<r2,r1,#lun.lo>
+	tst	r0
+	beq	30$
+	call	logerr
+30$:	add	#100.	,sp
+	unsave	<r2,r1>
+50$:	return
+
+
+	.sbttl	Receive file initialization
+	.enabl	lsb
+
+rinit:	inc	numtry
+	cmp	numtry	,initry
+	blos	10$
+	 jmp	r$retry
+
+10$:	rpack	r2 ,r3	,#packet,#maxlng
+	scan	r1	,#200$
+	asl	r0
+	jmp	@210$(r0)
+
+	.save
+	.psect	$pdata
+200$:	.byte	msg$err	,msg$snd,timout	,badchk
+	.byte	0
+	.even
+210$:	.word	recx.$
+	.word	recx.e	,rini.s	,recx$$	,recx$$
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Process response to RINIT
+
+rini.s:	calls	rpar	,<#packet,r2>
+	calls	spar	,<#packet>
+	spack	#msg$ack,paknum,sparsz,#packet
+	clr	numtry
+	incm64	paknum
+	movb	#sta.fil,r1
+	jmp	inirepeat
+
+
+	.sbttl	Receive file header
+	.enabl	lsb
+
+rfile:	inc	numtry
+	cmp	numtry	,maxtry
+	blos	5$
+	 jmp	r$retry
+
+5$:	call	clratr
+	movb	conpar+p.chkt,chktyp
+	movb	chktyp	,chksiz
+	sub	#'0	,chksiz
+	mov	$image	,image
+	tst	xgottn
+	beq	10$
+	movb	#sta.typ,r1
+	br	20$
+10$:	rpack	r2 ,r3	,#packet,#maxlng
+20$:	scan	r1	,#200$
+	asl	r0
+	jmp	@210$(r0)
+
+	.save
+	.psect	$pdata
+200$:	.byte	msg$bre	,msg$err,msg$fil,msg$snd,msg$tex,msg$eof
+	.byte	timout	,badchk
+	.byte	0
+	.even
+210$:	.word	recx.$
+	.word	rfil.b	,recx.e	,rfil.f	,rfil.s	,rfil.x	,rfil.z
+	.word	recx$$	,recx$$
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Process response to RFILE
+
+rfil.b:	cmp	r3	,paknum
+	beq	10$
+	 jmp	r$sync
+
+10$:	spack	#msg$ack,paknum
+	movb	#sta.com,r1
+	return
+
+
+	.sbttl	Receive file name
+
+rfil.f:	cmp	r3	,paknum
+	beq	10$
+	 jmp	r$sync
+
+10$:	calls	bufunp	,<#packet,#spare1>
+	calls	namcvt	,<#spare1,#packet>
+	calls	fixfil	,<#packet,#srcnam>
+	mov	#asname	,r1
+	tstb	(r1)
+	bne	15$
+	mov	#srcnam	,r1
+
+15$:	upcase	r1
+	calls	fparse	,<r1,#filnam>
+	clrb	asname
+	tst	r0
+	bne	100$
+	tst	outopn
+	bpl	20$
+	calls	close	,<#lun.ou>
+20$:	clr	outopn
+	spack	#msg$ack,paknum
+	clr	numtry
+	incm64	paknum
+	movb	#sta.dat,r1
+	return
+
+100$:	calls	syserr	,<r0,#errtxt>
+	calls	error	,<#3,#errtxt,#aspace,r1>
+	jmp	rabort
+
+
+rfil.s:	inc	numtry
+	cmp	numtry	,maxtry
+	blos	10$
+	 jmp	r$retry
+
+10$:	mov	paknum	,r1
+	dec	r1
+	bge	11$
+	mov	#63	,r1
+11$:	cmp	r3	,r1
+	bne	20$
+	 calls	spar	,<#packet>
+	 spack	#msg$ack,r3,sparsz,#packet
+	 jmp	deja$$
+
+20$:	 jmp	r$sync
+
+
+rfil.x:	jmp	rabort
+
+
+rfil.z:	inc	numtry
+	cmp	numtry	,maxtry
+	blos	10$
+	 jmp	r$retry
+
+10$:	mov	paknum	,r1
+	dec	r1
+	bge	11$
+	mov	#63	,r1
+11$:	cmp	r3	,r1
+	bne	20$
+	 jmp	deja$vu
+
+20$:	 jmp	r$retry
+
+
+	.sbttl	Receive file data
+	.enabl	lsb
+
+rdata:	inc	numtry
+	cmp	numtry	,maxtry
+	blos	10$
+	 jmp	r$retry
+
+10$:	rpack	r2 ,r3  ,#packet,#maxlng
+	scan	r1	,#200$
+	asl	r0
+	jmp	@210$(r0)
+
+	.save
+	.psect	$pdata
+200$:	.byte	msg$atr	,msg$dat,msg$err,msg$fil,msg$tex,msg$eof
+	.byte	timout	,badchk
+	.byte	0
+	.even
+210$:	.word	recx.$
+	.word	rdat.a	,rdat.d	,recx.e	,rdat.f	,rdat.x	,rdat.z
+	.word	recx$$	,recx$$
+	.restore
+
+	.dsabl	lsb
+
+	.sbttl	Process response to RDATA
+
+rdat.a:	cmp	r3	,paknum
+	beq	40$
+	inc	numtry
+	cmp	numtry	,maxtry
+	blos	20$
+	 jmp	r$retry
+
+20$:	mov	paknum	,r1
+	dec	r1
+	bge	21$
+	mov	#63	,r1
+21$:	cmp	r3	,r1
+	bne	30$
+	 jmp	deja$vu
+
+30$:	 jmp	rabort
+
+40$:	calls	r$attr	,<#packet>
+	tst	r0
+	bne	30$
+	spack	#msg$ack,paknum
+	clr	numtry
+	incm64	paknum
+	movb	state	,r1
+	return
+
+
+rdat.d:	tst	xmode
+	bne	1$
+	tst	outopn
+	bne	1$
+	tst	filprot
+	beq	2$
+	clr	index
+	calls	lookup,<#filnam,#srcnam>
+	tst	r0
+	bne	2$
+	.purge	#lun.sr
+	spack	#msg$ack,paknum,#1,#RD22$
+	incm64	paknum
+	clr	numtry
+	mov	#1	,outopn
+	movb	#sta.dat,r1
+	return
+
+1$:	br	10$
+
+2$:	mov	#filnam	,r4
+	calls	create	,<r4,#lun.ou,image>
+	mov	#lun.ou	,outlun
+	tst	r0
+	beq	5$
+	calls	syserr	,<r0,#errtxt>
+	calls	error	,<#3,#errtxt,#aspace,r4>
+	jmp	rabort
+
+5$:	mov	#-1	,outopn
+
+10$:	cmp	r3	,paknum
+	beq	40$
+	inc	numtry
+	cmp	numtry	,maxtry
+	blos	20$
+	 jmp	r$retry
+
+20$:	mov	paknum	,r1
+	dec	r1
+	bge	21$
+	mov	#63	,r1
+21$:	cmp	r3	,r1
+	bne	30$
+	 jmp	deja$vu
+
+30$:	 jmp	r$sync
+
+40$:	add	r2	,charin+2
+	adc	charin+0
+	calls	bufemp	,<#packet,r2>
+	tst	r0
+	beq	70$
+	calls	syserr	,<r0,#errtxt>
+	calls	error	,<#1,#errtxt>
+	jmp	100$
+
+70$:	spack	#msg$ack,paknum
+80$:	clr	numtry
+	incm64	paknum
+	movb	#sta.dat,r1
+	return
+
+100$:	mov	#sta.abo,r1
+	return
+
+
+rdat.f:
+rdat.x:	inc	numtry
+	cmp	numtry	,maxtry
+	blos	10$
+	 jmp	r$retry
+
+10$:	mov	paknum	,r1
+	dec	r1
+	bge	11$
+	mov	#63	,r1
+11$:	cmp	r3	,r1
+	bne	20$
+	 jmp	deja$vu
+
+20$:	 jmp	r$sync
+
+
+rdat.z:	cmp	paknum	,r3
+	beq	10$
+	 jmp	r$sync
+
+10$:	mov	#lun.ou	,r2
+	tst	outopn
+	beq	18$
+	bgt	30$
+
+	cmpb	#eof$dis,packet
+	bne	20$
+	mov	incfile	,skipfile
+	br	20$
+
+18$:	clr	r2
+20$:	calls	close	,<r2>
+30$:	call	clratr
+	clr	outopn
+	spack	#msg$ack,r3
+	clr	numtry
+	incm64	paknum
+	movb	#sta.fil,r1
+	clr	xgottn
+	return
+
+
+	.sbttl	Dump a buffer out to disk
+
+bufemp:	mov	@r5	,r2
+	mov	2(r5)	,r3
+	clr	r0
+
+10$:	tst	r3
+	ble	100$
+20$:	clr	r0
+	bisb	(r2)+	,r0
+	dec	r3
+
+	mov	#1	,r4
+	tst	dorpt
+	beq	30$
+	cmpb	r0	,rptquo
+	bne	30$
+	dec	r3
+	clr	r4
+	bisb	(r2)+	,r4
+	bic	#^c177	,r4
+	unchar	r4	,r4
+	clr	r0
+	bisb	(r2)+	,r0
+	dec	r3
+	tst	r4
+	bgt	30$
+	mov	#1	,r4
+
+30$:	clr	set8bit
+	tst	do8bit
+	beq	60$
+	cmpb	r0	,ebquot
+	bne	60$
+	mov	sp	,set8bit
+	clr	r0
+	bisb	(r2)+	,r0
+	dec	r3
+
+60$:	cmpb	r0	,conpar+p.qctl
+	bne	70$
+	clr	r0
+	bisb	(r2)+	,r0
+	dec	r3
+	clr	r1
+	bisb	r0	,r1
+	bic	#^c177	,r1
+	cmpb	r1	,conpar+p.qctl
+	beq	70$
+	cmpb	r1	,#77
+	blo	70$
+	cmpb	r1	,#137
+	bhi	70$
+	ctl	r0	,r0
+
+70$:	tst	set8bit
+	beq	74$
+	bisb	#200	,r0
+74$:	mov	r0	,-(sp)
+75$:	mov	#lun.ou	,r1
+	tst	outopn
+	bne	80$
+	clr	r1
+80$:	mov	@sp	,r0
+	call	putcr0
+	tst	r0
+	bne	100$
+	add	#1	,filein+2
+	adc	filein+0
+	sob	r4	,75$
+	tst	(sp)+
+	br	10$
+
+100$:	return
+
+	.end

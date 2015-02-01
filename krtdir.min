@@ -1,0 +1,653 @@
+	.title	KRTDIR.MIN  RT-11 directory services
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984 Change Software, Inc
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.mcall	.CSISPC ,.LOCK	,.LOOKUP
+	.mcall	.READW	,.PURGE	,.RCTRLO,.UNLOCK
+
+	.macro	R0toR2	ptr
+	.if nb ptr
+	mov	ptr	,r0
+	.endc
+	call	R0toR2
+	.endm	R0toR2
+
+
+	.sbttl	Data offsets
+
+	SYSPTR	=	54
+		BLKEY	=	256
+	HD$BLK	=	1
+	HD$FIR	=	6
+	HD$SYS	=	760
+	H$NEXT	=	2
+	H$EXT	=	6
+	F.STAT	=	0
+	F.NAM1	=	2
+	F.NAM2	=	4
+	F.TYPE	=	6
+	F.LEN	=	10
+	F.TIME	=	12
+	F.DATE	=	14
+	PERM	=	2000
+	ENDSEG	=	4000
+	PROT	=	100000
+	STAR	=	132500
+
+
+	.sbttl	Data definitions
+
+	.psect	rtdir	,rw,d,gbl,rel,con
+csidev:	.word	0 ,0 ,0 ,0
+dirsiz: .word	0
+dirbuf::.blkw	1000
+dbsize	= .-dirbuf
+dirptr: .word	0
+endflg:	.word	0
+h.next: .word	0
+name1:	.blkb	56.
+name2:	.blkb	12
+numblks:.word	0
+numfree:.word	0
+
+	.psect	rtdir1	,rw,d,lcl,rel,con
+sluggy:	.blkw	41.
+
+	.psect	$pdata
+blocks:	.asciz	" Block"
+dcrlf:	.asciz	<cr><lf>
+defext:	.word	star ,0 ,0 ,0
+unpspc:	.ascii	" "
+dspace:	.asciz	"  "
+files:	.asciz	" File"
+free:	.asciz	" Free block"
+protspc:.asciz	"P  "
+nodate:	.asciz	" No Date"
+	.even
+
+
+	.psect	$code
+	.sbttl	Wildcarded lookup
+
+lookup::save	<r1,r2,r3>
+	tst	index
+	bgt	4$
+	call	opndev
+	tst	r0
+	bne	90$
+
+4$:	mov	context	,r3
+	bne	20$
+	call	gethom
+	tst	r0
+	bne	90$
+
+	mov	#hd$fir	,r1
+10$:	call	gethdr
+	tst	r0
+	bne	90$
+	mov	#dirbuf ,r3
+	add	#5*2	,r3
+
+20$:	mov	#dirbuf	,r0
+	add	#dbsize	,r0
+	cmp	r3	,r0
+	bhis	88$
+	bit	#endseg ,f.stat(r3)
+	bne	80$
+	bit	#perm	,f.stat(r3)
+	bne	25$
+	add	f.len(r3),numfree
+	br	70$
+
+25$:	call	match
+	tst	r0
+	beq	70$
+	inc	index
+	add	f.len(r3) ,numblks
+	tst	summary
+	bne	70$
+	mov	2(r5)	,r2
+	call	convert
+	mov	r2	,r0
+30$:	tstb	(r0)
+	beq	40$
+	tst	dirflg
+	bne	33$
+	cmpb	(r0)	,#space
+	beq	35$
+33$:	movb	(r0)	,(r2)+
+35$:	inc	r0
+	br	30$
+40$:	clrb	(r2)
+	mov	f.date(r3),lokdate
+	mov	f.len(r3) ,loklen
+	mov	f.stat(r3),lokstat
+	add	dirsiz	,r3
+	mov	r3	,context
+	clr	r0
+	br	100$
+
+70$:	add	dirsiz	,r3
+	br	20$
+80$:	mov	h.next	,r1
+	bne	10$
+88$:	mov	#er$nmf ,r0
+
+90$:	push	r0
+	.purge	#lun.sr
+	clr	lokdate
+	clr	lokstat
+	clr	loklen
+	clr	dirflg
+	strcpy	2(r5)	,(r5)
+	pop	r0
+100$:	unsave	<r3,r2,r1>
+	return
+
+
+	.sbttl	Replace "?" with "%" for RSTS/E users
+
+fixwil::save	<r2>
+	mov	@r5	,r2
+10$:	tstb	@r2
+	beq	100$
+	cmpb	@r2	,#'?
+	bne	20$
+	movb	#'%	,@r2
+20$:	inc	r2
+	br	10$
+100$:	unsave	<r2>
+	clr	r0
+	return
+
+
+	.sbttl	Display directory listing on terminal
+
+dodir::	call	sdirini
+	tst	r0
+	bne	100$
+	br	20$
+
+10$:	call	dirnex
+	bcs	99$
+	tst	endflg
+	beq	20$
+	.rctrlo
+20$:	wrtall	dirbfr
+	br	10$
+
+99$:	clr	r0
+100$:	return
+
+
+	.sbttl	Server directory
+
+sdirini::copyz	(r5)	,dirnam	,#80.
+	clr	index
+	calls	lookup	,<dirnam,@r5>
+	tst	r0
+	beq	10$
+	cmp	r0	,#er$nmf
+	bne	70$
+10$:	clr	index
+	mov	sp	,dirflg
+	clr	endflg
+	mov	dirbfr	,r2
+	mov	r2	,dirptr
+	R0toR2	#nodate
+	tst	summary
+	beq	69$
+	R0toR2	#dcrlf
+	R0toR2	dirnam
+69$:	clr	r0
+70$:	return
+
+sdodir::save	<r2,r3>
+10$:	movb	@dirptr ,r1
+	bne	20$
+	mov	dirbfr	,dirptr
+	clrb	@dirptr
+	call	dirnex
+	bcs	90$
+	br	10$
+20$:	inc	dirptr
+	clr	r0
+	br	100$
+90$:	mov	#er$eof ,r0
+	clr	r1
+100$:	unsave	<r3,r2>
+	return
+
+dirnex:	mov	dirbfr	,r2
+	mov	#sluggy	,r3
+	tst	endflg
+	bne	89$
+	calls	lookup	,<dirnam,r3>
+	tst	r0
+	bne	80$
+	R0toR2	#dcrlf
+	R0toR2	r3
+	calls	d$cvtnum,<r3,loklen,#0>
+	R0toR2	r3
+	bit	#prot	,lokstat
+	beq	57$
+	R0toR2	#protspc
+	br	59$
+57$:	R0toR2	#unpspc
+59$:	calls	ascdat	,<r3,lokdate>
+	R0toR2	r3
+	br	88$
+
+80$:	cmp	r0	,#er$nmf
+	bne	90$
+	call	195$
+88$:	clr	r0
+	br	100$
+89$:	mov	#er$eof ,r0
+90$:	sec
+100$:	return
+
+
+	.sbttl	Directory summary
+
+195$:	mov	sp	,endflg
+	R0toR2	#dcrlf
+	tst	summary
+	bne	134$
+	tst	index
+	bgt	134$
+	R0toR2	#dcrlf
+134$:	calls	d$cvtnum,<r3,index,#-1>
+	R0toR2	r3
+	R0toR2	#files
+	dec	index
+	beq	135$
+	movb	#'s!40	,(r2)+
+135$:	movb	#comma	,(r2)+
+	calls	d$cvtnum,<r3,numblks,#-1>
+	R0toR2	r3
+	R0toR2	#blocks
+	dec	numblks
+	beq	137$
+	movb	#'s!40	,(r2)+
+137$:	R0toR2	#dcrlf
+	calls	d$cvtnum,<r3,numfree,#-1>
+	R0toR2	r3
+	R0toR2	#free
+	dec	numfree
+	beq	139$
+	movb	#'s!40	,(r2)+
+139$:	R0toR2	#dcrlf
+	return
+
+
+	.sbttl	Copy (r0) to (r2)
+
+R0toR2:	movb	(r0)+	,(r2)+
+	bne	R0toR2
+	dec	r2
+	return
+
+
+	.sbttl	Open device, build name list to search directory
+
+opndev:	calls	fparse	,<(r5),#sluggy>
+	tst	r0
+	beq	1$
+	return
+
+1$:	.purge	#lun.sr
+	mov	#sluggy	,r0
+	copyz	r0	,dirnam
+	clr	context
+	clr	numblks
+	clr	numfree
+
+	sub	#82.	,sp
+	mov	sp	,r1
+	movb	#'=	,(r1)+
+10$:	movb	(r0)+	,(r1)+
+	bne	10$
+	mov	sp	,r1
+	.csispc #sluggy	,#defext ,r1
+	mov	r1	,sp
+	bcs	80$
+	mov	sluggy+36,csidev
+	calls	fetch	,<csidev>
+	tst	r0
+	bne	120$
+
+	mov	#6	,r1
+	mov	#sluggy+40,r0
+17$:	tst	(r0)
+	bne	19$
+	mov	#star	,(r0)
+19$:	add	#10	,r0
+	sob	r1	,17$
+	clr	-(r0)
+
+	mov	#name1	,r0
+	mov	#56./2	,r1
+20$:	clr	(r0)+
+	sob	r1	,20$
+
+	push	r2
+	mov	#name1	,r1
+	mov	#sluggy+36,r2
+30$:	tst	(r2)+
+	beq	39$
+	mov	#3	,r0
+33$:	calls	rdtoa	,<r1,(r2)+>
+	add	#3	,r1
+	sob	r0	,33$
+	br	30$
+39$:	pop	r2
+
+	.lock
+	cmp	rt11ver	,#5
+	bge	40$
+	mov	@#sysptr,r0
+	mov	#0	,blkey(r0)
+	br	50$
+40$:	MOV	#rtwork	,R0
+	MOV	#28.*^o400+2,@R0
+	MOV	#blkey	,2.(R0)
+	CLR	4.(R0)
+	EMT	^o375
+50$:	.lookup #rtwork	,#lun.sr,#csidev
+	bcs	100$
+	clr	r0
+	br	120$
+
+80$:	mov	#csierr ,r1
+	br	110$
+100$:	mov	#lokerr ,r1
+110$:	movb	@#errbyt,r0
+	bpl	115$
+	com	r0
+	mov	#faterr ,r1
+115$:	asl	r0
+	add	r0	,r1
+	mov	@r1	,r0
+
+120$:	add	#82.	,sp
+	push	r0
+	beq	130$
+	.purge	#lun.sr
+130$:	.unlock
+	pop	r0
+	return
+
+
+	.sbttl	Read in the home block
+
+gethom: save	<r1,r2>
+	.readw	#rtwork,#lun.sr,#dirbuf,#400,#hd$blk
+	bcs	90$
+	tst	rtvol
+	beq	30$
+	mov	#dirbuf ,r2
+	add	#hd$sys ,r2
+	mov	r2	,r1
+	mov	#rt	,r0
+10$:	tstb	@r0
+	beq	30$
+	cmpb	(r0)+	,(r1)+
+	beq	10$
+	mov	#vms	,r0
+20$:	tstb	@r0
+	beq	30$
+	cmpb	(r0)+	,(r2)+
+	beq	20$
+	br	80$
+30$:	clr	r0
+	br	100$
+
+80$:	mov	#er$vol ,r0
+	br	100$
+
+90$:	movb	@#errbyt,r0
+	asl	r0
+	mov	drderr(r0),r0
+100$:	unsave	<r2,r1>
+	return
+
+	.save
+	.psect	$pdata
+rt:	.asciz	"DECRT11"
+vms:	.asciz	"DECVMSEX"
+	.even
+	.restore
+
+
+	.sbttl	Read in a segment, get header data
+
+gethdr: .readw	#rtwork,#lun.sr,#dirbuf,#1000,r1
+	bcs	90$
+	mov	#dirbuf	,r0
+	asl	h$next(r0)
+	beq	5$
+	add	#4	  ,h$next(r0)
+5$:	mov	h$next(r0),h.next
+	mov	#7*2	 ,dirsiz
+	add	h$ext(r0),dirsiz
+	clr	r0
+	br	100$
+
+90$:	movb	@#errbyt,r0
+	asl	r0
+	mov	drderr(r0),r0
+100$:	return
+
+
+	.sbttl	Convert a directory entry to .asciz
+
+convert:save	<r2>
+	calls	rdtoa	,<r2,csidev>
+	add	#2	,r2
+	cmpb	@r2	,#space
+	beq	20$
+	tstb	(r2)+
+20$:	movb	#':	,(r2)+
+	calls	rdtoa	,<r2,f.nam1(r3)>
+	add	#3	,r2
+	calls	rdtoa	,<r2,f.nam2(r3)>
+	add	#3	,r2
+	movb	#'.	,(r2)+
+	calls	rdtoa	,<r2,f.type(r3)>
+	clrb	3(r2)
+	unsave	<r2>
+	return
+
+
+	.sbttl	Wildcarded file name match test
+
+	PERCENT = '.
+	WILDC	= '?
+
+match:	save	<r1,r2,r4>
+	mov	#name2	,r1
+	mov	r3	,r2
+	add	#f.nam1 ,r2
+	mov	#3	,r0
+10$:	calls	rdtoa	,<r1,(r2)+>
+	add	#3	,r1
+	sob	r0	,10$
+
+	mov	#name1	,r4
+33$:	tstb	(r4)
+	beq	99$
+	mov	r4	,r1
+	mov	#name2	,r2
+	mov	#6.	,r0
+	add	r0	,r4
+	call	200$
+	bcs	90$
+	mov	r4	,r1
+	mov	#name2+6,r2
+	mov	#3.	,r0
+	add	r0	,r4
+	call	200$
+	bcs	93$
+	mov	sp	,r0
+	br	100$
+
+90$:	add	#3	,r4
+93$:	br	33$
+99$:	clr	r0
+100$:	unsave	<r4,r2,r1>
+	return
+
+200$:	mov	r0	,L311$
+	mov	r1	,L310$
+201$:	cmpb	@r1	,@r2
+	beq	202$
+	cmpb	@r1	,#wildc
+	beq	210$
+	cmpb	@r1	,#percent
+	bne	231$
+	cmpb	(r2)	,#space
+	ble	231$
+202$:	inc	r1
+	inc	r2
+	sob	r0	,201$
+	call	300$
+	bcs	230$
+	cmpb	@r1	,#space
+	beq	230$
+	br	231$
+
+210$:	inc	r1
+	call	300$
+	bcs	230$
+211$:	cmpb	@r1	,#space
+	beq	230$
+	cmpb	@r1	,#percent
+	bne	220$
+	cmpb	(r2)	,#space
+	ble	231$
+	inc	r1
+	sob	r0	,211$
+	br	230$
+
+220$:	cmpb	@r1	,@r2
+	bne	221$
+	cmpb	1(r2)	,@r2
+	bne	202$
+221$:	inc	r2
+	sob	r0	,220$
+	br	231$
+
+230$:	tst	(pc)+
+231$:	sec
+	return
+
+300$:	push	r0
+	mov	r1	,r0
+	sub	L310$	,r0
+	cmp	L311$	,r0
+	beq	320$
+	tst	(pc)+
+320$:	sec
+	pop	r0
+	return
+
+	.save
+	.psect	rtdir	,rw,d,gbl,rel,con
+L310$:	.word	0
+L311$:	.word	0
+	.restore
+
+
+	.sbttl	Convert date to .asciz
+
+ascdat::save	<r0,r1,r2,r3>
+	mov	@r5	,r1
+	mov	2(r5)	,r0
+	bne	5$
+1$:	strcpy	r1	,#D310$
+	br	100$
+
+5$:	cmp	r0	,#-1
+	beq	1$
+
+10$:	mov	r0	,r3
+	ash	#3	,r3
+	swab	r3
+	bic	#^c37	,r3
+	call	i2toa
+
+	mov	r0	,r3
+	swab	r3
+	bic	#^c74	,r3
+	cmp	r3	,#12.*4
+	ble	17$
+	clr	r3
+17$:	add	#D300$	,r3
+	mov	#5	,r2
+20$:	movb	(r3)+	,(r1)+
+	dec	r2
+	bne	20$
+
+	mov	r0	,r3
+	bic	#^c37	,r3
+	add	#1972.	,r3
+	bic	#^c140000,r0
+	swab	r0
+	asr	r0
+	add	r0	,r3
+
+30$:	call	i4toa
+	clrb	@r1
+	cmpb	#'0	,@(r5)
+	bne	100$
+	movb	#space	,@(r5)
+100$:	unsave	<r3,r2,r1,r0>
+	return
+
+	.save
+	.psect	$pdata
+D300$:	.ascii "-ERR-Jan-Feb-Mar-Apr-May-Jun-Jul-Aug-Sep-Oct-Nov-Dec-"
+D310$:	.asciz " No Date "
+	.even
+	.restore
+
+
+	.sbttl	Unsigned 16-bit integer conversion
+
+d$cvtnum:save	<r0,r1,r2,r3>
+	mov	(r5)	,r2
+	mov	#6	,r3
+	mov	r3	,r1
+
+1$:	movb	#space	,(r2)+
+	sob	r1	,1$
+	clrb	@r2
+	mov	2(r5)	,r1
+
+2$:	clr	r0
+	div	#10.	,r0
+	add	#'0	,r1
+	movb	r1	,-(r2)
+	mov	r0	,r1
+	beq	3$
+	sob	r3	,2$
+
+3$:	tst	4(r5)
+	beq	5$
+	 mov	@r5	,r1
+	 inc	r1
+4$:	 movb	(r2)+	,(r1)+
+	 bne	4$
+
+5$:	unsave	<r3,r2,r1,r0>
+	return
+
+	.end

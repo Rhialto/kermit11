@@ -1,0 +1,1161 @@
+	.title	KRTST1	SET command overlay one
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	allow attributes to be individually set, ala C-Kermit
+;	modify SET FLOW XON to force quoting of XOFF and XON chars
+;	consolidate local data..
+;	add SET FILE WILDCARDS
+;	cd with no arg defaults to home dir, shows default after executing
+
+; /E64/	05-May-96  John Santos
+;
+;	Fix bug in SET TERM which always set NOSCOPE
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	moved BREAK, CREATE-SIZE and [NO]VOLUME-VERIFY here ..
+;	conform sinit-related SETs to major update of KRTINI.MAC
+;	make SET TIME-OUT to SET RECEIVE TIME-OUT and SET SEND TIME-OUT
+;	add SET CONSOLE PRIORITY for KM/XC/XL under TSX
+;	add SET FLOW-CONTROL to support RTS/CTS and KM handler
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	HOME uses dkname:
+;	set$df - now calls c$cwd
+;	set$sn - clear r0 after printing error message, avoid dupe msg
+;	sts$pl - corrected packet length max test to 94. (maxpak)
+;	set$attributes - fixed so "?" arg doesn't set to last displayed
+;	added set ld empty, using TSX emts
+;	sf$typ - patched to pass proper arg to any routine it calls ..
+;	added warn message to str$pl if CRC block checking not enabled
+;	str$pl re-enables long packets if set >94., warns if CRC not on
+;	set$file - added SET FILE NAMING [NO]LOWER-CASE, for Unix
+;	con8bit set/cleared as appropriate by set$tt
+;	SET LONG ON now does SET BLO 3, SET REC PAC 1024
+;	time-out may now be set as low as 1 second
+;	SET REC PAC >94 now enables long-packets, if set off prior to it
+;	added SET CL PORTS, UNITS for auto line assign under TSX+
+;	added SET CONSOLE [NO]MILNET to force 2 XONs when CONNECTing
+;	cleaned up SET FILE code, see HELP SET FILE for details
+;
+;	set$bi - modified to be augmented by new entries, not trashed,
+;	to allow dependence on it for selection of filtering for the
+;	new improved type routine in KRTCM1, supports types <3 chars
+;
+;	st$nlp - clr senlng, which is now used to ensure a packet of
+;	almost or equal to 94 bytes in a long-packet xfr will get the
+;	correct header.  command dispatch table also patched for this
+;
+;	added set$vl - sets action on vlswch char ^W and print window
+;	char ^B in the CONNECT mode under TSX+  see HELP SET VLSWCH
+;
+;	moved SET [NO]QUIET here, made it SET TT [NO]QUIET, added tests
+;	for it where missing..
+
+;	Copyright 1984 Change Software, Inc.
+;
+;	31-Jan-84  15:13:45  Brian Nelson
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+	.include "IN:KRTCDF.MAC"
+	.iif ndf  KRTCDF  .error	<; .include for IN:KRTCDF.MAC failed>
+
+	.mcall	.GVAL	,.SPFUN		; /62/
+
+
+	.sbttl	Local data		; /63/ consolidate local data here..
+
+	.psect $pdata
+st1.01:	.asciz	"Blocks: "
+st1.02:	.asciz	"Mode: "
+st1.03:	.asciz	"Option: "
+st1.04:	.asciz	"Value: "
+st1.05:	.asciz	"Octal 1-36: "
+st1.06:	.asciz	"Seconds: "
+st1.07:	.asciz	"Octal value: "
+st1.08:	.asciz	"How many? "
+st1.09:	.asciz	"On, Off? "
+st1.10:	.asciz	"Length? "
+st1.11:	.asciz	"Your max authorized priority is "
+st1.12:	.asciz	"DK  --> "		 ; /63/
+st1.13:	.asciz	"Explicit or Implicit? " ; /63/
+st1.14:	.asciz	"You may need to SET BLO "
+st1.15:	.asciz	" on the other Kermit"<cr><lf>
+st1.16:	.asciz	"ASCII text mode set"<cr><lf>
+st1.17:	.asciz	"Binary mode set"<cr><lf>
+st1.18:	.asciz	"DEC-Multinational mode set"<cr><lf>
+st1.19:	.asciz	"Auto ASCII/Binary mode set"<cr><lf>
+st1.20:	.asciz	"Caution: Binary files will require 8-bit prefixing"<cr><lf>
+st1.21:	.asciz	" appended to BINARY-TYPE list"<cr><lf>
+st1.22:	.asciz	"Packet length truncated to buffer maximum of "
+st1.23:	.asciz	". bytes"<cr><lf>
+st1.24:	.asciz	"Remember to SET BLO 3 for long-packets"<cr><lf>
+	.even
+
+
+	.psect	$code
+	.sbttl	SET SPEED
+
+set$sp::calls	l$val	,<argbuf>	; get the speed into decimal
+	tst	r0			; ok?
+	bne	20$			; /BBS/ nope
+	calls	setspd	,<r1>		; set the speed
+	tst	r0			; did it work?
+	bne	30$			; /BBS/ no
+	clr	b4speed			; /BBS/ ya, also clear fallback speed
+	clr	r0			; /BBS/ success
+	tst	mready			; /BBS/ is a modem on-line?
+	beq	30$			; /BBS/ no
+	call	inqcd			; /BBS/ ya, is the modem active?
+	tst	r0			; /BBS/ well..
+	ble	10$			; /BBS/ probably not, do the init
+	clr	r0			; /BBS/ restore r0 after inqcd eats it
+	br	30$			; /BBS/ definitely active, don't init
+10$:	tst	(sp)+			; /BBS/ ya, dump return address then
+	jmp	set$dtr			; load adjacent overlay, re-init modem
+
+20$:	mov	#er$spe	,r0		; /BBS/ unknown speed
+30$:	return
+
+
+	.sbttl	SET CL
+	.enabl	lsb			; /63/
+
+	MAXPRI	= -18.			; /62/ offset to max priority allowed
+
+set$cl::tst	tsxsav			; /62/ running under TSX?
+	bne	10$			; /62/ ya
+	mov	#er$tsx	,r0		; /62/ no
+	br	120$			; /62/
+10$:	upcase	argbuf			; /BBS/ added this, all new..
+20$:	scan	#'=	,argbuf		; /62/ look for an equals sign
+	tst	r0			; /62/ well?
+	beq	30$			; /62/ none there, or left
+	add	argbuf	,r0		; /62/ found one, get pointer
+	movb	#space	,-(r0)		; /62/ and swap in a space for it
+	br	20$			; /62/ check for another "="
+30$:	calls	getcm0	,<argbuf,#cllst> ; find out which option was given
+	tst	r0			; did we find one
+	bmi	120$			; no
+	tst	wasnul			; were commands listed via "?"
+	bne	120$			; ya
+	mov	argbuf	,r0		; this is a KLUDGE, skip to needed arg
+40$:	tstb	@r0			; find EOS as of yet?
+	bne	50$			; no
+	mov	#cmd$bad,r0		; ya, thus it's no good
+	br	120$			; exit with an error
+50$:	cmpb	(r0)+	,#space		; found a delimiter yet?
+	bne	40$			; no, keep looking
+	mov	r0	,argpnt		; pass proper arg to called cmd
+	jmp	@r1			; /63/ dispatch now
+
+	command	cllst	,LINE	,1	,scl$$
+	command	cllst	,PORTS	,2	,scl$1
+	command	cllst	,PRIORITY,2	,scl$3
+	command	cllst	,UNITS	,1	,scl$2
+	command	cllst
+
+scl$$:	mov	cmdbuf	,r0		; recover original command string
+60$:	cmpb	(r0)+	,#space		; step in to..  (skip past "SET")
+	bne	60$			; ..first argument
+	mov	r0	,r1		; copy pointer to first arg  ("CLn")
+70$:	cmpb	(r1)+	,#space		; step in past next space delimiter
+	bne	70$			; to arg(s) > "CLn" and copy back so
+	copyz	argbuf	,r1 ,#ln$max-4	; multi cmds delimited by commas work
+	strcpy	argbuf	,r0		; /62/ reset current "CLn LINE x" cmd
+	mov	#cmd$bad,r0		; and force it to fall thru to the
+	return				; SET CLn LINE x stuff in KRTCM1
+
+scl$3:	calls	l$val	,<argpnt>	; convert ascii to integer
+	tst	r0			; well?
+	bne	80$			; bad value
+	cmp	r1	,#1.		; a reasonable minimum?
+	blo	80$			; ok
+	cmp	r1	,#127.		; a reasonable maximum?
+	blos	90$			; yes
+80$:	mov	#er$pri	,r0		; no, return error
+	br	120$
+90$:	.gval	#rtwork	,#maxpri	; /62/ get max allowed priority
+	cmp	r0	,r1		; /62/ requested more than can be had?
+	bhis	100$			; /62/ no
+	mov	r0	,r1		; /62/ bump down to max possible
+	wrtall	#st1.11			; /63/ Your max authorized priority is
+	call	L10266			; /62/ display it
+	.newline			; /62/
+100$:	movb	r1	,cl.pri		; save desired priority
+110$:	clr	r0			; no error (must do here for sco$pr)
+120$:	return
+
+scl$1:	copyz	argpnt	,#ports	,#ln$max ; /63/ max string len is LN$MAX bytes
+	br	110$			; /63/ no error
+
+scl$2:	copyz	argpnt	,#units	,#16.	; up to 8 single digit CL unit numbers
+	br	110$			; /63/ no error    delimited by blanks
+
+	.dsabl	lsb			; /63/
+
+
+	.sbttl	SET FLOW-CONTROL	; /62/ new, KM handler only
+	.enabl	lsb
+
+	KMFLOW	= 277			; SET FLOW-CONTROL spfun
+
+set$km::
+	tst	km.lock			; is KM the link device?
+	bne	10$			; ya
+	mov	#er$km	,r0		; no, can't do this
+	br	30$			; /63/
+10$:	upcase	argbuf			; upper case the argument
+	calls	getcm0	,<argbuf,#kmlst> ; which option was given?
+	tst	r0			; find one?
+	bmi	30$			; /63/ no
+	tst	wasnul			; were commands listed via "?"
+	bne	30$			; /63/ ya
+	jmp	@r1			; /63/ dispatch
+
+	command	kmlst	,RTS/CTS,1	,km$rts
+	command	kmlst	,XOFF	,1	,km$xof
+	command	kmlst
+
+km$rts:	mov	sp	,r1		; make word count <>
+	br	20$
+
+km$xof:	mov	#ctlflgs,r1		; /63/ pointer to control flags data
+	mov	#1	,r0		; /63/ modify some flags with this..
+	movb	r0	,22(r1)		; /63/ force quoting of ^Q
+	movb	r0	,24(r1)		; /63/ ^S
+	movb	r0	,63(r1)		; /63/ 200!^Q
+	movb	r0	,65(r1)		; /63/ 200!^S
+	clr	r1			; zero word count
+20$:	.spfun	#rtwork,#xc.control,#kmflow,#0,r1,#1 ; do the SET
+	clr	r0			; no error possible
+30$:	return
+
+	.dsabl	lsb
+
+	.sbttl	SET BLOCK-CHECK-TYPE
+	.enabl	lsb
+
+set$bl::upcase	argbuf			; /BBS/ upper case all args
+	calls	getcm0	,<argbuf,#blklst> ; find out which option was given
+	tst	r0			; did we find one
+	bmi	30$			; no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	30$			; /BBS/ ya
+	jmp	@r1			; /63/ dispatch now
+
+	command	blklst	,1-CHARACTER-CHECKSUM	,1	,sbl$1
+	command	blklst	,2-CHARACTER-CHECKSUM	,1	,sbl$2
+	command	blklst	,3-CHARACTER-CRC-CCITT	,1	,sbl$3
+	command	blklst	,CRC-CCITT		,1	,sbl$3
+	command	blklst
+
+sbl$1:	movb	#'1	,r1
+	br	10$			; /63/
+
+sbl$2:	movb	#'2	,r1
+	br	10$			; /63/
+
+sbl$3:	movb	#'3	,r1
+10$:	mov	r1	,setchkt	; /62/ save the
+	movb	r1	,senpar+p.chkt	; /62/ result
+	tst	infomsg			; /BBS/ verbose today?
+	beq	20$			; /BBS/ No
+	wrtall	#st1.14			; /63/ "You may need to SET BLO "
+	movb	r1	,r0		; /BBS/ get the number
+	call	writ1char		; /BBS/ dump it
+	wrtall	#st1.15			; /63/ " on the other Kermit"
+20$:	clr	r0			; no error
+30$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET FILE
+	.enabl	lsb
+
+set$fi::upcase	argbuf			; /BBS/ upper case the arguments
+	calls	getcm0	,<argbuf,#setfil> ; parse the command
+	tst	r0			; did it work?
+	bmi	20$			; /63/ nope
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	20$			; /63/ ya
+	calls	getcm1	,<argbuf,#setfil,r0> ; /63/ check for possible arg
+	tst	r0			; /63/ well?
+	bmi	20$			; /63/ bad arg..
+	jmp	@r1			; /63/ dispatch
+
+	command	setfil	,ASCII		,2	,sf$asc
+	command	setfil	,AUTOMATIC	,2	,sf$aut
+	command	setfil	,BINARY		,1	,sf$bin
+	command	setfil	,CREATE-SIZE	,2	,srt$cr	,st1.01
+	command	setfil	,CSI-PARSING	,2	,srt$cs	,st1.02
+	command	setfil	,DEC-MULTINATIONAL,1	,sf$dec
+	command	setfil	,FIXED		,1	,sf$bin
+	command	setfil	,IMAGE		,1	,sf$bin
+	command	setfil	,NAMING		,2	,sf$nam	,st1.03
+	command	setfil	,NOPROTECT	,3	,sf$sup
+	command	setfil	,NOREPLACE	,2	,sf$nos	; /62/
+	command	setfil	,NOVOLUME-VERIFY,3	,srt$nv	; /62/
+	command	setfil	,PROTECT	,1	,sf$nos
+	command	setfil	,REPLACE	,1	,sf$sup	; /62/
+	command	setfil	,TEXT		,2	,sf$asc
+	command	setfil	,TYPE		,2	,sf$typ
+	command	setfil	,VOLUME-VERIFY	,1	,srt$vo	; /62/
+	command	setfil	,WILDCARDS	,1	,sf$wil	,st1.13	; /63/
+	command	setfil
+
+sf$typ:	calls	getcm0	,<argbuf,#setfil> ; /63/ recheck the table for type
+	tst	r0			; did it work?
+	bmi	20$			; /63/ no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	20$			; /63/ ya
+	calls	getcm1	,<argbuf,#setfil,r0> ; /63/ check for possible arg
+	tst	r0			; /63/ well?
+	bmi	20$			; /63/ bad arg..
+	jmp	@r1			; /63/ dispatch
+
+sf$asc:	mov	#text	,$image		; image_mode := false
+	clr	doauto			; /BBS/ force it on
+	tst	infomsg			; SET TT QUIET?
+	beq	10$			; ya
+	wrtall	#st1.16			; /63/ "ASCII text mode set"
+	br	10$
+
+sf$bin:	mov	#binary	,$image		; image_mode := true
+	clr	doauto			; /BBS/ force it on
+	tst	infomsg			; SET TT QUIET?
+	beq	10$			; ya
+	wrtall	#st1.17			; /63/ "Binary mode set"
+	call	xbin			; check parity and warn if needed
+	br	10$
+
+sf$dec:	mov	#decnat	,$image		; /52/ added
+	clr	doauto			; /BBS/ force it on
+	tst	infomsg			; SET TT QUIET?
+	beq	10$			; ya
+	wrtall	#st1.18			; /63/ "DEC-Multinational mode set"
+	call	xbin			; check parity and warn if needed
+	br	10$
+
+sf$aut:	mov	sp	,doauto		; allow auto checking of attributes
+	mov	#text	,$image		; begin check with image_mode := false
+	tst	infomsg			; SET TT QUIET?
+	beq	10$			; ya
+	wrtall	#st1.19			; /63/ "Auto ASCII/Binary mode set"
+	call	xbin			; check parity and warn if needed
+	br	10$
+
+sf$sup:	clr	filprot			; overwrite an existing file
+	br	10$
+
+sf$nos:	mov	sp	,filprot	; do not overwrite an existing file
+10$:	clr	r0			; /63/ no error
+20$:	return				; /63/
+
+xbin:	tst	parity			; /BBS/ set to none?
+	beq	10$			; yes
+	wrtall	#st1.20			; /63/ "Binary files will be prefixed"
+	br	10$			; /63/
+
+srt$cr:	calls	l$val	,<argbuf>	; /63/ yes, see if a good number
+	tst	r0			; well?
+	bne	20$			; /63/ ok
+	mov	r1	,en$siz		; yes, save it please  note r0=0 here
+	return				; /63/
+
+srt$vo:	mov	sp	,rtvol		; check for valid volume id
+	br	10$			; /63/
+
+srt$nv:	clr	rtvol			; ignore volume id
+	br	10$			; /63/
+
+sf$nam:	calls	getcm0	,<argbuf,#sfname> ; /63/ check the table for naming
+	tst	r0			; /54/ did it work?
+	bmi	20$			; /63/ no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	20$			; /63/ ya
+	jmp	@r1			; /63/ no, dispatch on it please
+
+	command	sfname	,CONVERTED	,1	,sfn$tr
+	command	sfname	,FULL		,1	,sfn$fu
+	command	sfname	,LOWER-CASE	,1	,sfn$lc
+	command	sfname	,NOLOWER-CASE	,1	,sfn$uc
+	command	sfname
+
+sfn$tr:	clr	rawfil			; /54/ the default, always convert
+	br	10$			; /63/ no error
+
+sfn$fu:	mov	sp	,rawfil		; /54/ don't remove extra stuff, like
+	br	10$			; /63/ node names and so on
+
+sfn$uc:	clr	locase			; /BBS/ the default, upper case only
+	br	10$			; /63/ no error
+
+sfn$lc:	mov	sp	,locase		; /BBS/ leave names to remote as typed
+	br	10$			; /63/ no error
+
+srt$cs:	calls	getcm0	,<argbuf,#cstype> ; /63/ check the table for modes
+	tst	r0			; did it work?
+	bmi	20$			; /63/ no
+	tst	wasnul			; were commands listed via "?"
+	bne	20$			; /63/ ya
+	jmp	@r1			; /63/ no, dispatch on it please
+
+	command	cstype	,EMULATED	,1	,scs$em
+	command	cstype	,REAL		,1	,scs$re
+	command	cstype
+
+scs$re:	clr	csi.fake		; the default, use the real .csipsc
+	br	10$			; /63/ no error
+
+scs$em:	mov	sp	,csi.fake	; fake csispc comma delimit processing
+	br	10$			; /63/ no error
+
+sf$wil:	upcase	argbuf			; /63/ all new.. upper case the arg
+	calls	getcm0	,<argbuf,#wldlst> ; which option was given?
+	tst	r0			; find one?
+	bmi	20$			; no
+	tst	wasnul			; were commands listed via "?"
+	bne	20$			; ya
+	jmp	@r1			; dispatch
+
+	command	wldlst	,EXPLICIT,1	,wld$ex
+	command	wldlst	,IMPLICIT,1	,wld$im
+	command	wldlst
+
+wld$ex:	clr	dowild			; SET WILD EXPLICIT
+	br	10$
+
+wld$im:	mov	sp	,dowild		; SET WILD IMPLICIT
+	br	10$
+
+	.dsabl	lsb
+
+
+	.sbttl	SET BINARY-TYPE
+
+set$bi::save	<r1,r2,r3>
+	strlen	bintyp			; /BBS/ any room left in list?
+	cmp	r0	,#120.		; /BBS/ max of 31. entries possible
+	ble	10$			; /BBS/ if <= 30. then it's modifiable
+	mov	#er$bnl	,r0		; /BBS/ say the list is full
+	br	70$			; /BBS/ no room
+10$:	mov	#spare1	,r3		; /63/ pointer to some work space
+	clrb	@r3			; ensure .asciz
+	upcase	argbuf			; /BBS/ upper case remaining args
+	mov	argbuf	,r2		; get the argbuf pointer now
+	cmpb	@r2	,#'.		; is there a leading dot?
+	beq	20$			; yes
+	movb	#'.	,(r3)+		; no, insert one please
+	clrb	@r3			; .asciz please
+20$:	mov	#spare1	,r3		; /63/ refresh pointer
+	strcat	r3	,r2		; concatenate the file type now
+	strlen	r3			; get the length
+	mov	#4	,r1		; /BBS/ must be 4
+	sub	r0	,r1		; /BBS/ chars or less
+	beq	50$			; /BBS/ it's exactly 4
+	bgt	30$			; /BBS/ it's less than 4
+	mov	#er$one	,r0		; /BBS/ illegal file type length
+	br	70$			; error exit
+
+30$:	mov	r3	,r2		; /BBS/ save copy of pointer
+	add	r0	,r2		; /BBS/ point to last char
+40$:	movb	#space	,(r2)+		; /BBS/ space pad file extent
+	sob	r1	,40$		; /BBS/ until total length is 4
+	clrb	@r2			; /BBS/ null terminate padded string
+50$:	strcat	bintyp	,#spare1	; /63/ concat new one onto the list
+	tst	infomsg			; SET TT QUIET?
+	beq	60$			; ya
+	wrtall	#spare1			; /63/ say what was
+	wrtall	#st1.21			; /63/ " appended to BINARY-TYPE list"
+60$:	clr	r0			; success
+70$:	unsave	<r3,r2,r1>
+	return
+
+
+	.sbttl	ASSIGN, CWD, HOME	; /62/ moved this here..
+	.enabl	lsb			; /BBS/ all new
+
+c$assign::scan	#space	,argbuf		; look for a space delimiter
+	tst	r0			; find one?
+	beq	10$			; no delimiter = no good..
+	add	argbuf	,r0		; point one byte past the delimiter
+	clrb	-(r0)			; bump back and hose it
+	tstb	(r0)+			; point at first char after delimiter
+	bicb	#40	,@r0		; make sure it's upper case
+	cmpb	(r0)+	,#'D		; iz it a "D" ?
+	bne	10$			; nope..
+	bicb	#40	,@r0		; make sure it's upper case
+	cmpb	(r0)+	,#'K		; got a "K" here?
+	bne	10$			; nope
+	tstb	@r0			; end of the line?
+	beq	c$cwd			; ya, it's "DK"	(no colon)
+	cmpb	(r0)+	,#':		; no, is it "DK:" ?  (with colon)
+	bne	10$			; no, so wutever it is, it's no good
+	tstb	@r0			; anything else there?
+	beq	c$cwd			; no, it's ok
+10$:	mov	#er$ass	,r0		; ya, thus it's a bad assign
+	br	60$			; goto error handler
+
+c$cwd::	strlen	argbuf			; get length of argument
+	cmp	r0	,#4		; /62/ a possibly legal name?
+	ble	30$			; /62/ ya
+20$:	mov	#er$dna	,r0		; /63/ no, name is no good
+	br	60$			; goto error handler
+
+30$:	tstb	@argbuf			; /63/ did user include where to go?
+	bne	40$			; /63/ yes
+	strcpy	argbuf	,#dkname	; /63/ if no dev specified, then HOME
+	strlen	argbuf			; /63/ get length of home dir's name
+40$:	mov	r0	,r1		; /63/ save copy of length
+	add	argbuf	,r0		; /62/ point to end of string in buff
+	cmpb	-(r0)	,#':		; /62/ last byte a colon?
+	beq	50$			; ya
+	cmp	r1	,#3		; /63/ if no end colon max len is 3 ch
+	bhi	20$			; /63/ it's too long
+	inc	r0			; /62/ no, goto where colon has to be
+	movb	#':	,(r0)+		; /62/ insert colon after device name
+	clrb	(r0)			; /62/ re-terminate..
+
+50$:	upcase	argbuf			; ensure device name is upper case
+	calls	fparse,<argbuf,#spare1>	; check dev using handy buff
+	tst	r0			; ok?
+	beq	70$			; ya
+60$:	direrr	r0			; say what went wrong
+	br	80$
+
+70$:	copyz	#spare1	,#defdir,#5	; /62/ modify default dir
+	wrtall	#st1.12			; /63/ stick "DK --> " in it..
+	wrtall	#defdir			; /63/ add the directory name in
+	.newline			; /63/
+80$:	clr	r0			; any error in above already handled
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET HOME		; /BBS/ enhanced..
+
+set$ho::upcase	argbuf			; upper case the arg
+	strlen	argbuf			; and get its length
+	add	argbuf	,r0		; get pointer to end of string in buff
+	cmpb	-1(r0)	,#':		; last byte a colon?
+	beq	10$			; ya
+	movb	#':	,(r0)+		; and insert colon after device name
+	clrb	@r0			; and re-terminate..
+10$:	sub	argbuf	,r0		; get actual length of it all now
+	cmp	r0	,#4		; is it too much?
+	ble	20$			; no
+	mov	#er$iln	,r0		; bad device name
+	return
+
+20$:	copyz	argbuf	,#dkname,#5	; /62/ modify the home dir
+	clr	r0			; no error
+	return
+
+
+	.sbttl	SET SEND, RECEIVE
+	.enabl	lsb
+
+set$rc::mov	#reclst	,r3		; point to the RECEIVE command table
+	br	10$
+set$sn::mov	#senlst	,r3		; point to the SEND command table
+10$:	upcase	argbuf			; /BBS/ upper case the arguments
+	calls	getcm0	,<argbuf,r3>	; find out which option was given
+	tst	r0			; did we find the option?
+	bmi	30$			; no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	30$			; /BBS/ ya
+	calls	getcm1	,<argbuf,r3,r0>	; yes, look for value clause now
+	tst	r0			; find it (or read it)?
+	bmi	30$			; no
+	jmp	@r1			; /63/ ya, dispatch
+
+	command reclst	,PACKET-LENGTH	,1	,str$pl	,st1.04
+	command reclst	,START-OF-PACKET,1	,str$so	,st1.05
+	command	reclst	,TIME-OUT	,1	,str$ti	,st1.06
+	command reclst
+
+	command	senlst	,NOXON		,1	,sts$nx
+	command	senlst	,PACKET-LENGTH	,3	,sts$pl	,st1.04
+	command	senlst	,PADCHARACTER	,4	,sts$pd	,st1.07
+	command	senlst	,PADDING	,4	,sts$pn	,st1.08
+	command senlst	,START-OF-PACKET,1	,sts$so	,st1.05
+	command	senlst	,TIME-OUT	,1	,sts$ti	,st1.06
+	command	senlst	,XON		,1	,sts$xo
+	command	senlst
+
+sts$so:	call	setsop			; check for valid value
+	tst	r0			; well?
+	bne	30$			; no good..
+	mov	r1	,sensop		; ok, save new SEND start of packet
+	return
+
+str$so:	call	setsop			; check for valid value
+	tst	r0			; well?
+	bne	30$			; no good..
+	mov	r1	,recsop		; ok, save new REC start of packet
+	return
+
+set$so::call	setsop			; check for valid value
+	tst	r0			; well?
+	bne	30$			; no good..
+	mov	r1	,sensop		; ok, save new SEND start of packet
+	mov	r1	,recsop		; ditto for REC
+	return
+
+setsop:	calls	octval	,<argbuf>	; get the octal value
+	tst	r0			; check for errors
+	bne	20$			; exit if so
+	tst	r1			; greater than zero?
+	ble	20$			; no, exit
+	cmp	r1	,#36		; <= 36 ?
+	ble	30$			; /BBS/ ya
+20$:	mov	#er$oct	,r0		; /BBS/ no, must be 1 to 36 octal
+30$:	return
+
+str$ti:	call	settim			; /62/ get and check value
+	tst	r0			; /62/ ok?
+	bne	30$			; /62/ no
+	mov	r1	,rectim		; /62/ ya, save it
+	return				; /62/
+
+sts$ti:	call	settim			; /62/ get and check value
+	tst	r0			; /62/ ok?
+	bne	30$			; /62/ no
+	mov	r1	,sentim		; /62/ ya, save it
+	return				; /62/
+
+settim:	calls	l$val	,<argbuf>	; convert ascii digits to an integer
+	tst	r0			; well?
+	bne	40$			; no, bad value
+	cmp	r1	,#maxpak	; /62/ largest possible value..
+	blos	30$			; /63/ it's ok, return
+40$:	mov	#er$tim	,r0		; /BBS/ must be between 0 and 94.
+	return
+
+sts$xo:	mov	sp	,prexon		; /53/ prefix packets with XON
+	br	50$			; /63/ no error possible
+
+sts$nx:	clr	prexon			; /53/ don't prefix with XON
+50$:	clr	r0			; /63/ no error possible
+	return
+
+sts$pl:	calls	l$val	,<argbuf>	; get the argument now
+	tst	r0			; did it work?
+	bne	90$			; /62/ no
+	cmp	r1	,#20.		; minimum of twenty
+	blt	70$			; /62/ too small, go say so
+	cmp	r1	,#maxpak	; /62/ how long is it to be?
+	ble	60$			; /62/ within "normal" range
+	call	st$.pl			; /62/ do long-packet tests..
+60$:	mov	r1	,senlen		; /62/ do the SET
+	br	50$			; /62/ that's it..
+
+str$pl:	calls	l$val	,<argbuf>	; /43/ get the user's size
+	tst	r0			; /43/ successful?
+	bne	90$			; /63/ no
+	cmp	r1	,#maxpak	; /43/ huge packets? /BBS/ wuz 96.
+	bgt	str.pl			; /43/ yes
+	cmp	r1	,#20.		; /BBS/ too small?
+	blt	70$			; /62/ ya..
+	movb	r1	,senpar+p.spsiz	; /43/ set up it
+	clrb	senpar+p.mxl1		; /62/ and hose any possible
+	clrb	senpar+p.mxl2		; /62/ previous long packet length
+	clr	reclng			; /43/ clear this
+	clr	dolong			; /BBS/ and this
+	br	50$			; /62/ that's it..
+70$:	mov	#er$txp	,r0		; /62/ minimum length is 20. bytes
+	return				; /62/
+
+str.pl:	call	st$.pl			; /62/ shared with sts$pl
+	mov	r1	,reclng		; /62/ setup this parameter
+	mov	sp	,dolong		; /62/ ensure long packets are on
+	clr	r0			; /43/ now setup for divide by 95
+	div	#95.	,r0		; /43/ break length into two bytes
+	movb	r0	,senpar+p.mxl1	; /62/ and insert it
+	movb	r1	,senpar+p.mxl2	; /62/ into parameter vector
+	br	50$			; /63/ success
+
+st$.pl:	cmp	r1	,#maxlng	; /43/ will this fit within the
+	blos	80$			; /63/ Kermit-11 internal buffers?
+	mov	#maxlng	,r1		; /43/ no, reset to max we allow
+	wrtall	#st1.22			; /63/ "Packet length truncated .."
+	mov	r1	,r0		; put length where L10266 needs it
+	call	L10266			; /BBS/ write r0 to TT
+	wrtall	#st1.23			; /63/ ". bytes"
+80$:	cmpb	setchkt	,#'3		; /62/ CRC block checking in use?
+	beq	90$			; /BBS/ ya
+	tst	infomsg			; SET TT QUIET?
+	beq	90$			; ya..
+	wrtall	#st1.24			; /63/ "Remember to SET BLO 3 .."
+90$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET END-OF-LINE
+
+set$eo::call	setsop			; /BBS/ octal value must be 1..36
+	tst	r0			; did it work?
+	bne	10$			; no
+	movb	r1	,senpar+p.eol	; /62/ yes, stuff it in there please
+10$:	return
+
+
+	.sbttl	SET PAUSE
+
+set$ps::calls	l$val	,<argbuf>	; get the value
+	tst	r0			; well?
+	bne	10$			; /63/ it's no good
+	mov	r1	,pauset		; ok value, save it
+10$:	return
+
+
+	.sbttl	SET DELAY
+
+set$dl::calls	l$val	,<argbuf>	; get the value
+	tst	r0			; well?
+	bne	10$			; /63/ it's no good
+	mov	r1	,sendly		; ok value, save it
+10$:	return
+
+
+	.sbttl	SET SEND PADDING, PADCHARACTER	; /57/ Brian Nelson 17-Jul-87
+
+sts$pd:	calls	octval	,<argbuf>	; get the octal value now
+	tst	r0			; did it work?
+	bne	10$			; /63/ no
+	movb	r1	,senpar+p.padc	; /62/ yes, SET it
+10$:	return
+
+sts$pn:	calls	l$val	,<argbuf>	; get the value
+	tst	r0			; well?
+	bne	10$			; /63/ it's no good
+	mov	r1	,senpar+p.npad	; /62/ ok, stuff number of chars here
+10$:	return
+
+
+	.sbttl	SET ESCAPE
+
+set$es::call	setsop			; /BBS/ get the octal value now
+	tst	r0			; did it work?
+	bne	10$			; /BBS/ no
+	mov	r1	,conesc		; ya, store it
+10$:	return
+
+
+	.sbttl	SET ATTRIBUTES		; /63/ add individual attributes..
+	.enabl	lsb			; /63/
+
+set$at::upcase	argbuf			; ensure arg(s) are upper case
+	calls	getcm0	,<argbuf,#attr>	; find out which option was given
+	tst	r0			; did it work?
+	bmi	s.enx			; /63/ nope
+	tst	wasnul			; were commands listed via "?"
+	bne	s.enx			; /63/ ya, so don't set to last shown
+	calls	getcm1	,<argbuf,#attr,r0> ; check for possible arg to command
+	tst	r0			; well?
+	bmi	s.enx			; /63/ bad arg..
+	jmp	@r1			; dispatch
+
+	command	attr	,ALL		,1  ,sat$all	,st1.09
+	command	attr	,DATE		,1  ,sat$date	,st1.09
+	command	attr	,EXACT-LENGTH	,1  ,sat$exact	,st1.09
+	command	attr	,LENGTH		,1  ,sat$len	,st1.09
+	command	attr	,OFF		,2  ,sat$off
+	command	attr	,ON		,2  ,sat$on
+	command	attr	,PROTECTION	,1  ,sat$prot	,st1.09
+	command	attr	,SYSTEM-ID	,9. ,sat$id	,st1.09
+	command	attr	,SYSTEM-INFO	,9. ,sat$info	,st1.09
+	command	attr	,TYPE		,1  ,sat$type	,st1.09
+	command	attr
+
+sat$al:	mov	#at.all	,r2		; all attributes
+	br	s.ofon
+
+sat$da:	mov	#at.cdt	,r2		; create date
+	br	s.ofon
+
+sat$ex:	mov	#at.xle	,r2		; exact length in bytes
+	br	s.ofon
+
+sat$le:	mov	#at.len	,r2		; length
+	br	s.ofon
+
+sat$of:	bic	#at.on	,doattr		; set them off
+	br	s.end			; success
+
+sat$on:	bis	#at.on	,doattr		; set them on
+	br	s.end			; success
+
+sat$pr:	mov	#at.pro	,r2		; file protection
+	br	s.ofon
+
+sat$id:	mov	#at.sys	,r2		; system ID
+	br	s.ofon
+
+sat$in:	mov	#at.inf	,r2		; DEC-specific file type
+	br	s.ofon
+
+sat$ty:	mov	#at.typ	,r2		; file type
+	.br	s.ofon			; /63/ fall through to s.ofon
+
+s.ofon:	calls	getcm0	,<argbuf,#offon> ; yes, check what to do now..
+	tst	r0			; did it work?
+	bmi	s.enx			; no, return with error in r0
+	tst	wasnul			; were commands listed via "?"
+	bne	s.enx			; ya
+	jmp	@r1			; /63/ dispatch on it please
+
+	command	offon	,OFF	,2	,s.of
+	command	offon	,ON	,2	,s.on
+	command	offon
+
+s.of:	bic	r2	,doattr
+	br	s.end			; /83/
+
+s.on:	bis	r2	,doattr
+	br	s.end			; /63/
+
+st$nat::bic	#at.on	,doattr		; don't do attributes
+s.end:	clr	r0			; no error
+s.enx:	return
+
+
+	.sbttl	SET LONG-PACKETS
+
+set$lp::upcase	argbuf			; /BBS/ ensure args are upper case
+	calls	getcm0	,<argbuf,#onoff> ; /42/ find out which option given
+	tst	r0			; /42/ did we find one
+	bmi	st$ox			; /63/ no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	st$ox			; /63/ ya
+	jsr	pc	,@r1		; /42/ dispatch now
+	mov	r0	,dolong		; /42/ save result
+	beq	st$nlp			; /63/ turning it off
+	mov	argbuf	,r0		; /BBS/ turning it on, copy address
+	movb	#'3	,(r0)+		; /BBS/ SET BLO 3
+	clrb	@r0			; /BBS/ null terminate
+	call	set$bl			; /BBS/ do the set
+	mov	#maxlng	,r1		; /BBS/ load max possible packet size
+	mov	r1	,senlen		; /62/ SET SEN PAC too..
+	jmp	str.pl			; /63/ special entry point for str$pl
+
+	command	onoff	,OFF	,2	,st$of ; /63/ clearing r0 turns it off
+	command	onoff	,ON	,2	,st$on
+	command	onoff
+
+st$on:	mov	sp	,r0		; /63/ set it on
+	return
+
+st$nlp::clr	dolong			; don't do long packets
+	clr	senlng			; /BBS/ for short long packet fix
+	cmp	senlen	,#maxpak	; /62/ is send length >94. ?
+	ble	st$of			; /63/ no, don't modify SET SEN PAC
+	mov	#maxpak	,senlen		; /62/ ya, SET SEN PAC 94. here too..
+st$of:	clr	r0			; /62/ no error
+st$ox:	return
+
+
+	.sbttl	SET PROMPT
+
+set$pr::call	skipit			; /BBS/ ignore comma in argument
+	mov	argbuf	,r1		; /63/ pointer to start of string
+	cmpb	(r1)	,#42		; /63/ is first byte a " ?
+	beq	10$			; /63/ yes
+	cmpb	(r1)	,#47		; /63/ or a ' ?
+	bne	20$			; /63/ nope..
+10$:	strlen	argbuf			; /63/ length of string
+	add	argbuf	,r0		; /63/ pointer to end of it
+	cmpb	-(r0)	,(r1)		; /63/ does last byte match the first?
+	bne	20$			; /63/ nope..
+	inc	r1			; /63/ ya, skip past leading quote
+	clrb	(r0)			; /63/ and hose trailing quote
+20$:	copyz	r1	,#prompt ,#31.	; write new prompt string
+	clr	r0			; no error possible
+	return
+
+
+	.sbttl	SET SEED, RANDOM
+	.enabl	lsb			; /63/
+
+set$se::calls	l$val	,<argbuf>	; convert ascii arg to integer
+	tst	r0			; well?
+	bne	10$			; /63/ no, bad value
+	mov	r1	,seed		; save it as the random number seed
+10$:	return
+
+set$ra::upcase	argbuf			; /BBS/ upper case the argument
+	calls	getcm0	,<argbuf,#ranlst> ; find out which option was given
+	tst	r0			; did we find one?
+	bmi	30$			; /63/ no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	30$			; /63/ ya
+	jmp	@r1			; /63/ dispatch
+
+	command	ranlst	,OFF	,2	,sra$of
+	command	ranlst	,ON	,2	,sra$on
+	command	ranlst
+
+sra$of:	clr	ranerr			; /62/ turn it off
+	br	20$			; /63/
+
+sra$on:	mov	sp	,ranerr		; /62/ turn it on
+20$:	clr	r0			; /63/ no error
+30$:	return				; /63/
+
+	.dsabl	lsb			; /63/
+
+
+	.sbttl	SET REPEAT
+	.enabl	lsb			; /63/
+
+set$rp::upcase	argbuf			; /BBS/ upper case the argument
+	calls	getcm0	,<argbuf,#relst> ; which option was given?
+	tst	r0			; find one?
+	bmi	20$			; no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	20$			; /BBS/ ya
+	jmp	@r1			; /63/ dispatch
+
+	command	relst	,OFF	,2	,rep$of
+	command	relst	,ON	,2	,rep$on
+	command	relst
+
+rep$of::clr	setrpt			; /63/ SET NOREPEAT-QUOTING
+	br	10$			; /63/
+
+rep$on:	mov	sp	,setrpt		; /62/ turn it on
+10$:	clr	r0			; no error
+20$:	return
+
+	.dsabl	lsb			; /63/
+
+
+	.sbttl	SET TERMINAL
+	.enabl	lsb			; /63/
+
+set$tt::upcase	argbuf			; /BBS/ upper case the args
+	calls	getcm0	,<argbuf,#ttlst> ; which option was given?
+	tst	r0			; find one?
+	bmi	30$			; no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	30$			; /BBS/ ya
+	jmp	@r1			; /E64/  dispatch
+
+	command	ttlst	,NOQUIET,3	,svt$nq
+	command	ttlst	,NOSCOPE,3	,svt$ns
+	command	ttlst	,QUIET	,1	,svt$qu
+	command	ttlst	,SCOPE	,1	,svt$vt
+	command	ttlst	,TTY	,1	,svt$tt
+	command	ttlst	,VT100	,3	,svt$vt
+	command	ttlst	,VT101	,3	,svt$vt
+	command	ttlst	,VT102	,3	,svt$vt
+	command	ttlst	,VT200	,3	,svt$22
+	command	ttlst	,VT220	,3	,svt$22
+	command	ttlst
+
+svt$ns:	mov	#noscope,r0		; make it NOSCOPE (printing terminal)
+	br	10$
+svt$tt:	mov	#tty	,r0		; make it TTY (dumb tube terminal)
+10$:	mov	r0	,vttype		; save the term type
+	clr	con8bit			; neither of these are 8-bit devices
+	br	20$			; /63/
+
+svt$vt:	mov	#vt100	,vttype		; make it a VT-100
+	clr	con8bit			; which isn't 8-bit either..
+	br	20$			; /63/
+
+svt$22:	mov	#vt200	,vttype		; make it a VT-220
+	mov	sp	,con8bit	; /BBS/ for the CONNECT mode..
+	br	20$			; /63/
+
+svt$qu:	clr	qu.ini			; /BBS/ copy for after init/^c abort
+	clr	infomsg			; /41/ disallow full info messages
+	br	20$			; /63/
+
+svt$nq:	mov	sp	,qu.ini		; /BBS/ copy for after init/^c abort
+	mov	sp	,infomsg	; /41/ allow full info messages
+	tst	sy.ini			; /BBS/ is init file running?
+	beq	20$			; /BBS/ no
+	.newline			; /BBS/ ya, get a fresh line
+20$:	clr	r0			; success
+30$:	return
+
+	.dsabl	lsb			; /63/
+
+
+	.sbttl	Clear a VT-100's screen	; /62/ moved this here..
+	.enabl	lsb
+
+c$cls::	movb	#'l!40	,nrm.rev	; set for normal video
+	br	10$
+c$clx::	movb	#'h!40	,nrm.rev	; set for reverse video
+10$:	wrtall	#clstxt			; clean up the screen
+	clr	r0			; /62/
+	return
+
+	.save
+	.psect	$rwdata	,rw,d,lcl,rel,con
+clstxt:	.ascii	<esc>"<"	; ANSI mode from VT-52
+	.ascii	<esc>"[?1l"	; reset cursor key application mode
+	.ascii	<esc>"[?3l"	; reset to 80 cols
+	.ascii	<esc>"[?4l"	; reset to jump scroll
+	.ascii	<esc>"[?5"	; prefix for normal/reverse video
+nrm.rev:.byte	0		; set to normal/reverse screen as desired
+	.ascii	<esc>"[?6l"	; reset to cursor origin mode
+	.ascii	<esc>"[?7h"	; set auto wraparound mode
+	.ascii	<esc>"[?8h"	; set auto repeat mode
+	.ascii	<esc>"(B"	; designate ASCII character set as G0
+	.ascii	<ctrl$o>	; reset to normal text from graphics..
+	.ascii	<esc>"[1;24r"	; reset scrolling region to entire screen
+	.ascii	<esc>"[J"	; erase from cursor to end (here, everything)
+	.ascii	<esc>"[m"	; reset all attributes to normal
+	.ascii	<esc>"[q"	; turn off all leds
+	.ascii	<esc>"[v"	; make cursor visible
+	.ascii	<esc>">"	; restore keypad numeric mode
+	.byte	0		; terminator
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	SET CONSOLE
+	.enabl	lsb			; /62/
+
+set$co::upcase	argbuf			; /BBS/ upper case the args
+	calls	getcm0	,<argbuf,#colst>  ; which option was given?
+	tst	r0			; find one?
+	bmi	20$			; /63/ no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	20$			; /63/ ya
+	calls	getcm1	,<argbuf,#colst,r0> ; /63/ check for possible arg
+	tst	r0			; /63/ well?
+	bmi	20$			; /63/ bad arg..
+	jmp	@r1			; /63/ dispatch
+
+	command	colst	,7-BIT	,1	,sco$7
+	command	colst	,8-BIT	,1	,sco$8
+	command	colst	,BREAK	,1	,sco$br	,st1.10
+	command	colst	,MILNET	,1	,sco$mi
+	command	colst	,NOMILNET,1	,sco$no
+	command	colst	,PRIORITY,1	,sco$pr	,st1.04
+	command	colst
+
+sco$7:	clr	con8bit			; goto the 7-bit mode
+	br	10$			; /62/
+
+sco$8:	mov	sp	,con8bit	; use all 8 bits..
+	br	10$			; /62/
+
+sco$no:	clr	milnet			; /BBS/ don't send a couple ^Qs
+	br	10$			; /62/
+
+sco$mi:	mov	sp	,milnet		; /BBS/ send a couple ^Qs on CONNECT
+10$:	clr	r0			; no error
+20$:	return
+
+sco$br:	calls	getcm0	,<argbuf,#brklst> ; /63/ check the table for length
+	tst	r0			; /62/ did it work?
+	bmi	20$			; /63/ no
+	tst	wasnul			; /62/ were commands listed via "?"
+	bne	20$			; /63/ ya
+	jmp	@r1			; /63/ no, dispatch it please
+
+	command	brklst	,LONG	,1  ,sbk$lo	; /62/
+	command	brklst	,SHORT	,1  ,sbk$sh	; /62/
+	command	brklst				; /62/
+
+sbk$sh:	mov	#17.	,r3		; /62/ assume 60Hz
+	cmp	clkflg	,#50.		; /62/ is it 50Hz?
+	bne	30$			; /62/ no
+	mov	#14.	,r3		; /62/ ya, this is .280 sec at 50Hz
+	br	30$			; /62/ go save the appropriate value
+
+sbk$lo:	mov	#3	,r3		; /62/ 3 seconds
+	mul	clkflg	,r3		; /62/ accommodate clock rate
+30$:	mov	r3	,break+2	; /62/ store the value
+	br	10$			; /62/ success
+
+sco$pr:	tst	tsxsav			; /62/ running under TSX?
+	bne	40$			; /62/ ya
+	mov	#er$tsx	,r0		; /62/ no
+	return				; /63/
+40$:	mov	argbuf	,argpnt		; /63/ point to mow current arg
+	jmp	scl$3			; /62/ go set the priority
+
+	.dsabl	lsb			; /62/
+
+
+	.sbttl	SET LD			; /BBS/ added entire routine
+
+set$ld::tst	tsxsav			; running under TSX?
+	bne	10$			; ya
+	mov	#er$tsx	,r0		; no
+	br	20$
+10$:	cmp	tsxver	,#630.		; needs TSX V6.30 or above
+	bhis	30$			; got it
+	mov	#er$v63	,r0		; don't have it, say so
+20$:	return				; /63/
+
+30$:	upcase	argbuf			; /BBS/ upper case command args
+	calls	getcm0	,<argbuf,#ldlst> ; which option was given?
+	tst	r0			; find one?
+	bmi	20$			; no
+	tst	wasnul			; were commands listed via "?"
+	bne	20$			; ya
+	jmp	@r1			; /63/ dispatch
+
+	command	ldlst	,EMPTY	,1	,sld$1
+	command	ldlst
+
+sld$1:	clr	-(sp)			; /62/ .word 0
+	mov	#56405	,-(sp)		; /62/ .byte 5,135
+	mov	sp	,r0		; pointer to it
+	emt	375			; dismount all logical disks
+	bcc	40$			; ok
+	mov	#ld$bsy	,r0		; chan(s) open to a logical disk
+	br	50$			; if error, don't reassign DK
+40$:	strcpy	#defdir	,#dkname	; /62/ go home if successful
+	clr	r0			; success
+50$:	cmp	(sp)+	,(sp)+		; pop work area
+	return
+
+
+	.sbttl	SET VLSWCH		; /BBS/ all new..
+	.enabl	lsb			; /63/
+
+set$vl::tst	tsxsav			; running under TSX?
+	bne	10$			; ya
+	mov	#er$tsx	,r0		; no, works under TSX only
+	br	30$
+10$:	upcase	argbuf			; upper case command arguments
+	calls	getcm0	,<argbuf,#vlopts> ; which option was given?
+	tst	r0			; find one?
+	bmi	30$			; no
+	tst	wasnul			; were commands listed via "?"
+	bne	30$			; ya
+	jmp	@r1			; /63/ dispatch
+
+	command	vlopts	,LOCAL	,1 ,vl$clr
+	command	vlopts	,REMOTE	,1 ,vl$set
+	command	vlopts
+
+vl$set:	movb	limits	,vlflag		; non-zero = pass ^W to remote,
+	br	20$			; /63/ also store TSLICH in vlflag
+
+vl$clr:	clrb	vlflag			; zero = local ^W operation
+20$:	clr	r0			; /63/ success
+30$:	return				; /63/
+
+	.dsabl	lsb			; /63/
+
+	.end

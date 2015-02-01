@@ -1,0 +1,162 @@
+Date: Fri, 17 Oct 1997 12:00:00
+Newsgroups: alt.sys.pdp11,comp.sys.dec,comp.sys.dec.micro,comp.protocols.kermit.misc,vmsnet.pdp-11
+Subject: Announcing Kermit (KRT) V3.63 for RT-11 and TSX-Plus
+From: billy@MIX.COM
+
+I'm pleased to announce an update to the KRT Kermit for the PDP-11
+RT-11 and TSX-Plus operating systems is ready for production service.
+Version 3.63 adds several new features and performance enhancements
+which are detailed below, as well as fixing all known bugs, and is
+available now by anonymous ftp from <kermit.columbia.edu>.  All
+sources are on-line but just a few files are required to install
+and use the distributed executable program images -
+
+  kermit/b/krt.doc        Installation instructions, index of all files
+  kermit/b/krt.ini        Sample init file
+  kermit/b/krthlp.hlp     HELP text file
+  kermit/bin/krt.sav      Executable for RT-11FB/SB/SJ or TSX+
+  kermit/bin/krttsx.sav   Executable for RT-11XB/XM/ZB/ZM or TSX+
+
+This edition represents a significant step forward in both speed and
+convenience.  I strongly urge all users of RT-11/TSX-Plus to upgrade
+as soon as possible.
+
+My sincere thanks to all who've made suggestions and above all helped
+test this work - one of its key points is it's been thoroughly tested
+over quite some time and has been found to be extremely stable.  There
+is yet more to come, work is also being done by John Santos for RSTS/E
+and KRT remains a fully supported Kermit - if you have any problem with
+it please contact me directly.  And to be sure, KRT is fully Year-2000
+compliant when used with operating system versions that are as well.
+
+KRT's new features and fixes include -
+
+o SET/SHOW CONTROL-CHARACTER as in C-Kermit were added.  This speeds up
+  transfers of binary data as it reduces the need for control character
+  quoting which requires two bytes to transmit each one.  See HELP SET
+  CONTROL-CHAR for an in-depth discussion regarding how to use it.
+
+o KRT's file name conversion code now accomodates various previously
+  troublesome Unix file names such as .x. or .x: or ..x. which were
+  being erronously considered as implicitly wildcarded or a device or
+  path name.  All previously undefined characters possible in such file
+  names are now processed correctly.
+
+o In support of the above SET FILE WILDCARDS is now available within KRT.
+  The default is IMPLICIT, as it always has been in K11 and KRT.  EXPLICIT
+  requires the user to actually enter wildcard characters.  This does not
+  modify the RT-11 or TSX-Plus setting and allows renaming Unix files with
+  a leading dot in the same command used to get them.
+
+o User specified file sizes, as in FILENAME[size], are now supported and
+  sizes are now displayed when sending or receiving files.  Note that for
+  text files from foreign systems KRT adds 25% to the received size to
+  accomodate differing line termination schemes, and this increased size
+  is what will be displayed even though the file will most likely be
+  closed later at some smaller number of blocks.  If this increase exceeds
+  the currently available free space even though the file would fit its
+  exact size may now be passed to KRT in the GET command.
+
+o The contents of SEND FILE ACK and RECEIVE FILE ACK packets, such
+  as a file name returned by the remote Kermit, and the file type
+  (ASCII, Binary) are now displayed during file transfers.
+
+o An error packet is now sent to the other Kermit when appropriate
+  (as when a write to a local file fails) so the transfer is properly
+  aborted.
+
+o A warning message is now displayed when receiving an empty file so
+  the user will know why no data were transfered.
+
+o Under TSX-Plus EMT 114 is now used for output when using TT as the
+  link device.  This is a very noticable difference.  As the TSX docs
+  say ttyout loops are not handled very efficiently..
+
+o Transmitted and received file attributes may now be individually
+  disabled.  These additions are documented in HELP SET ATTRIBUTES
+  and are useful when another Kermit has trouble with some but not
+  all of them.
+
+o A dummy file name is now included when opening LP as the log file
+  for more recent versions of RT-11 that expect to see something there.
+  Receiving a file to LP is also now possible.  As in the past LP must
+  either be spooled or extremely fast to serve as the log device.
+
+o The test for a Line Time Clock was modified to accomodate QED's fast
+  machines, per a suggestion from Alan Sieving of QED.  It now completes
+  as fast as possible regardless of machine type.  Previously the QED
+  CPUs finished the delay loop in less than one clock tick.
+
+o The use of a quoted string to place a blank at end of prompt string,
+  as in SET PROMPT "Kermit-11> ", is now supported.
+
+o The command line input buffer has been increased to 132 bytes in
+  the EIS assembly only.  This accomodates long lines in take files
+  and of course also works for keyboard input.  This invloved fixing
+  all possible sign extension problems and it's now possible to make
+  LN$MAX <= 255.  As distributed KRTTSX is built with EIS instructions
+  and KRT is not.
+
+o A T3000X.42 modem definition for XOFF restraint with this modem was
+  added.  Note that S48 must be set to 0 or the modem will NOT do XOFF
+  restraint, regardless of what the modem docs say, at least in the
+  command mode and sometimes when on-line to another modem as well.
+  This is a bug in the modem itself and is the reason hardware flow
+  control was added to the KM handler.
+
+o REMOTE commands now display the reasons for retries as each occurs.
+  An error packet is now sent when giving up to stop any possible
+  lingering activity at the other end.
+
+o Repeated char encoding is now done on REMOTE command arguments.  This
+  makes a big difference for a command like REMOTE DELETE *~ sent to a
+  Unix system, which without repeat encoding becomes 'rm *' after going
+  though C-Kermit and thus hoses everything.  Eight-bit quoting is also
+  now done here when parity is in use.
+
+o CD/CWD and REMOTE CD/CWD will now operate without an argument.  RT-11
+  and TSX assigns are now tested for illegal string lengths as well.
+
+o REMOTE WHO now passes arguments to the remote host.  Some hosts
+  support this, such as VMS where it's really handy on a busy system.
+
+o DAYTIME and SHOW DAYTIME commands were added.
+
+o The first data packet is now actually rebuilt when resizing due
+  to its failing so the next retry is actually done with the smaller
+  sized packet.  In the past the reduction wasn't done until the next
+  packet was sent, which is of course too late..  A rewind routine was
+  restored in KRTRMS.MAC for use when resizing packets ala the above,
+  which is more efficient then closing and reopening the file.
+
+o An error in testing for terminal emulator command characters after
+  having SET CONSOLE 8-BIT is now fixed.
+
+o The packet data processing routine (BUFFIL) was moved back to the
+  root for speed after cleaning up made space available for it once
+  again.  This means less calling of overlays and helps quite a bit
+  when running on a floppies-only system.
+
+o A problem with the SET PHONE XMODE value specified in a SET CL PORTS
+  string being overwritten by the default value in a modem definition
+  was fixed.  Now if a value is explicitly supplied it will prevail.
+
+o A problem with garbage sometimes being appended to a log file name
+  was fixed.
+
+o An unpopped stack error on an error exit from BUFEMP (used to receive
+  files) was fixed.  This bug was introduced in V3.62 but there was no
+  error checking at all before that..
+
+o Any possibly lingering data from a modem is now flushed before again
+  beginning dialing or redialing.
+
+o All source files have been thoroughly cleaned up and fully commented
+  and the HELP text and .DOC files are completely caught up.  All program
+  data have been moved to the tops of their source modules to make foreign
+  language translation as easy as possible.
+
+Billy Youdelman
+billy@MIX.COM
+16-Oct-1997
+

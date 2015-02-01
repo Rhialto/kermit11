@@ -1,0 +1,170 @@
+	.title	KRTOSI.MIN  One shot init
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.sbttl	Macro references, various handy constants defined
+
+	.MCALL	.CSTAT	,.EXIT	,.GVAL	,.LOOKUP,.PURGE	,.QSET
+	.MCALL	.RCTRLO,.SERR	,.SETTOP
+
+	SYSVER	= 276
+	TOPMEM	= 50
+
+	.sbttl	Buffer allocation
+
+	BINLSIZ	= 40*4
+	MAXSIZ	== 1000
+	$$BUFP	= <<MAXSIZ+2>*4>
+	$$1	= 82.+200
+	$$2	= <34*2*2>*2
+	$$3	= <LN$MAX+2>*2
+	$$4	= <<LN$MAX+2>*LN$CNT>
+	TOTALL	== BINLSIZE+$$BUFP+$$1+$$2+$$3+$$4
+
+
+	.psect	$code
+	.sbttl	Init for RT-11
+	.enabl	lsb
+
+xinit::	.qset	#rtque	,#nrtque
+	.serr
+	.gval	#rtwork	,#sysver
+	movb	r0	,rt11ver
+	mov	#freept	,r2
+	mov	@hilimit,@r2
+	add	#3	,@r2
+	bic	#1	,@r2
+	.settop	#-2
+	mov	r0	,maxtop
+	cmp	@r2	,r0
+	bhi	80$
+	sub	@r2	,r0
+	cmp	#totall	,r0
+	blos	90$
+
+	wrtall	#fatal
+	message	<Insufficient space available for buffer allocation>,cr
+	message	<TOTALL = >
+	octout	#totall
+	message	<,  MAXTOP-HILIMIT = >
+	octout	r0
+	sub	#totall	,r0
+	br	87$
+
+80$:	wrtall	#fatal
+	message <Program high limit exceeds top of memory>,cr
+	message	<HILIMIT = >
+	octout	@r2
+	message	<,  MAXTOP = >
+	octout	r0
+	sub	@r2	,r0
+
+87$:	.newline
+	message	<You are >
+	neg	r0
+	call	plural
+	message	< from happiness..>,cr
+	clr	r0
+	.exit
+
+plural:	asr	r0
+	mov	r0	,r1
+	call	L10266
+	message	<. word>
+	dec	r1
+	beq	888$
+	mov	#'s!40	,r0
+	call	writ1char
+888$:	return
+
+
+	.sbttl	Allocate and init buffers
+
+90$:	mov	@r2	,r0
+	mov	#2	,r3
+	mov	#4	,r4
+100$:	mov	@r2	,buflst(r3)
+	add	#maxsiz	,@r2
+	add	#2	,r3
+	sob	r4	,100$
+	mov	@r2	,dirnam
+	add	#82.	,@r2
+	mov	@r2	,dirbfr
+	add	#200	,@r2
+	mov	@r2	,bintyp
+	add	#binlsiz,@r2
+	mov	@r2	,totp.s
+	add	#34*2*2	,@r2
+	mov	@r2	,totp.r
+	add	#34*2*2	,@r2
+	mov	#ln$cnt	,r3
+	mov	#lastli	,r4
+104$:	mov	@r2	,(r4)+
+	add	#ln$max+2,@r2
+	sob	r3	,104$
+	mov	@r2	,cmdbuf
+	add	#120	,@r2
+	mov	@r2	,argbuf
+	add	#120	,@r2
+105$:	clr	(r0)+
+	cmp	r0	,@r2
+	blos	105$
+
+
+	.sbttl	Set/get terminal config..
+
+	TTMODE	= 20 ! 100 ! 10000 ! 40000
+	$TCFIG	= 424
+	$SCOPE	= 100000
+
+	bis	#ttmode	,@#jsw
+	.rctrlo
+	mov	@#jsw	,ttparm
+
+	.lookup	#rtwork,#lun.sr,#dkblk
+	bcs	1100$
+	.cstat	#rtwork,#lun.sr,#cstat
+	bcs	1100$
+	calls	rdtoa	,<#dkname,cstat+12>
+	movb	cstat+10,r0
+	add	#'0	,r0
+	movb	r0	,dkname+2
+	movb	#':	,dkname+3
+	clrb	dkname+4
+1100$:	.purge	#lun.sr
+	strcpy	#defdir	,#dkname
+
+	.gval	#rtwork	,#$tcfig
+	cmp	rt11ver	,#5
+	bge	135$
+	mov	(r0)	,r0
+	br	137$
+135$:	mov	r0	,r1
+	MOV	#rtwork	,R0
+	MOV	#28.*^o400+1.,@R0
+	MOV	r1	,2.(R0)
+	EMT	^o375
+137$:	mov	r0	,ttpar2
+	bit	#$scope	,r0
+	beq	140$
+	mov	#vt100	,vttype
+140$:	mov	#par$space,parity
+	mov	#60.	,senlen
+	movb	#60.	,senpar+p.spsiz
+	clr	dolong
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Data
+
+	.psect	$pdata
+fatal:	.asciz	"?KRTOSI-F-"
+	.even
+
+	.end

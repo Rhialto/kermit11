@@ -1,0 +1,458 @@
+	.title	KRTCVT	File name and misc data conversions
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	fixfil now fixes unix leading dot ".file" names, also ".x.", etc.
+;	cleaned up chkext
+;	move unfmts to KRTSUB so KRTMDM can use this overlay ...
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	increase size of fixfil stack buffer to SVID limit
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	added useful RT-11/TSX+ binary file types
+;	modified chkext to handle file types of less than 3 chars
+;	fixfil - parse a device name in filespec, fixed termination bug
+;	namcvt now catches unix "/" and pc "\" directory delimiters
+;	namcvt fixed to not output a "." on a null input file name
+
+;	Copyright 1984 Change Software, Inc.
+;
+;	20-Mar-84  11:31:06 Brian Nelson
+;
+;	 Attempt to parse filespecifications that may include DECNET
+;	remote node name and  directories  in  a  manner  compatible
+;	with RSTS, RSX and RT-11.
+;
+;	 This was  first  implemented using the host executives file
+;	name parsing services, ie for RSTS using the .FSS  directive
+;	and   for   RSX   using   CSI   and   .PARSE   to   get  the
+;	filespecification converted into rad50 and  then  converting
+;	back  to  ascii.  The  problem with doing it that way, apart
+;	from being a hack, is that we could not process DECNET  node
+;	file  specifications  as the format of remote file names can
+;	never be expected to be compatible  with  the  host  system.
+;	Bob  Denny  wrote  a  new  one  for  RSX  which avoided this
+;	problem,  and  this  version  should  work  on   all  PDP-11
+;	operating systems.
+;
+;	 This  is implemented using a  transition state table driver
+;	thus allowing simple modification to accommodate the various
+;	types of node file names that may come up in the future.
+;
+;	 For the time being this routine will be placed in the over-
+;	lay region  ERRDVR, since  as of now it is  only called from
+;	KRTPAK and then only once for  each file send  to the remote
+;	system or micro.
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+
+	.macro	chtype	ch ,val		; /62/ work around "n/df" hosing .LST
+	.if nb	ch
+	. = chtype+ch			; put in the buffer, according to its
+	.byte	val			; ascii value as an offset into it
+	.iff
+	. = chtype+128.			; /63/ if no args, restore pc
+	.endc
+	.endm	chtype
+
+
+	.sbttl	Local data		; /63/ consolidate here..
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+chkbuf:	.byte	0 ,0 ,0 ,0 ,0 ,0	; /BBS/ buff to pad extents <3 chars
+
+	.psect	$pdata
+defchr:	.byte	'X&137			; replace any bad name char with this
+okchr:	.asciz	"0123456789.:ABCDEFGHIJKLMNOPQRSTUVWXYZ" ; /BBS/ allow device
+	.even				; /E64/ just in case
+
+
+	.sbttl	BINARY-TYPES default list
+	.dsabl	lc			; binl data MUST be UPPER case
+
+; /BBS/ space-pad to four bytes if file type is less than four bytes..
+
+binl:	.ascii	".BAC"			; compiled BASIC files
+	.ascii	".BAX"			; /BBS/ double precision .BAC files
+	.ascii	".BIN"			; XXDP
+	.ascii	".BOT"			; /BBS/ RT-11 boot files
+	.ascii	".BUP"			; /62/ backup files
+	.ascii	".CAL"			; /62/ spreadsheet files
+	.ascii	".CRF"			; link cross reference files
+	.ascii	".DEV"			; /BBS/ old logical disk file
+	.ascii	".DSK"			; /BBS/ logical disk file
+	.ascii	".EXE"			; executable image only, no data
+	.ascii	".LDA"			; /62/ absolute load address images
+	.ascii	".MLB"			; macro libraries
+	.ascii	".OBJ"			; MACRO output files
+	.ascii	".REL"			; /BBS/ RT-11 relocatable programs
+	.ascii	".RTS"			; TSX+ run time systems
+	.ascii	".SAV"			; RT-11 saved images
+	.ascii	".SML"			; system macro libs
+	.ascii	".STB"			; LINK symbol tables
+	.ascii	".SYS"			; RT-11 monitors, drivers
+	.ascii	".TSX"			; /BBS/ TSX+ system files
+	.byte	0			; /BBS/ end of it all
+	.even
+	.enabl	lc			; /BBS/ restore
+
+
+	.sbttl	Generate character class table for file name state parsing
+
+;	  character    class	  operation	/63/ commented for clarity..
+;	  ---------    -----	  ---------  
+;	     other	 0	  ignore, skip past adding nothing to output
+;	      nul	 1	  input string termination chars, must exit
+;	     < ( [	 2	  start of a dircetory, ppn or uic
+;	     > ) ]	 3	  end of a dircetory, ppn or uic
+;	     : / \	 4	  end of a device, directory or node
+;	      dot	 5	  part of a directory or file name
+;	     comma	 6	  part of a ppn or uic
+;	alpha-numeric	 7	  any char that's ok in directory or file name
+
+chtype:	.rept	128.		; doing ascii 0. through 127.
+	.byte		 0	; init everything to being ignored
+	.endr
+
+	chtype	 0	,1	; exit on null
+	chtype	lf	,1	; /62/ exit on a line feed
+	chtype	cr	,1	; exit on <cr>
+	chtype	'(	,2	; start of a rsts style ppn
+	chtype	')	,3	; end of a ppn
+	chtype	comma	,6	; part of a uic or ppn
+	chtype	dot	,5	; part of a file name or directory
+	chtype	'/	,4	; /BBS/ end of a unix directory
+	 $ch =	'0		; /62/ digits are ok most anywhere
+	 .rept	10.
+	 chtype	$ch	,7
+	 $ch =	$ch+1		; do 0 through 9
+	 .endr
+	chtype	'<	,2	; start of a TOPS-20 directory
+	chtype	':	,4	; end of a device or node
+	chtype	scolon	,1	; exit on ";" version delimiter
+	chtype	'>	,3	; end of a TOPS-20 directory
+	 $ch =	'A&137		; letters are also ok most anywhere
+	 .rept	32
+	 chtype	$ch	,7
+	 $ch =	$ch+1		; do A through Z
+	 .endr
+	chtype	'[	,2	; start of a directory or uic
+	chtype	'\	,4	; /BBS/ end of a pc directory
+	chtype	']	,3	; end of a directory
+	chtype			; /63/ end of this list
+	 $ch =	'a!40		; don't forget lower case letters
+	 .rept	32
+	 chtype	$ch	,7
+	 $ch =	$ch+1		; do a through z
+	 .endr
+	chtype			; /63/ restore the pc
+
+
+	.sbttl	NAMCVT state transition table
+
+ptable:
+
+; char	other	null	'[	']	':	'.	',   letter/digit
+; class	  0	  1	 2	 3	 4	 5	 6	  7
+
+  .byte	  1	,30.	,2	,-1	,11.	,21.	,-1	,21.  ; init
+  .byte	  2	,30.	,-1	,3	,-1	,2	,2	,2    ; [ ]
+  .byte	  3	,30.	,-1	,-1	,14.	,23.	,3	,23.  ; [ ]x.x
+  .byte	  4	,30.	,30.	,-1	,-1	,24.	,-1	,24.  ; x.x
+
+paction:			; action routines for file name parsing
+	.word	null		; null process, do nothing, ignore input char
+	.word	init		; start over, hosing everything done prior
+	.word	copy		; copy a valid char into the output string
+	.word	fin		; done, append a dot if needed and exit
+
+
+	.psect	$code
+	.sbttl	Parse file specification to extract only filnam.typ
+
+;	input:	 (r5)	address of source file_spec
+;		2(r5)	resultant string address
+;	output:   r0	error code, if any
+;
+;	internal register usage:
+;	r0	=   action index
+;	r1	=   current state
+;	r2	=   input string pointer
+;	r4	--> resultant string
+
+namcvt::save	<r1,r2,r3,r4>
+	mov	@r5	,r2		; point to the input string
+	mov	2(r5)	,r4		; point to the output string
+	clrb	@r4			; init output to be .asciz
+	mov	#1	,r1		; initialize current state
+	tst	rawfil			; /54/ really string stuff?
+	beq	10$			; /54/ yes
+	strcpy	r4	,r2		; /54/ no, copy as is
+	clr	r0			; /54/ no errors
+	br	40$			; /54/ and exit
+
+10$:	tst	r1			; current state is zero?
+	beq	20$			; yes, exit then
+	clr	r3			; get the next ch please
+	bisb	(r2)+	,r3		; simple
+	bic	#^c<177>,r3		; ensure in range 0..127
+	dec	r1			; use previous state to get the
+	mul	#10	,r1		; index into the state table  line
+	movb	chtype(r3),r0		; /BBS/                       column
+	add	r0	,r1		; add in the character class  line+col
+	movb	ptable(r1),r1		; and get the new state of system
+	beq	20$			; all done if new state is zero
+	bmi	30$			; error exit if < 0
+	clr	r0			; now mask off the action index from
+	div	#10.	,r0		; the new state
+	asl	r0			; word indexing to action routine
+	jsr	pc	,@paction(r0)	; simple
+	br	10$			; next please
+
+20$:	clr	r0			; no errors
+	clrb	@r4			; .asciz for output
+	br	40$
+
+30$:	mov	#-1	,r0		; error, bye
+40$:	unsave	<r4,r3,r2,r1>
+	return
+
+
+	.sbttl	Action routines for the file name parser
+
+null:	return
+
+init:	mov	2(r5)	,r4		; re-init the output string address
+	clrb	@r4			; /BBS/ re-init the output buffer
+	return
+
+copy:	movb	r3	,(r4)+		; copy a byte
+	clrb	@r4			; (re)terminate the string
+	return				; next please
+
+fin:	save	<r0,r3>			; all done, look for a dot
+	mov	2(r5)	,r0		; if there isn't any, add one
+	tstb	@r0			; /BBS/ is there anything left?
+	beq	30$			; /BBS/ don't add a dot to nothing
+10$:	tstb	@r0			; end of the line yet?
+	beq	20$			; yes
+	cmpb	@r0	,#'.		; a dot hanging around today?
+	beq	30$			; yes, exit
+	inc	r0			; no, bump to next char
+	br	10$			; and try again please
+20$:	movb	#'.	,r3		; no dot, stuff one in please
+	call	copy			; simple
+30$:	unsave	<r3,r0>
+	return
+
+
+	.sbttl	Check file extent to determine its type
+
+;	C H K E X T
+;
+;	input:	 (r5)	= file name
+;	output:	  r0	= if <>, assume it's a binary file
+
+chkext::save	<r1,r2,r3,r4>
+	mov	@r5	,r1		; /BBS/ save copy of pointer
+	strlen	r1			; how much is left?
+	tst	r0			; if nothing, then presume not binary
+	beq	80$			; nothing to do, exit
+	add	r0	,r1		; point to the end of the file name
+10$:	cmpb	-(r1)	,#'.		; look for a dot which will delimit
+	beq	20$			; the file type
+	sob	r0	,10$		; not found, try again please
+	br	80$			; never found a dot (can't happen)
+20$:	copyz	r1	,#chkbuf,#5	; /BBS/ make a copy so spaces aren't
+	mov	#chkbuf	,r1		; /BBS/ written into actual name buff!
+	strlen	r1			; # chars in file type, including "."
+	mov	#4	,r3		; /BBS/ flip operands for positive num
+	sub	r0	,r3		; /BBS/ must be 4 chars or less
+	beq	40$			; /BBS/ it's exactly 4, on to testing
+	blt	80$			; /BBS/ it's greater than 4, bail out
+	mov	r1	,r2		; /BBS/ save copy of pointer
+	add	r0	,r2		; /BBS/ point to last char
+30$:	movb	#space	,(r2)+		; /BBS/ space pad file extent
+	sob	r3	,30$		; /BBS/ until total length is 4
+	clrb	@r2			; /BBS/ null terminate padded string
+
+40$:	mov	bintyp	,r2		; ok, get listhead of file types
+	upcase	r1			; /63/ upper case chkbuf
+
+50$:	mov	r2	,r3		; get next file type address
+	tstb	@r3			; end of the list?
+	beq	80$			; if null, then all done
+	mov	r1	,r4		; not done, get pointer to passed type
+	cmpb	(r4)+	,(r3)+		; /63/ skip past the dots
+	cmpb	(r4)+	,(r3)+		; /63/ look for match on file type
+	bne	60$			; not bloody likely
+	cmpb	(r4)+	,(r3)+		; /63/ and so on
+	bne	60$			; you know
+	cmpb	(r4)+	,(r3)+		; /63/ one more time
+	beq	70$			; a match, go say so..
+60$:	add	#4	,r2		; no match, bump to next one please
+	br	50$			; and go give it a try
+
+70$:	mov	#1	,r0		; flag it's a binary file
+	br	90$
+80$:	clr	r0			; not binary
+90$:	unsave	<r4,r3,r2,r1>
+	return
+
+
+	.sbttl	Init BINARY-TYPES list
+
+binini::strcpy	bintyp	,#binl		; copy list to buffer in high memory
+	return				; so appending it is possible
+
+
+	.sbttl	Convert invalid characters to something reasonable
+
+;	F I X F I L E
+;
+;	Input:	 (r5)	= source string, .asciz
+;		2(r5)	= destination string, .asciz
+;	Output:	  r0	= zero if unmodified, else non-zero (for warnings)
+;
+;	The main reason for this is to protect ourselves against the
+;	file naming conventions used for TOPS20 and VMS so we do not
+;	die on a bad file name.
+
+; /63/	Modified to accomodate Unix file names, general clean-up too.
+
+fixfil::save	<r1,r2,r3>
+	sub	#256.	,sp		; buffer so src string stays intact
+	mov	sp	,r1		; pointer to it
+	copyz	(r5)	,r1  ,#255.	; copy input string into it
+	upcase	r1			; upper case the copy
+	clr	r3			; no mods made yet to file name
+
+10$:	tstb	(r1)			; this is the replace bad chars loop
+	beq	30$			; null = end of source file spec
+	scan	(r1)	,#okchr		; check for invalid character
+	tst	r0			; did we find one?
+	bne	20$			; no (we checked for legit chars)
+	movb	defchr	,(r1)		; ya, insert the fixup character
+	mov	#er$fnm	,r3		; and flag name has been modified
+20$:	inc	r1			; advance to next src char
+	br	10$			; and go check it
+
+30$:	mov	sp	,r1		; restore pointer to temp buffer
+	mov	2(r5)	,r2		; dst string buffer address
+	scan	#':	,r1		; look for a device delimiter
+	tst	r0			; find one?
+	beq	50$			; no..
+40$:	movb	(r1)+	,(r2)+		; ya, copy the device name
+	sob	r0	,40$		; including the colon terminator
+50$:	mov	#6	,r0		; RT-11 file name is 6 chars max
+
+60$:	tstb	(r1)			; anything now left?
+	beq	70$			; no, must have at least 1 char
+	cmpb	(r1)	,#'.		; end of file name field?
+	bne	90$			; not yet
+	inc	r1			; if a dot, bump pointer past it
+70$:	cmp	r0	,#6		; anything at all in the name field?
+	bne	100$			; something has been copied there
+	movb	defchr	,(r2)+		; no, it must have at least 1 char
+80$:	mov	#er$fnm	,r3		; flag that we altered name
+	br	100$			; then continue
+
+90$:	movb	(r1)+	,(r2)+		; copy the character
+	sob	r0	,60$		; next please
+	scan	#'.	,r1		; now find next dot in input string
+	add	r0	,r1		; bump ptr past it (no dot = no bump)
+	dec	r0			; next char was dot or no dot at all?
+	bgt	80$			; no, so something had to be tossed..
+
+100$:	movb	#'.	,(r2)+		; stuff a dot in output string
+	mov	#3	,r0		; at most 3 chars in file type
+
+110$:	cmpb	(r1)	,#'.		; another dot??  (for unix!)
+	beq	120$			; ya
+	cmpb	(r1)	,#':		; just in case, is it a colon?
+	bne	130$			; no    (colon is not fixed above..)
+120$:	tstb	(r1)+			; ya, skip past this char
+	mov	#er$fnm	,r3		; and flag name was altered..
+	br	110$
+
+130$:	movb	(r1)+	,(r2)+		; finish off with the file type
+	beq	140$			; hit the end of input string
+	sob	r0	,110$		; next char please
+	clrb	(r2)			; .asciz
+	tstb	(r1)			; anything left over?
+	beq	140$			; nope..
+	mov	#er$fnm	,r3		; ya, flag type was truncated..
+
+140$:	add	#256.	,sp		; release temp buffer
+	mov	r3	,r0		; return status
+	unsave	<r3,r2,r1>
+	return
+
+
+	.sbttl	Convert strings ala abcde<15> or abcde\015 to binary format
+
+prsarg::save	<r1,r2,r3,r4>		; /45/ save regs
+	mov	argbuf	,r3		; /41/ argbuf address
+	mov	r0	,r4		; /41/ where to return parsed string
+10$:	movb	(r3)+	,r2		; /41/ while (*argbuf)
+	beq	110$			; /41/ exit with success
+	cmpb	r2	,#'\		; /45/ "C" style notation?
+	beq	50$			; /45/ yes
+	cmpb	r2	,#'<		; /41/ start of an octal sequence?
+	bne	40$			; /41/ no
+	clr	r1			; /41/ init accumulator
+20$:	movb	(r3)+	,r2		; /41/ while (*argbuf++)
+	beq	100$			; /41/ error, no terminator
+	cmpb	r2	,#'>		; /41/ octal number terminator?
+	beq	30$			; /41/ yes, exit loop
+	cmpb	r2	,#'0		; /41/ check for legitimate value
+	blo	100$			; /41/ not an octal digit, error
+	cmpb	r2	,#'7		; /41/ check again please
+	bhi	100$			; /41/ not legit, error
+	sub	#'0	,r2		; /41/ yes, convert to octal until ">"
+	ash	#3	,r1		; /62/ shift left 3 bits
+	add	r2	,r1		; /41/ add in current digit
+	br	20$			; /41/ no
+30$:	mov	r1	,r2		; /41/ yes, get set to insert value
+40$:	movb	r2	,(r4)+		; /41/ place current char or value in
+	br	10$			; /41/ next please
+
+50$:	clr	r1			; /45/ "C" style notation
+	clr	-(sp)			; /45/ trip counter
+60$:	movb	(r3)	,r2		; /45/ copy a character
+	beq	70$			; /45/ EOS, exit next time
+	cmpb	r2	,#'0		; /45/ octal characters?
+	blo	70$			; /45/ no, exit this loop
+	cmpb	r2	,#'7		; /45/ ...
+	bhi	70$			; /45/ copy the character
+	inc	(sp)			; /45/ been here at least once
+	sub	#'0	,r2		; /45/ yes, convert to octal
+	ash	#3	,r1		; /62/ shift left 3 bits
+	add	r2	,r1		; /45/ add in current digit
+	inc	r3			; /45/ next please
+	br	60$			; /45/ do it
+70$:	tst	(sp)+			; /45/ did we really get a number?
+	beq	80$			; /45/ no, ignore then
+	movb	r1	,(r4)+		; /45/ done, copy the data
+	br	90$			; /45/ and get next please
+80$:	tstb	r2			; /45/ no number, perhaps "\\" or
+	beq	90$			; /45/ or "\<" was present?
+	movb	r2	,(r4)+		; /45/ must have had "\x"
+	inc	r3			; /45/ point to next char please
+90$:	br	10$			; /45/ go get it
+
+100$:	mov	#-1	,r0		; /41/ failed
+	br	120$			; /41/ exit
+110$:	clr	r0			; /41/ success
+120$:	clrb	@r4			; /41/ ensure string is .asciz
+	unsave	<r4,r3,r2,r1>		; /45/ unsave regs
+	return
+
+	.end

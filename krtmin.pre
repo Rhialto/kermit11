@@ -1,0 +1,485 @@
+	.title	KRTMIN.PRE  Prefix file for building KRTHLP.MIN
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1986 Brian Nelson
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.mcall	.RCTRLO
+
+	CVTARG	= C.CRLF ! C.LSPA ! C.SSPA ! C.LCUC ! C.TSPA
+
+
+	.sbttl	Local data
+
+	.psect	$pdata
+bugtxt:	.asciz	"Upgrades"
+dbldash:.asciz	" --"
+fill7:	.byte	cr ,lf ,40 ,40 ,40 ,40 ,40 ,40
+filler:	.byte	40 ,0
+p2lp$:	.asciz	"LP:KRTHLP.OUT"
+ptopic:	.asciz	" Select topic, please: "
+	.even
+sub.0:	.word	sub.2 ,sub.3 ,sub.4
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+backlev:.word	0
+backup:	.word	0
+hlpbuf:	.blkb	200
+htopic:	.blkb	200
+idxdmp:	.word	0
+prbuff:	.blkb	200
+prmptd:	.word	0
+rmsidx:	.word	0
+sub.2:	.blkb	100
+sub.3:	.blkb	100
+sub.4:	.blkb	100
+subwild:.word	0
+topics:	.word	0 ,0 ,0 ,0 ,0 ,0 ,0 ,0
+topbuf:	.blkb	200
+toplev:	.word	0
+ttbuff:	.blkb	200
+wild:	.word	0
+
+
+	.psect	$code
+	.sbttl	HELP main_loop
+	.enabl	lsb
+
+c$bug::	strcpy	argbuf	,#bugtxt
+	br	c$help
+
+prihlp::tst	outopn
+	beq	1$
+	mov	#er$lby	,r0
+	br	2$
+
+1$:	calls	create	,<#p2lp$,#lun.ou,#text>
+	tst	r0
+	beq	3$
+2$:	direrr	r0
+	return
+
+3$:	mov	sp	,outopn
+	mov	#lun.ou	,xprint
+
+c$help::call	hlpopn
+	tst	r0
+	beq	9$
+	jmp	99$
+
+9$:	upcase	argbuf
+	clr	prmptd
+	clr	subwild
+
+10$:	clr	idxdmp
+	clr	wild
+	clr	topics
+	clrb	prbuff
+	mov	#hlphead,rmsidx
+	mov	argbuf	,r5
+	tstb	@r5
+	beq	60$
+	call	parse
+	call	hfind
+	tst	r0
+	beq	20$
+	dec	r0
+	beq	50$
+	mov	sp	,wild
+20$:	call	hprint
+	br	70$
+
+50$:	message	< Help not found for the requested topic>,cr
+	mov	backup	,rmsidx
+	beq	55$
+	mov	backlev	,toplev
+	clr	backup
+	clr	idxdmp
+	clr	wild
+	br	20$
+55$:	clr	topics
+	clrb	prbuff
+	clrb	hlpbuf
+	mov	#hlphead,rmsidx
+60$:	.newline
+	mov	#'1	,-(sp)
+	call	hindex
+
+70$:	tst	idxdmp
+	beq	99$
+	mov	#prbuff	,r3
+	mov	argbuf	,r4
+	mov	#topics	,r5
+	clrb	@r4
+75$:	mov	(r5)+	,r2
+	beq	80$
+	cmpb	(r2)	,#'*
+	beq	100$
+	strcat	r4	,r2
+	strcat	r4	,#filler
+	br	75$
+80$:	tstb	@r3
+	beq	88$
+	strcat	r3	,#dbldash
+88$:	strcat	r3	,#ptopic
+	clr	subwild
+	.rctrlo
+	.newline
+	calls	readcmd	,<#ttbuff,r3>
+	tst	r0
+	bne	100$
+	calls	cvt$$	,<#ttbuff,r1,#cvtarg>
+	tst	r0
+	beq	99$
+	clrb	ttbuff(r0)
+	cmpb	ttbuff	,#'*
+	bne	89$
+	mov	sp	,subwild
+89$:	strcat	r4	,#ttbuff
+	mov	sp	,prmptd
+	jmp	10$
+
+99$:	clr	r0
+100$:	save	<r0>
+	tst	outopn
+	beq	110$
+	calls	close	,<#lun.ou>
+	clr	outopn
+110$:	clr	xprint
+	calls	close	,<#lun.in>
+	clr	inopn
+	unsave	<r0>
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Parse command line
+
+parse:	save	<r3,r4,r5>
+	mov	#topbuf	,r4
+	mov	#topics	,r3
+	clr	@r3
+
+10$:	tstb	@r5
+	beq	100$
+	cmpb	@r5	,#space
+	bne	15$
+	inc	r5
+	br	10$
+15$:	mov	r4	,(r3)+
+	clr	@r3
+20$:	tstb	@r5
+	beq	30$
+	cmpb	@r5	,#space
+	beq	30$
+	movb	(r5)+	,(r4)+
+	br	20$
+30$:	clrb	(r4)+
+	br	10$
+100$:	unsave	<r5,r4,r3>
+	return
+
+
+	.sbttl	Find the topic in the help file
+
+hfind:	save	<r2,r3,r4,r5>
+	mov	#topics	,r5
+	mov	#'1	,r2
+	clrb	htopic
+	mov	#hlphead,r4
+
+10$:	tst	@r5
+	beq	100$
+	mov	@r4	,r1
+	beq	90$
+	cmpb	@r1	,r2
+	blo	90$
+	bne	80$
+
+	inc	r1
+	inc	r1
+	mov	(r5)	,r3
+	cmpb	(r3)	,#'*
+	beq	85$
+
+50$:	tstb	(r3)
+	beq	70$
+	tstb	(r1)
+	beq	80$
+	movb	(r1)+	,r0
+	cmpb	r0	,#'a!40
+	blo	55$
+	cmpb	r0	,#'z!40
+	bhi	55$
+	bicb	#40	,r0
+55$:	cmpb	(r3)+	,r0
+	beq	50$
+	br	80$
+
+70$:	mov	r2	,backlev
+	mov	r4	,backup
+	inc	r2
+	tst	(r5)+
+	mov	@r4	,r1
+	inc	r1
+	strcat	#htopic	,r1
+	clr	prmptd
+80$:	add	#6	,r4
+	br	10$
+
+85$:	tstb	htopic
+	beq	88$
+	tst	prmptd
+	bne	88$
+	tst	subwild
+	bne	88$
+	save	<r1>
+	mov	backup	,rmsidx
+	mov	backlev	,toplev
+	clr	wild
+	call	hprint
+	.newline
+	mov	sp	,wild
+	unsave	<r1>
+88$:	dec	r1
+	strcpy	#hlpbuf	,r1
+	mov	r2	,toplev
+	mov	#2	,r0
+	br	107$
+
+90$:	mov	#1	,r0
+	mov	#hlphead,rmsidx
+	clr	@r5
+	br	110$
+
+100$:	mov	r2	,toplev
+	dec	toplev
+	clr	r0
+	sub	#6	,r4
+
+107$:	mov	r4	,rmsidx
+	clr	backup
+110$:	unsave	<r5,r4,r3,r2>
+	return
+
+
+	.sbttl	Print help text found by HFIND
+
+hprint:	save	<r2,r3,r4>
+	clrb	sub.2
+	clrb	sub.3
+	clrb	sub.4
+	clr	r2
+	strcpy	#ttbuff	,#htopic
+	strcpy	#prbuff	,r0
+	mov	#hlpbuf	,r4
+	tst	wild
+	beq	29$
+	.newline
+	strcat	#ttbuff	,r4
+	wrtall	r0
+	.newline
+	clrb	(r0)
+
+29$:	call	preset
+	bcc	30$
+9999$:	jmp	100$
+
+30$:	calls	getrec	,<r4,#lun.in,#176>
+	tst	r0
+	bne	9999$
+	clrb	hlpbuf(r1)
+	cmpb	(r4)	,#space
+	blos	60$
+	add	#6	,rmsidx
+	cmpb	(r4)	,toplev
+	blo	90$
+	beq	50$
+	mov	rmsidx	,r3
+	cmpb	(r4)	,r2
+	ble	40$
+	movb	(r4)	,r0
+	sub	#'0+2	,r0
+	blt	37$
+	asl	r0
+	strcpy	sub.0(r0),#errtxt
+
+37$:	movb	(r4)	,r0
+	mov	r0	,-(sp)
+	call	hindex
+	tst	wild
+	beq	80$
+	.newline
+
+40$:	mov	r3	,rmsidx
+	call	preset
+	bcs	100$
+
+50$:	tst	wild
+	beq	90$
+	movb	(r4)	,r0
+	sub	#'0+1	,r0
+	blt	57$
+	beq	51$
+	dec	r0
+	beq	53$
+	dec	r0
+	beq	55$
+	br	57$
+51$:	clrb	sub.2
+53$:	clrb	sub.3
+55$:	clrb	sub.4
+
+57$:	movb	(r4)	,r2
+	clrb	(r4)
+	strcpy	#ttbuff	,#htopic
+	strcat	r0	,#sub.2
+	strcat	r0	,#sub.3
+	strcat	r0	,#sub.4
+	mov	@rmsidx	,r1
+	inc	r1
+	strcat	r0	,r1
+	strcpy	#errtxt	,r1
+
+60$:	tstb	ttbuff
+	beq	70$
+	.newline
+	wrtall	#ttbuff
+	tst	wild
+	bne	69$
+	.newline
+69$:	clrb	ttbuff
+70$:	tstb	(r4)
+	beq	75$
+	wrtall	r4
+75$:	.newline
+	jmp	30$
+
+80$:	mov	#1	,r0
+	br	100$
+90$:	clr	r0
+100$:	unsave	<r4,r3,r2>
+	return
+
+
+	.sbttl	Preset an I/O channel to an exact block and offset
+
+preset:	mov	rmsidx	,r0
+	calls	prewind	,<#lun.in,2(r0),4(r0)>
+	rts	pc
+
+
+	.sbttl	Print index
+	.enabl	lsb
+
+hindex:	save	<r2,r4,r5>
+	mov	sp	,idxdmp
+	clr	-(sp)
+	clr	-(sp)
+	mov	sp	,r5
+	movb	2+<5*2>(sp),2(r5)
+	cmpb	2(r5)	,#'1
+	bhi	10$
+	clrb	hlpbuf
+10$:	message	<    Additional information is available on:>,cr
+	wrtall	#fill7
+	mov	#4	,(r5)
+	mov	rmsidx	,r4
+
+30$:	mov	@r4	,r1
+	beq	305$
+
+	cmpb	@r1	,2(r5)
+	bhi	507$
+	blo	305$
+
+300$:	inc	r1
+	inc	r1
+301$:	strlen	r1
+	mov	r0	,r2
+302$:	sub	#18.	,r2
+	neg	r2
+	bgt	303$
+	neg	r2
+	dec	(r5)
+	bne	302$
+	wrtall	#fill7
+	mov	#4	,(r5)
+	br	301$
+303$:	wrtall	r1
+	dec	(r5)
+	beq	505$
+	mov	#space	,r0
+503$:	call	writ1ch
+	sob	r2	,503$
+	br	507$
+505$:	wrtall	#fill7
+	mov	#4	,(r5)
+507$:	add	#6	,r4
+	br	30$
+
+305$:	cmp	#4	,(r5)
+	beq	88$
+	.newline
+88$:	clr	r0
+
+	mov	r4	,rmsidx
+	cmp	(sp)+	,(sp)+
+	unsave	<r5,r4,r2>
+	mov	(sp)+	,(sp)
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Open the help file
+	.enabl	lsb
+
+hlpopn:	mov	#rtname	,r3
+20$:	tst	@r3
+	beq	70$
+	calls	fparse	,<@r3,#srcnam>
+	calls	open	,<#srcnam,#lun.in,#text>
+	tst	r0
+	bne	40$
+
+	mov	#hlpbuf	,r4
+	calls	getrec	,<r4,#lun.in,#176>
+	tst	r0
+	bne	35$
+	clrb	hlpbuf(r1)
+	strlen	#hident
+	calls	instr	,<r4,r1,#hident,r0>
+	tst	r0
+	bne	99$
+35$:	message	<?KRTMIN-W->
+	wrtall	#srcnam
+	message	< is an incorrect version>,cr
+39$:	calls	close	,<#lun.in>
+40$:	tst	(r3)+
+	br	20$
+
+70$:	message	<Can't find KRTMIN.HLP on SY or DK>,cr
+	mov	#er$fnf	,r0
+	br	100$
+99$:	mov	sp	,inopn
+	clr	r0
+100$:	return
+
+	.dsabl	lsb
+
+	.save
+	.psect	$pdata
+rtname:	.word	3$ ,4$ ,0
+3$:	.asciz	"SY:KRTMIN.HLP"
+4$:	.asciz	"DK:KRTMIN.HLP"
+	.even
+
+
+	.sbttl	Fake RMS for help text file under RT-11
+

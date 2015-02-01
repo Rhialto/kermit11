@@ -1,0 +1,580 @@
+	.title  KRTHLP	HELP for Kermit-11
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	translate "_" to "-" which searching for topics
+;	move index data to separate file KRTIDX.MAC solving a size problem
+;	increase text line and terminal input buffers to 132. bytes
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	add dummy file name for HPRINT via RT-11 V5.2/TSX V6.0 LP/LS
+;	display all subtopic text when wildcarding through nested text
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	kill extra LF after listing subtopics
+;	hfind - fixed wildcarding when no subtopics exist for a topic
+;	help text file updated to reflect mods/additions/omissions
+;	hindex - display sped up, prompting after it now uses full text,
+;	also handles topic names greater than 18 bytes ala VMS help
+;	added fake RMS stuff for RT-11/TSX, and did a general cleanup..
+;	path for KRTHLP.HLP is now HLP, KRT, SY and DK
+;	modified to check for correct copy of KRTHLP.HLP
+;	on topic error nest in as far as possible instead of from the top
+;	added HPRINT, dumps help text to LP
+
+;	Copyright 1986 Brian Nelson
+;
+;	26-Mar-86  18:41:25
+;
+;	This is a complete rewrite of Kermit-11's help.  It is a bit more
+;	intelligent, in that it understands wildcarding (HELP SET *), and
+;	can build subtopic prompting strings and process accordingly.
+
+
+;	   Directions for rebuilding the RMS Index for KRTHLP.HLP
+;
+;	If the help text file must be edited, added to or changed, one
+;	must then rebuild the index data table located in KRTIDX.MAC.
+;	Doing this is quite easy - simply run KRTIDX.BAS which will
+;	create a new KRTIDX.MAC for you.
+;
+;	KRTHLP.HLP help text file format info:
+;
+;	The very first line contains an ident string with which this program
+;	can verify it has the correct file, as otherwise with the internal
+;	indexing in use here it may seem to be broken for no apparent reason.
+;	This ident string contains the program version and last edit date:
+;
+;	V03.63 27-Sep-97		(or whatever it may later become..)
+;
+;	Topic/subtopic lines must begin with a single ascii digit (ie: "1")
+;	representing the nesting level in the first column, followed by a
+;	space (ascii 40), followed by the topic/subtopic name.  The text
+;	following is preceded by a blank (CR/LF only) line.  Each line of
+;	the text must include a space (or lower value char, such as a tab
+;	or return) in column one, which is used to distinguish text from
+;	topics.  The text is followed by another blank line, just prior to
+;	the next topic or subtopic line.  Wildcarded nesting is currently
+;	supported through 5 levels, topic text length is 63. bytes and
+;	aggregate (topic/subtopics) length must be 127. or less bytes.
+;	The maximun length of a line of help text is 132. bytes, although
+;	it's best to stay within 80 columns if at all possible.
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+	.mcall	.RCTRLO
+
+	CVTARG	= C.CRLF ! C.LSPA ! C.SSPA ! C.LCUC ! C.TSPA ; arg processing
+
+
+	.sbttl	Local data
+
+	.psect	$pdata
+sub.0:	.word	sub.2 ,sub.3 ,sub.4	; /62/ for nested wildcarded headers
+rtname:	.word	10$ ,20$ ,30$ ,40$ ,0	; /63/ this is the help file path
+10$:	.asciz	"HLP:KRTHLP.HLP"	; /BBS/ try here first
+20$:	.asciz	"KRT:KRTHLP.HLP"	; /BBS/ then here, etc..
+30$:	.asciz	"SY:KRTHLP.HLP"
+40$:	.asciz	"DK:KRTHLP.HLP"
+addinf:	.ascii	"    Additional information is available on:"<cr><lf> ; /63/
+ fill7:	.byte	cr ,lf ,40 ,40 ,40 ,40 ,40 ,40 ; /BBS/ a newline and 7 blanks
+ fill:	.byte	40 ,0			; or just one blank, for formatting
+bugtxt:	.asciz	"Upgrades"		; /62/ for the BUG command
+dbldash:.asciz	" --"			; /BBS/ a space and a double dash..
+errhdr:	.asciz	"?KRTHLP-W-"		; /63/
+errmis:	.asciz	"Can't find KRTHLP.HLP on HLP, KRT, SY or DK"<cr><lf>
+errver:	.asciz	" is an incorrect version"<cr><lf>
+hlp2lp:	.asciz	"LP:KRTHLP.OUT"		; /62/ where HPRINT sends a file
+nohelp:	.asciz	"% Help not found for the requested topic"<cr><lf> ; /63/
+ptopic:	.asciz	" Select topic, please: " ; /BBS/ for prompting
+	.even
+
+	.psect	$rwdata	,rw,d,lcl,rel,con ; /BBS/
+backlev:.word	0			; /BBS/ last good topic in case error
+backup:	.word	0			; /BBS/ for nesting in on an error
+hlpbuf:	.blkb	134.			; /63/ read/write buffer for the file
+htopic:	.blkb	200			; the current topic
+idxdmp:	.word	0			; index was dumped
+prbuff:	.blkb	200			; prompting buffer
+prmptd:	.word	0			; /62/ select subtopic prompt done
+rmsidx:	.word	0			; /BBS/ current place in RMS index
+sub.2:	.blkb	100			; /62/ fill in with sub topics
+sub.3:	.blkb	100			; /62/ as required by how far in
+sub.4:	.blkb	100			; /62/ nested wildcarding goes..
+subwild:.word	0			; /62/ <> if 1st char of input is "*"
+topics:	.word	0 ,0 ,0 ,0 ,0 ,0 ,0 ,0	; /BBS/ list of topic/subtopic addrs
+topbuf:	.blkb	200			; (nested) topics buffer
+toplev:	.word	0			; level of current topic
+ttbuff:	.blkb	134.			; /63/ terminal read buffer
+wild:	.word	0			; <> if topic wildcarded
+
+
+	.psect	$code
+	.sbttl	BUG, HPRINT
+
+c$phlp::tst	outopn			; /63/ come here to print it too..
+	beq	10$			; output channel is available
+	mov	#er$lby	,r0		; chan is busy
+	br	20$			; handle error
+10$:	calls	create	,<#hlp2lp,#lun.ou,#text> ; open chan to LP:
+	tst	r0			; did it work?
+	bne	20$			; /63/ no
+	mov	sp	,outopn		; flag output channel is open
+	mov	#lun.ou	,xprint		; enable print routine in ttyout stuff
+	br	c$help			; /63/
+20$:	direrr	r0			; no, say why..
+	return
+
+c$bug::	strcpy	argbuf	,#bugtxt	; /62/ do this for
+	.br	c$help			; /63/ the "BUG" command
+
+
+	.sbttl	HELP main_loop
+
+;	(1)  Try to open help file, if it fails print an error message
+;	(2)  Parse the command line, filling in the topics pointer array
+;	(3)  Find and print (if found) the requested help topic+[subtopic(s)]
+;	(4)  If not found, build a new command line from the topics pointer
+;	     array, prompt and concatenate the requested topic
+;	(5)  Go back to (2)
+;	(6)  When done, close help file
+
+c$help::call	hlpopn			; come here for just plain help..
+	tst	r0			; locate and open the help file?
+	beq	30$			; /BBS/ ya..
+	jmp	140$			; /62/ no, error already displayed..
+
+30$:	upcase	argbuf			; /BBS/ keep this out of the loop!
+	clr	prmptd			; /62/ haven't asked for a subtopic
+	clr	subwild			; /62/ first char of input isn't a "*"
+
+40$:	clr	idxdmp			; index has not been dumped yet
+	clr	wild			; clear the wildcarding flag
+	clr	topics			; init [sub]topics pointers
+	clrb	prbuff			; /BBS/ clear sub-level prompt buffer
+	call	loahlp			; /63/ load HELP text index overlay
+	mov	r0	,rmsidx		; /63/ goto the top of the RMS list
+	mov	argbuf	,r5		; /BBS/ point to possible command args
+	tstb	@r5			; anything there?
+	beq	80$			; no, dump root index
+	call	parse			; ya, set up pointers
+	call	hfind			; now locate the desired text
+	tst	r0			; find anything?
+	beq	50$			; yes, let's go dump the text
+	dec	r0			; ok, was it a code of 1 or 2?
+	beq	60$			; 1, which means not found
+	mov	sp	,wild		; 2, found something wildcarded
+50$:	call	hprint			; dump the help text out now
+	br	90$			; then continue
+
+60$:	wrtall	#nohelp			; /63/ "Help not found for .."
+	mov	backup	,rmsidx		; /BBS/ here on a topic error?
+	beq	70$			; /BBS/ nope..
+	mov	backlev	,toplev		; /BBS/ ya, recover topic level
+	clr	backup			; /BBS/ don't come back here from here
+	clr	idxdmp			; /BBS/ haven't dumped an index yet
+	clr	wild			; /BBS/ in case nothing was there to *
+	br	50$			; /BBS/ print nested in as far as can
+70$:	clr	topics			; re-init [sub]topics pointers
+	clrb	prbuff			; /BBS/ clear sub-level prompt buffer
+	clrb	hlpbuf			; /BBS/ init one more buffer
+	call	loahlp			; /63/ load HELP text index overlay
+	mov	r0	,rmsidx		; /63/ goto the top of the RMS list
+80$:	.newline
+	mov	#'1	,-(sp)		; flag to..
+	call	hindex			; ..dump the top-level index out now
+
+90$:	tst	idxdmp			; did we ever print [sub]topic list?
+	beq	140$			; /62/ no, just exit
+	mov	#prbuff	,r3		; ya, build a prompt string
+	mov	argbuf	,r4		; in the argbuf
+	mov	#topics	,r5		; pointers to the parsed arguments
+	clrb	@r4			; /BBS/ init argbuf keep prbuff intact
+100$:	mov	(r5)+	,r2		; get next parsed argument
+	beq	110$			; all done, exit
+	cmpb	(r2)	,#'*		; wildcard argument?
+	beq	150$			; /BBS/ ya, done
+	strcat	r4	,r2		; /BBS/ no, add in previous [sub]topic
+	strcat	r4	,#fill		; /BBS/ and a delimiter
+	br	100$			; do next arg
+110$:	tstb	@r3			; /BBS/ anything in prompt buffer?
+	beq	120$			; /BBS/ nope..
+	strcat	r3	,#dbldash	; /BBS/ ya, add " --" to prompt string
+120$:	strcat	r3	,#ptopic	; finish creating the prompt
+	clr	subwild			; /62/ first char of input isn't a "*"
+	.rctrlo				; /BBS/ be sure output is on
+	.newline
+	calls	readcmd	,<#ttbuff,r3>	; /BBS/ use SL editor
+	tst	r0			; successful terminal read?
+	bne	150$			; /BBS/ no, got to exit
+	calls	cvt$$	,<#ttbuff,r1,#cvtarg> ; remove garbage, upper case
+	tst	r0			; anything left?
+	beq	140$			; /62/ no, exit please
+	clrb	ttbuff(r0)		; ya, ensure .asciz
+	cmpb	ttbuff	,#'*		; /62/ is first byte an asterisk?
+	bne	130$			; /62/ no
+	mov	sp	,subwild	; /62/ first char of input is a "*"
+130$:	strcat	r4	,#ttbuff	; append the data just read please
+	mov	sp	,prmptd		; /62/ prompted for subtopic flag
+	jmp	40$			; and parse the command all over again
+
+140$:	clr	r0			; /62/ here if error already handled
+150$:	save	<r0>			; /62/ moved hlpclo here..
+	tst	outopn			; is chan to LP open?
+	beq	160$			; no
+	calls	close	,<#lun.ou>	; ya, close it
+	clr	outopn			; say it's now closed
+160$:	clr	xprint			; turn off hprint
+	calls	close	,<#lun.in>	; close the help text file
+	clr	inopn			; flag channel is now free
+	unsave	<r0>			; /62/
+	return
+
+
+	.sbttl	Parse command line
+
+;	P A R S E
+;
+;	passed:	  r5	= address of command args (minus "HELP"), .asciz
+;	return:	topics	= addresses to each topic/subtopic
+;			  extra embedded spaces are removed
+
+parse:	save	<r3,r4,r5>
+	mov	#topbuf	,r4		; where to copy the text
+	mov	#topics	,r3		; where to place the pointers to it
+	clr	@r3			; assume nothing was passed
+10$:	tstb	@r5			; all done?
+	beq	50$			; yes, exit this routine
+	cmpb	@r5	,#space		; while (*ch && *ch == space) ch++
+	bne	20$			; not a space, go copy the data
+	inc	r5			; a space found, check next one
+	br	10$			; next
+20$:	mov	r4	,(r3)+		; insert current address
+	clr	@r3			; ensure next one is cleared out
+30$:	tstb	@r5			; all done with this line?
+	beq	40$			; yes, exit
+	cmpb	@r5	,#space		; space delimiter found?
+	beq	40$			; yes, setup for next one
+	movb	(r5)+	,(r4)+		; no, copy some data over
+	br	30$			; next please
+40$:	clrb	(r4)+			; ensure .asciz please
+	br	10$			; next subtopic
+50$:	unsave	<r5,r4,r3>
+	return
+
+
+	.sbttl	Find the topic in the help file
+
+;	input:	topics	= list of addresses of text to match
+;	return:	 r0	= 0 if success
+;			= 1 if not found
+;			= 2 if match and wildcarded topic/subtopic
+
+; /BBS/	modified to scan an internal index and return pointer in rmsidx
+;	to block and offset of beginning of desired text in KRTHLP.HLP
+
+hfind:	save	<r2,r3,r4,r5>
+	mov	#topics	,r5		; point to the help topic list
+	mov	#'1	,r2		; current topic level
+	clrb	htopic			; clear out header
+	call	loahlp			; /63/ load HELP text index overlay
+	mov	r0	,r4		; /63/ pointer to fake RMS list
+
+10$:	tst	@r5			; anything to look for?
+	beq	110$			; no, just leave pointing at beginning
+	mov	@r4	,r1		; /BBS/ get address of ascii topic
+	beq	100$			; /BBS/ end of list, return(1)
+	cmpb	@r1	,r2		; topic levels match up?
+	blo	100$			; /BBS/ if gt then quit looking..
+	bne	70$			; no, read another record then
+	inc	r1			; /BBS/ skip over the level flag now
+	inc	r1			; /BBS/ skip over space
+	mov	(r5)	,r3		; get pointer to text to match up
+	cmpb	(r3)	,#'*		; wildcarding?
+	beq	80$			; yes, return(2)
+
+20$:	tstb	(r3)			; found end of the desired topic?
+	beq	60$			; ya, check next level topic needed
+	tstb	(r1)			; /BBS/ end of the line yet?
+	beq	70$			; yes
+	movb	(r1)+	,r0		; /BBS/ no, get next byte
+	cmpb	r0	,#'a!40		; is this a lower case letter?
+	blo	30$			; nope
+	cmpb	r0	,#'z!40		; maybe, if a "z" or below
+	bhi	30$			; no
+	bicb	#40	,r0		; ya, convert to upper case
+30$:	cmpb	(r3)	,#'_		; /63/ did user type an underscore?
+	bne	40$			; /63/ no
+	cmpb	r0	,#'-		; /63/ ya, looking for a dash?
+	beq	50$			; /63/ ya, call it a match
+40$:	cmpb	(r3)	,r0		; /63/ do the characters match up?
+	bne	70$			; /63/ no, read another record
+50$:	inc	r3			; /63/ yes, keep checking them
+	br	20$			; /63/
+
+60$:	mov	r2	,backlev	; /BBS/ save this before the bump
+	mov	r4	,backup		; /BBS/ save copy of RMS index
+	inc	r2			; increment level # and read
+	tst	(r5)+			; another record from the help file
+	mov	@r4	,r1		; /BBS/ recover pointer
+	inc	r1			; /BBS/ bump past topic level number
+	strcat	#htopic	,r1		; /BBS/ build up a header record
+	clr	prmptd			; /62/ do main topic when wildcarding
+70$:	add	#6	,r4		; /BBS/ bump index to next entry
+	br	10$			; then back for more
+
+80$:	tstb	htopic			; /62/ if eq it's H * or HPRINT * so
+	beq	90$			; /62/ there's no first topic to see
+	tst	prmptd			; /62/ already displayed main topic?
+	bne	90$			; /62/ ya
+	tst	subwild			; /62/ don't dump the index if first
+	bne	90$			; /62/ char of inout is a "*"
+	save	<r1>			; /62/ no, stash this address..
+	mov	backup	,rmsidx		; /62/ prep to dump the main text
+	mov	backlev	,toplev		; /62/ for a wildcarded [sub]topic
+	clr	wild			; /62/ but only that for the moment
+	call	hprint			; /62/ display main topic text & index
+	.newline			; /62/ format the display
+	mov	sp	,wild		; /62/ restore wildcarded status
+	unsave	<r1>			; /62/ pop address of topic name
+90$:	dec	r1			; /BBS/ back up to include a blank
+	strcpy	#hlpbuf	,r1		; /62/ used to build first header
+	mov	r2	,toplev		; save the topic level
+	mov	#2	,r0		; /62/ match with wildcarding
+	br	120$			; /62/ done
+
+100$:	call	loahlp			; /63/ load HELP text index overlay
+	mov	r0	,rmsidx		; /63/ reset to top of file
+	mov	#1	,r0		; /63/ nothing found (reached EOF)
+	clr	@r5			; /BBS/ zap pointer to ng [sub]topic
+	br	130$			; bail out
+110$:	mov	r2	,toplev		; save topic level
+	dec	toplev			; it will be off by one
+	clr	r0			; found the topic
+	sub	#6	,r4		; /BBS/ back up to last good one
+120$:	mov	r4	,rmsidx		; /BBS/ save a copy of where it is now
+	clr	backup			; /BBS/ clear nested error rmsidx buff
+130$:	unsave	<r5,r4,r3,r2>
+	return
+
+
+	.sbttl	Print help text found by HFIND
+
+;	assumes:	both PARSE and HFIND have been called already
+;	return:   r0	= if < failure, the RMS error code
+;			  if 0 success
+;			  if 1 found subtopics to print out
+
+; /BBS/	patched to support indexing for help text in KRTHLP.HLP
+
+hprint:	save	<r2,r3,r4>
+	clrb	sub.2			; /62/ init wildcarded
+	clrb	sub.3			; /62/ sub topics
+	clrb	sub.4			; /62/ nested names buffers
+	clr	r2			; /62/ init index display control flag
+	strcpy	#ttbuff	,#htopic	; get the default header string made
+	strcpy	#prbuff	,r0		; /62/ copy for select topic prompt
+	mov	#hlpbuf	,r4		; /BBS/ point to the buffer now
+	tst	wild			; /BBS/ coming in wild?
+	beq	10$			; /BBS/ nope..
+	.newline			; /BBS/ format display..
+	strcat	#ttbuff	,r4		; /62/ build up a header record for
+	wrtall	r0			; /62/ the first topic and print it
+	.newline			; /BBS/ and tag it with a newline
+	clrb	(r0)			; /BBS/ clear ttbuff name out now
+
+10$:	call	preset			; /BBS/ goto needed record in krthlp
+	bcc	30$			; /62/ it worked
+20$:	jmp	170$			; /62/ it didn't work
+
+30$:	calls	getrec	,<r4,#lun.in,#132.> ; /62/ read the next record
+	tst	r0			; error?
+	bne	20$			; /62/ yes, exit
+	clrb	hlpbuf(r1)		; ensure it's .asciz please
+	cmpb	(r4)	,#space		; leading space or control char?
+	blos	110$			; yes, a normal line to print
+	add	#6	,rmsidx		; /BBS/ keep RMS index pointer current
+	cmpb	(r4)	,toplev		; is this a lower, higher or same?
+	blo	160$			; lower level, exit
+	beq	60$			; same level
+	mov	rmsidx	,r3		; /62/ save to dump text after index
+	cmpb	(r4)	,r2		; /62/ done this particular index yet?
+	ble	50$			; /62/ ya, once is enough
+	movb	(r4)	,r0		; /62/ copy of current nesting level
+	sub	#'0+2	,r0		; /62/ convert, "2"=0 "3"=1 "4"=2
+	blt	40$			; /62/ this should never happen
+	asl	r0			; /62/ word indexing
+	strcpy	sub.0(r0),#errtxt	; /62/ stash a copy for making headers
+
+40$:	movb	(r4)	,r0		; /BBS/ keep the high byte clear while
+	mov	r0	,-(sp)		; /BBS/ passing the level number
+	call	hindex			; and print out whats leftover
+	tst	wild			; if not wildcarded
+	beq	150$			; then exit
+	.newline			; /BBS/ format wildcarded display
+
+50$:	mov	r3	,rmsidx		; /62/ now back up and do topics text
+	call	preset			; /62/ load buff with 1st block of it
+	bcs	170$			; /BBS/ it didn't work..
+
+60$:	tst	wild			; same level, is it wildcarded?
+	beq	160$			; no, we must exit
+	movb	(r4)	,r0		; /62/ copy of current nesting level
+	sub	#'0+1	,r0		; /62/ convert to an integer
+	blt	100$			; /62/ not a topic line
+	beq	70$			; /62/ level "1"  hose "2" and up..
+	dec	r0
+	beq	80$			; /62/ level "2"  hose "3" and up..
+	dec	r0
+	beq	90$			; /62/ level "3"  hose "4" and up..
+	br	100$			; /62/ level "4"  could need them all
+70$:	clrb	sub.2			; /62/ clear nested subtopic names
+80$:	clrb	sub.3			; /62/ as determined (and required)
+90$:	clrb	sub.4			; /62/ by the current topic level
+
+100$:	movb	(r4)	,r2		; /62/ topic level for index control
+	clrb	(r4)			; /62/ don't print this line
+	strcpy	#ttbuff	,#htopic	; build a header string up
+	strcat	r0	,#sub.2		; /62/ fill in as	else null in
+	strcat	r0	,#sub.3		; /62/ required by	first byte to
+	strcat	r0	,#sub.4		; /62/ nesting level	skip past ..
+	mov	@rmsidx	,r1		; /62/ copy for subtopic string build
+	inc	r1			; /62/ skip past the leading number
+	strcat	r0	,r1		; copy over leading space & topic name
+	strcpy	#errtxt	,r1		; /62/ save a copy for nested headers
+
+110$:	tstb	ttbuff			; do we need to print the next topic?
+	beq	130$			; no
+	.newline			; ya
+	wrtall	#ttbuff			; dump it please
+	tst	wild			; /BBS/ if a wildcard dump
+	bne	120$			; /BBS/ don't do this newline
+	.newline
+120$:	clrb	ttbuff			; clear topic name out now
+130$:	tstb	(r4)			; if this is a null
+	beq	140$			; don't print it
+	wrtall	r4			; ok to print, dump the text now
+140$:	.newline
+	jmp	30$			; /62/ next please
+
+150$:	mov	#1	,r0		; return(sub_topic_found)
+	br	170$
+160$:	clr	r0			; return(success)
+170$:	unsave	<r4,r3,r2>
+	return
+
+
+	.sbttl	Preset an I/O channel to an exact block and offset ; /BBS/
+
+preset:	mov	rmsidx	,r0		; get copy of indexing pointer
+	calls	prewind	,<#lun.in,2(r0),4(r0)>	; load and preset buffer
+	return				; 2(r0)=block 4(r0)=offset
+
+
+	.sbttl	Print index
+
+;	passed:	 2(sp)	= sub-topic level at which index is expected
+;	assumption:	HLPBUF is already loaded with the current record
+;			and rmsidx is pointing to it
+
+; /63/	modified to use an internal index which lives in KRTIDX.MAC
+
+hindex:	save	<r2,r4,r5>
+	mov	sp	,idxdmp		; flag that we have been here
+	clr	-(sp)			; allocate
+	clr	-(sp)			; some buffers
+	mov	sp	,r5		; and a pointer to them
+	movb	2+<5*2>(sp),2(r5)	; /BBS/ get the passed topic level
+	cmpb	2(r5)	,#'1		; is this the main menu today?
+	bhi	10$			; no, don't reposition the file
+	clrb	hlpbuf			; flag nothing's there
+10$:	wrtall	#addinf			; /63/ "Additional information .."
+	mov	#4	,(r5)		; number of topic names per line
+	mov	rmsidx	,r4		; /BBS/ recover index into RMS data
+
+20$:	mov	@r4	,r1		; /BBS/ get pointer to next record
+	beq	90$			; /BBS/ nothing left
+	cmpb	@r1	,2(r5)		; /BBS/ check topic level
+	bhi	80$			; /BBS/ higher level, ignore it
+	blo	90$			; /BBS/ lower level, we need to exit
+	; /BBS/ this displays topic names longer than 18. bytes ala VMS help
+	inc	r1			; skip the level number on the line
+	inc	r1			; then skip the space next to it
+30$:	strlen	r1			; compute the padding to next column
+	mov	r0	,r2		; get copy of length
+40$:	sub	#18.	,r2		; assume worst case 18. spaces needed
+	neg	r2			; we now have the number of spaces
+	bgt	50$			; that is, if it's a positive number
+	neg	r2			; preset for looping into next column
+	dec	(r5)			; is there a next column to overwrite?
+	bne	40$			; yes, pad to end of it
+	wrtall	#fill7			; init a newline to beginning column
+	mov	#4	,(r5)		; reset the counter now
+	br	30$			; and start fresh again..
+50$:	wrtall	r1			; add on the current name
+	dec	(r5)			; is there room left for the next one?
+	beq	70$			; nope
+	mov	#space	,r0		; load a space
+60$:	call	writ1ch			; dump it to TT
+	sob	r2	,60$		; until padded to length of 18. bytes
+	br	80$			; then back for more..
+70$:	wrtall	#fill7			; init a newline to beginning column
+	mov	#4	,(r5)		; reset the counter now
+80$:	add	#6	,r4		; bump to next entry
+	br	20$			; back for more
+
+90$:	cmp	#4	,(r5)		; is the current line blank?
+	beq	100$			; ya, skip the extra blank line
+	.newline			; no, do a newline
+	; /BBS/ end of VMS-style hindex patch..
+100$:	clr	r0			; success
+	mov	r4	,rmsidx		; /BBS/ save current RMS index pointer
+	cmp	(sp)+	,(sp)+		; pop some local buffers...
+	unsave	<r5,r4,r2>
+	mov	(sp)+	,(sp)		; move return address up
+	return
+
+
+	.sbttl	Open the help file
+
+; /BBS/ modified to check for correct version of KRTHLP.HLP..
+
+hlpopn:	mov	#rtname	,r3		; top of list of file specs to try
+10$:	tst	@r3			; end of the list yet?
+	beq	40$			; yes, can't find the help file
+	calls	fparse	,<@r3,#srcnam>	; use Kermit's DK, not the os default
+	calls	open	,<#srcnam,#lun.in,#text> ; try to open file
+	tst	r0			; did it work?
+	bne	30$			; no
+	mov	#hlpbuf	,r4		; check for correct help file
+	calls	getrec	,<r4,#lun.in,#132.> ; /63/ read the first line of it
+	tst	r0			; error?
+	bne	20$			; ya
+	clrb	hlpbuf(r1)		; no, ensure it's .asciz please
+	call	loahlp			; /63/ load overlay containing hident
+	strlen	#hident			; length of verifying string
+	calls	instr	,<r4,r1,#hident,r0> ; check it
+	tst	r0			; a match?
+	bne	50$			; found it, file is ok
+20$:	wrtall	#errhdr			; /63/ "?KRTHLP-W-"
+	wrtall	#srcnam			; the bad version's file name
+	wrtall	#errver			; /63/ " is an incorrect version",cr
+	calls	close	,<#lun.in>	; dump the channel to it
+30$:	tst	(r3)+			; prep for the
+	br	10$			; next one
+
+40$:	wrtall	#errhdr			; /63/ "?KRTHLP-W-"
+	wrtall	#errmis			; /63/ "Can't find KRTHLP.HLP ..",cr
+	mov	#er$fnf	,r0		; return file not found error
+	br	60$
+50$:	mov	sp	,inopn		; flag file is open so PF2 will know
+	clr	r0			; success
+60$:	return
+
+	.end
+

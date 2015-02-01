@@ -1,0 +1,1091 @@
+	.title	KRTPAK.MIN  Packet driver
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Y..
+
+;	Change Software, Toledo, Ohio
+;	University of Toledo, Toledo, Ohio
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTDEF.MIN"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MIN failed>
+
+	.mcall	.CLOSE	,.PURGE
+
+	BADCHK	==	377
+	DEFCHK	==	'1
+	DEFDLY	==	6
+	IN$TRY	==	5
+	MX$TRY	==	20
+	MYCHKT	==	defchk
+	MYEOL	==	cr
+	MYQUOTE	==	'#
+	MYPAD	==	0
+	MYPCHAR	==	0
+	MYQBIN	==	'&
+	MYREPT	==	176
+	MYRTMO	==	10.
+	MYSTMO	==	13.
+	TIMOUT	==	'T&137
+
+
+	.sbttl	Local and some global data
+
+	.psect	$pdata
+aspace::.byte	40 ,0
+null::	.byte	 0 ,0
+e$par:	.asciz	", parity is possibly being introduced"
+e$retr:	.asciz	"Retry limit reached"
+e$sync:	.asciz	"Packet serial numbers are out of sync"
+R20$:	.asciz	"<<< RPACK - "
+RP2$:	.asciz	"BAD Checksum: RCV,CALC = "
+RX2$:	.asciz	<cr><lf>
+S2$:	.asciz	">>> SPACK - "
+	.even
+
+
+	.psect	$code
+	.sbttl	Decide where to get the next character
+
+getcr0::tst	getcroutine
+	bne	10$
+	call	fgetcr0
+	br	100$
+10$:	call	@getcroutine
+100$:	return
+
+tgetcr::tst	tgetaddr
+	beq	90$
+	movb	@tgetaddr,r1
+	beq	90$
+	inc	tgetaddr
+	clr	r0
+	br	100$
+90$:	mov	#er$eof	,r0
+	clr	getcroutine
+100$:	return
+
+
+	.sbttl	Get next file to send
+
+getnxt::save	<r1>
+	calls	lookup	,<#srcnam,#filnam>
+	tst	r0
+	beq	100$
+	cmp	r0	,#er$nmf
+	beq	20$
+	cmp	r0	,#er$fnf
+	bne	30$
+20$:	tst	index
+	bne	100$
+	mov	#er$fnf	,r0
+30$:	mov	r0	,-(sp)
+	calls	syserr	,<r0,#errtxt>
+	calls	error	,<#3,#errtxt,#aspace,#filnam>
+	.purge	#lun.sr
+	mov	(sp)+	,r0
+100$:	unsave	<r1>
+	return
+
+
+	.sbttl	Read incoming packet
+
+	O$LEN	=  0
+	O$SEQ	=  2
+	O$TYP	=  4
+	.TYP	=  0
+	.CCHECK	=  2
+	.RCHECK	=  4
+	.LEN	=  6
+	.TIMEO	= 10
+	.SEQ	= 12
+	.SIZE	= 14
+	.TOGO	= 26
+	.HDTYPE	= 20
+	.CBUFF	= 22
+	.LSIZE	= 24
+
+rpack$::save	<r1,r2,r3,r4>
+	clr	recbit
+	sub	#.lsize	,sp
+	mov	sp	,r4
+	sub	#$allsiz,sp
+	call	waitsoh
+	tst	r0
+	beq	5$
+	jmp	95$
+
+5$:	mov	sp	,r3
+	mov	sp	,.cbuff(r4)
+	call	rpakin
+	call	rpakrd
+	bcs	95$
+	bisb	r1	,recbit
+	bic	#^c177	,r1
+	cmpb	r1	,recsop
+	beq	5$
+	movb	r1	,(r3)+
+	unchar	r1	,r0
+	mov	r0	,.hdtype(r4)
+	cmp	r0	,#2
+	ble	15$
+
+14$:	sub	#2	,r0
+	sub	chksiz	,r0
+	bge	15$
+	clr	r0
+15$:	mov	r0	,.len(r4)
+
+	call	rpakrd
+	bcs	95$
+	bisb	r1	,recbit
+	bic	#^c177	,r1
+	cmpb	r1	,recsop
+	beq	5$
+	movb	r1	,(r3)+
+	unchar	r1	,.seq(r4)
+
+	call	rpakrd
+	bcs	95$
+	bisb	r1	,recbit
+	bic	#^c177	,r1
+	cmpb	r1	,recsop
+	beq	5$
+	movb	r1	,(r3)+
+	mov	r1	,.typ(r4)
+
+	tst	.hdtype(r4)
+	bne	19$
+	call	rdexhd
+	tst	r0
+	bgt	5$
+	bmi	96$
+
+19$:	mov	.len(r4),.togo(r4)
+	cmp	.togo(r4),4(r5)
+	blos	190$
+	mov	4(r5)	,.togo(r4)
+190$:	mov	@r5	,r2
+
+20$:	tst	.togo(r4)
+	beq	30$
+	call	rpakrd
+	bcs	95$
+	tst	parity
+	bne	21$
+	tst	image
+	bne	23$
+21$:	bic	#^c177	,r1
+23$:	cmpb	r1	,recsop
+	beq	5$
+	cmp	.size(r4),#maxlng
+	bhis	25$
+	movb	r1	,(r2)+
+	movb	r1	,(r3)+
+
+25$:	inc	.size(r4)
+	dec	.togo(r4)
+	br	20$
+
+30$:	clrb	@r2
+	clrb	@r3
+	mov	sp	,r3
+	call	rpakck
+	bcs	95$
+	call	rpakfi
+	br	100$
+
+95$:	mov	2(r5)	,r1
+	mov	#timout	,o$typ(r1)
+	mov	#timout	,.typ(r4)
+	clr	o$len(r1)
+	clr	.len(r4)
+	clr	.seq(r4)
+96$:	call	rpakst
+
+100$:	add	#.lsize+$allsiz,sp
+	unsave	<r4,r3,r2,r1>
+	return
+
+
+	.sbttl	RPACK$ wait for a start of packet char (SOH)
+
+waitsoh:clr	r1
+10$:	cmpb	r1	,recsop
+	beq	100$
+	mov	sertim	,r0
+	bne	11$
+	movb	senpar+p.time,r0
+11$:	calls	binrea	,<r0>
+	tst	r0
+	bne	30$
+	bic	#^c177	,r1
+20$:	call	rawio
+	br	10$
+30$:	clr	r1
+100$:	return
+
+
+	.sbttl	RPACK$ initialization
+
+rpakin:	mov	r4	,r0
+	mov	#11	,r1
+10$:	clr	(r0)+
+	sob	r1	,10$
+	bisb	senpar+p.time,.timeo(r4)
+	mov	2(r5)	,r0
+	clr	(r0)+
+	clr	(r0)+
+	clr	(r0)+
+	return
+
+
+	.sbttl	RPACK$ read with time_out
+
+rpakrd:	calls	binrea	,<.timeo(r4)>
+	tst	r0
+	bne	110$
+	call	rawio
+	clr	r0
+	return
+110$:	sec
+	return
+
+
+	.sbttl	RPACK$ extended header type 0 for long packets
+
+rdexhd:	mov	r2	,-(sp)
+	mov	r5	,-(sp)
+	call	rpakrd
+	bcs	90$
+	bic	#^c177	,r1
+	cmpb	r1	,recsop
+	beq	80$
+	movb	r1	,(r3)+
+	unchar	r1	,r5
+	mul	#95.	,r5
+	call	rpakrd
+	bcs	90$
+	bic	#^c177	,r1
+	cmpb	r1	,recsop
+	beq	80$
+	movb	r1	,(r3)+
+	unchar	r1	,r1
+	add	r1	,r5
+	sub	chksiz	,r5
+	mov	r5	,.len(r4)
+
+	mov	.cbuff(r4),r5
+	mov	#5	,r1
+	clr	-(sp)
+10$:	clr	r0
+	bisb	(r5)+	,r0
+	add	r0	,(sp)
+	sob	r1	,10$
+	mov	(sp)+	,r0
+	mov	r0	,r2
+	bic	#^c300	,r2
+	ash	#-6	,r2
+	add	r0	,r2
+	bic	#^c77	,r2
+
+	call	rpakrd
+	bcs	90$
+	bic	#^c177	,r1
+	cmpb	r1	,recsop
+	beq	80$
+	movb	r1	,(r3)+
+	unchar	r1	,r1
+	cmpb	r1	,r2
+	bne	85$
+	clr	r0
+	br	100$
+
+80$:	mov	#1	,r0
+	br	100$
+
+85$:	mov	#badchk	,r0
+	br	95$
+90$:	mov	#timout	,r0
+	clr	.len(r4)
+95$:	mov	2(sp)	,r5
+	mov	2(r5)	,r1
+	clr	o$len(r1)
+	mov	r0	,o$typ(r1)
+	mov	r0	,.typ(r4)
+	mov	#-1	,r0
+100$:	mov	(sp)+	,r5
+	mov	(sp)+	,r2
+	return
+
+
+	.sbttl	RPACK$ get and convert the checksum
+
+rpakck:	save	<r3>
+	clr	r3
+	call	rpakrd
+	bcs	110$
+	bisb	r1	,recbit
+	bic	#^c177	,r1
+	unchar	r1	,r3
+	cmpb	chktyp	,#defchk
+	blos	10$
+	 ash	#6	,r3
+	 call	rpakrd
+	 bcs	110$
+	 bic	#^c177	,r1
+	 unchar	r1	,r1
+	 bisb	r1	,r3
+	 cmpb	chktyp	,#'3
+	 bne	10$
+	 ash	#6	,r3
+	 call	rpakrd
+	 bcs	110$
+	 bic	#^c177	,r1
+	 unchar	r1	,r1
+	 bisb	r1	,r3
+10$:	clc
+110$:	mov	r3	,.rcheck(r4)
+	unsave	<r3>
+	return
+
+
+	.sbttl	RPACK$ end of packet housekeeping
+
+rpakfi:	mov	r3	,-(sp)
+	call	checks
+	mov	(sp)+	,.ccheck(r4)
+	cmpb	.ccheck(r4),.rcheck(r4)
+	beq	10$
+	mov	#badchk	,.typ(r4)
+10$:	mov	2(r5)	,r1
+	mov	.len(r4),(r1)+
+	mov	.seq(r4),(r1)+
+	mov	.typ(r4),(r1)
+	call	rpakst
+	jmp	rpaklo
+
+
+	.sbttl	RPACK$ statistics, logging, resonating packets fix
+
+rpakst:	cmpb	.typ(r4),#'A&137
+	blo	110$
+	cmpb	.typ(r4),#'Z&137
+	bhi	110$
+	asr	nakrec
+	cmpb	.typ(r4),#'N&137
+	bne	55$
+	bis	#4	,nakrec
+55$:	cmp	nakrec	,#4+1
+	bge	67$
+60$:	cmpb	.typ(r4),#timout
+	bne	77$
+67$:	call	hose
+	clr	nakrec
+
+77$:	 movb	.typ(r4),r1
+	 sub	#100	,r1
+	 asl	r1
+	 asl	r1
+	 add	#1	,pcnt.r+2(r1)
+	 adc	pcnt.r+0(r1)
+	 add	#1	,pcnt.r+2
+	 adc	pcnt.r+0
+
+110$:	bit	#log$pa	,trace
+	beq	130$
+121$:	calls	dskdmp	,<#R20$,.seq(r4),.typ(r4),.len(r4),@r5>
+130$:	return
+
+
+	.sbttl	RPACK$ packet logging
+
+rpaklo:	cmp	.rcheck(r4),.ccheck(r4)
+	beq	110$
+	save	<r0,r1>
+	bit	#log$pa	,trace
+	beq	100$
+	sub	#100	,sp
+	mov	sp	,r1
+	strcpy	r1	,#RP2$
+	strlen	r1
+	add	r0	,r1
+	deccvt	.rcheck(r4),r1
+	add	#6	,r1
+	movb	#comma	,(r1)+
+	deccvt	.ccheck(r4),r1
+	add	#6	,r1
+	clrb	@r1
+	mov	sp	,r1
+	strlen	r1
+	calls	putrec	,<r1,r0,#lun.lo>
+	tst	r0
+	beq	30$
+	call	logerr
+30$:	add	#100	,sp
+100$:	unsave	<r1,r0>
+110$:	return
+
+
+	.sbttl	RPACK$ raw I/O logging, chars to RPACK debug display
+
+rawio:	bit	#log$io	,trace
+	beq	10$
+	save	<r0,r1>
+	clr	r0
+	bisb	r1	,r0
+	mov	#lun.lo	,r1
+	call	putcr0
+	tst	r0
+	beq	1$
+	call	logerr
+1$:	unsave	<r1,r0>
+10$:	return
+
+
+	.sbttl	Send a packet
+
+spack$::save	<r1,r2,r3,r4>
+	call	spakin
+	sub	#$allsiz,sp
+	mov	sp	,r4
+	clr	-(sp)
+	tst	prexon
+	beq	5$
+	movb	#xon	,(r4)+
+	inc	@sp
+5$:	setpar	sensop	,(r4)+
+	mov	r4	,r2
+	inc	@sp
+	mov	4(r5)	,r0
+	mov	#maxpak	,r1
+	cmp	senlng	,r1
+	blos	7$
+	sub	chksiz	,r1
+	sub	#2	,r1
+7$:	cmp	r0	,r1
+	blos	15$
+	tst	senlng
+	beq	10$
+
+	mov	r2	,-(sp)
+	mov	#space	,-(sp)
+	setpar	#space	,(r4)+
+	tochar	2(r5)	,r1
+	add	r1	,(sp)
+	setpar	r1	,(r4)+
+	movb	(r5)	,r1
+	bicb	#40	,r1
+	add	r1	,(sp)
+	setpar	r1	,(r4)+
+	mov	r0	,r3
+	clr	r2
+	add	chksiz	,r3
+	div	#95.	,r2
+	tochar	r2	,r2
+	tochar	r3	,r3
+	setpar	r2	,(r4)+
+	add	r2	,(sp)
+	setpar	r3	,(r4)+
+	add	r3	,(sp)
+	mov	(sp)+	,r0
+	mov	r0	,r2
+	bic	#^c300	,r2
+	ash	#-6	,r2
+	add	r0	,r2
+	bic	#^c77	,r2
+	tochar	r2	,r2
+	setpar	r2	,(r4)+
+	mov	(sp)+	,r2
+	add	#7	,(sp)
+	br	20$
+
+10$:	mov	#maxpak-3,r0
+15$:	add	#2	,r0
+	add	chksiz	,r0
+	clr	r1
+	tochar	r0	,r1
+	setpar	r1	,(r4)+
+	inc	@sp
+	tochar	2(r5)	,r0
+	setpar	r0	,(r4)+
+	inc	@sp
+	movb	@r5	,r0
+	bicb	#40	,r0
+	setpar	r0	,(r4)+
+	inc	@sp
+
+20$:	mov	4(r5)	,r1
+	beq	40$
+	mov	6(r5)	,r3
+
+30$:	clr	r0
+	bisb	(r3)+	,r0
+	setpar	r0	,(r4)+
+	inc	@sp
+	sob	r1	,30$
+
+40$:	clrb	@r4
+	mov	r2	,-(sp)
+	call	checks
+	mov	(sp)+	,r2
+	call	spakck
+	add	r0	,@sp
+	setpar	conpar+p.eol,(r4)+
+	inc	@sp
+	mov	(sp)+	,r1
+	mov	sp	,r4
+	calls	binwri	,<r4,r1>
+	call	spakfi
+	add	#$allsiz,sp
+	unsave	<r4,r3,r2,r1>
+	return
+
+
+	.sbttl	SPACK$ logging, padding, packet type stats
+
+spakin:	bit	#log$pa	,trace
+	beq	5$
+1$:	calls	dskdmp	,<#S2$,2(r5),@r5,4(r5),6(r5)>
+
+5$:	tst	pauset
+	beq	6$
+	calls	suspend	,<pauset>
+6$:	clr	r1
+	bisb	conpar+p.npad,r1
+	beq	20$
+	mov	#conpar+p.padc,r2
+10$:	calls	binwri	,<r2,#1>
+	sob	r1	,10$
+
+20$:	movb	@r5	,r1
+	cmpb	r1	,#'A&137
+	blo	30$
+	cmpb	r1	,#'Z&137
+	bhi	30$
+	 sub	#100	,r1
+	 asl	r1
+	 asl	r1
+	 add	#1	,pcnt.s+2(r1)
+	 adc	pcnt.s+0(r1)
+	 add	#1	,pcnt.s+2
+	 adc	pcnt.s+0
+30$:	return
+
+
+	.sbttl	SPACK$ compute checksum
+
+spakck:	clr	r0
+	cmpb	chktyp	,#defchk
+	blos	20$
+	cmpb	chktyp	,#'3
+	bne	10$
+	mov	r2	,r1
+	 ash	#-14	,r1
+	 bic	#^c17	,r1
+	 tochar	r1	,@r4
+	 setpar	@r4	,(r4)+
+	 inc	r0
+
+10$:	 mov	r2	,r1
+	 ash	#-6	,r1
+	 bic	#^c77	,r1
+	 tochar	r1	,@r4
+	 setpar	@r4	,(r4)+
+	 inc	r0
+	 bic	#^c77	,r2
+
+20$:	tochar	r2	,@r4
+	setpar	@r4	,(r4)+
+	inc	r0
+	return
+
+
+	.sbttl	SPACK$ log to disk
+
+spakfi:	bit	#log$io	,trace
+	beq	230$
+	save	<r0,r1,r2,r4>
+	mov	r1	,r2
+	beq	220$
+210$:	clr	r0
+	bisb	(r4)+	,r0
+	mov	#lun.lo	,r1
+	call	putcr0
+	tst	r0
+	beq	213$
+	call	logerr
+	br	220$
+213$:	sob	r2	,210$
+220$:	unsave	<r4,r2,r1,r0>
+230$:	return
+
+
+	.sbttl	Compute checksum
+
+checks:	save	<r0,r1,r2,r3>
+	mov	10+2(sp),r2
+	cmpb	chktyp	,#'3
+	bne	5$
+	strlen	r2
+	calls	crcclc	,<r2,r0>
+	mov	r0	,r2
+	br	90$
+
+5$:	clr	r1
+10$:	clr	r3
+	bisb	(r2)+	,r3
+	beq	20$
+	tst	parity
+	beq	15$
+	bic	#^c177	,r3
+15$:	bic	#170000	,r1
+	add	r3	,r1
+	br	10$
+
+20$:	mov	r1	,r2
+	cmpb	chktyp	,#'2
+	beq	30$
+	bic	#^c300	,r2
+	ash	#-6	,r2
+	add	r1	,r2
+	bic	#^c77	,r2
+	br	90$
+
+30$:	bic	#170000	,r2
+90$:	mov	r2	,10+2(sp)
+100$:	unsave	<r3,r2,r1,r0>
+	return
+
+
+	.sbttl	CRC calculation
+
+crcclc:	save	<r1,r2,r3,r4,r5>
+	clr	r0
+	mov	@r5	,r3
+	mov	2(r5)	,r4
+	beq	100$
+
+10$:	clr	r1
+	bisb	(r3)+	,r1
+	tst	parity
+	beq	20$
+	bic	#^c177	,r1
+20$:	ixor	r0	,r1
+	mov	r1	,r2
+	ash	#-4	,r2
+	bic	#^c17	,r2
+	bic	#^c17	,r1
+	asl	r1
+	asl	r2
+	mov	crctb2(r1),r1
+	ixor	crctab(r2),r1
+	swab	r0
+	bic	#^c377	,r0
+	ixor	r1	,r0
+	sob	r4	,10$
+
+100$:	unsave	<r5,r4,r3,r2,r1>
+	return
+
+	.save
+	.psect	$pdata
+crctab:	.word	     0 ,010201 ,020402 ,030603 ,041004 ,051205 ,061406 ,071607
+	.word	102010 ,112211 ,122412 ,132613 ,143014 ,153215 ,163416 ,173617
+crctb2:	.word	     0 ,010611 ,021422 ,031233 ,043044 ,053655 ,062466 ,072277
+	.word	106110 ,116701 ,127532 ,137323 ,145154 ,155745 ,164576 ,174367
+	.restore
+
+
+	.sbttl	Buffer file being sent
+
+buffil::save	<r2,r3,r4,r5>
+	mov	@r5	,r4
+	clr	r3
+	mov	senlng	,r5
+	bne	5$
+4$:	bisb	conpar+p.spsiz,r5
+5$:	cmp	r5	,senlen
+	ble	7$
+	mov	senlen	,r5
+7$:	sub	#10	,r5
+
+10$:	tst	dorpt
+	beq	50$
+
+15$:	call	gnc
+	bcs	30$
+	tst	rptinit
+	beq	20$
+	clr	rptinit
+	clr	rptcount
+	movb	r1	,rptlast
+20$:	cmpb	r1	,rptlast
+	bne	30$
+	cmp	rptcount,#maxpak
+	bge	30$
+	inc	rptcount
+	br	15$
+
+30$:	mov	r1	,rptsave
+	tst	rptcount
+	beq	90$
+
+	cmp	rptcount,#2
+	bgt	40$
+35$:	clr	r1
+	bisb	rptlast	,r1
+	call	200$
+	dec	rptcount
+	bne	35$
+	br	45$
+
+40$:	movb	rptquo	,(r4)+
+	inc	r3
+	tochar	rptcount,(r4)+
+	inc	r3
+	clr	r1
+	bisb	rptlast	,r1
+	call	200$
+45$:	movb	rptsave	,rptlast
+	clr	rptcount
+	tst	r0
+	bne	90$
+	inc	rptcount
+	br	70$
+
+50$:	call	gnc
+	bcs	90$
+	call	200$
+
+70$:	cmp	r3	,r5
+	blo	10$
+
+90$:	mov	r3	,r1
+	beq	100$
+	clr	r0
+100$:	unsave	<r5,r4,r3,r2>
+	return
+
+
+	.sbttl	Actually quote and stuff the char for BUFFIL
+
+200$:	tst	do8bit
+	beq	210$
+	tstb	r1
+	bpl	210$
+	 movb	ebquot	,(r4)+
+	 inc	r3
+	 bicb	#200	,r1
+210$:	clr	r2
+	bisb	r1	,r2
+	bic	#^c177	,r2
+
+	cmpb	r2	,#space
+	blo	220$
+	cmpb	r2	,#del
+	beq	220$
+	cmpb	r2	,senpar+p.qctl
+	beq	220$
+	tst	do8bit
+	beq	215$
+	cmpb	r2	,ebquot
+	beq	220$
+215$:	tst	dorpt
+	beq	230$
+	cmpb	r2	,rptquo
+	bne	230$
+
+220$:	movb	senpar+p.qctl,(r4)+
+	inc	r3
+	cmpb	r2	,#37
+	blos	225$
+	cmpb	r2	,#del
+	bne	230$
+225$:	ctl	r1	,r1
+	ctl	r2	,r2
+230$:	tst	image
+	beq	240$
+	movb	r1	,(r4)+
+	br	250$
+240$:	movb	r2	,(r4)+
+250$:	inc	r3
+	return
+
+
+	.sbttl	Get the next char
+
+gnc:	mov	#lun.in	,r0
+	call	getcr0
+	tst	r0
+	beq	100$
+	sec
+	return
+100$:	add	#1	,fileout+2
+	adc	fileout+0
+	clc
+	return
+
+
+	.sbttl	Like bufemp, but return data to a buffer
+
+bufunp::save	<r2,r3,r4,r5>
+	mov	@r5	,r2
+	clr	r3
+	mov	2(r5)	,r4
+
+10$:	clr	r0
+	bisb	(r2)+	,r0
+	beq	100$
+	bic	#^c177	,r0
+	mov	#1	,r5
+	tst	dorpt
+	beq	20$
+	cmpb	r0	,rptquo
+	bne	20$
+	clr	r5
+	bisb	(r2)+	,r5
+	bic	#^c177	,r5
+	unchar	r5	,r5
+	tst	r5
+	bgt	15$
+	mov	#1	,r5
+15$:	clr	r0
+	bisb	(r2)+	,r0
+	bic	#^c177	,r0
+20$:	cmpb	r0	,senpar+p.qctl
+	bne	30$
+	clr	r0
+	bisb	(r2)+	,r0
+	clr	r1
+	bisb	r0	,r1
+	bic	#^c177	,r1
+	cmpb	r1	,senpar+p.qctl
+	beq	30$
+	ctl	r0	,r0
+
+30$:	movb	r0	,(r4)+
+	inc	r3
+	sob	r5	,30$
+	br	10$
+
+100$:	clrb	@r4
+	mov	r3	,r1
+	clr	r0
+	unsave	<r5,r4,r3,r2>
+	return
+
+
+	.sbttl	Dump a debug packet to disk
+	.enabl	lsb
+
+dskdmp::save
+	sub	#64	,sp
+	mov	sp	,r1
+	mov	#64	,r0
+10$:	movb	#space	,(r1)+
+	sob	r0	,10$
+	mov	sp	,r1
+	mov	(r5)+	,r0
+	call	200$
+	dec	r1
+	mov	#110$	,r0
+	call	200$
+	inc	r1
+	mov	(r5)+	,r0
+	deccvt	r0	,r1	,#2
+	add	#6	,r1
+	mov	#120$	,r0
+	call	200$
+	inc	r1
+	movb	(r5)+	,(r1)
+	inc	r5
+	cmpb	(r1)	,#badchk
+	bne	12$
+	movb	#'*	,(r1)
+	br	17$
+12$:	cmpb	(r1)	,#'A&137
+	blt	13$
+	cmpb	(r1)	,#'Z&137
+	ble	17$
+13$:	movb	#'?	,(r1)
+17$:	add	#5	,r1
+	mov	#130$	,r0
+	call	200$
+	inc	r1
+	mov	(r5)+	,r2
+	deccvt	r2	,r1	,#4
+	add	#4	,r1
+	clrb	@r1
+	mov	sp	,r1
+	strlen	r1
+	calls	putrec	,<r1,r0,#lun.lo>
+	tst	r0
+	beq	27$
+	call	logerr
+	br	50$
+27$:	mov	@r5	,r3
+	cmp	r2	,#$allsiz-2
+	ble	29$
+	mov	#$allsiz-2,r2
+29$:	mov	r2	,r4
+30$:	mov	r4	,r0
+	ble	50$
+	cmp	r0	,#72.
+	ble	40$
+	mov	#72.	,r0
+40$:	call	300$
+	calls	putrec	,<r3,r0,#lun.lo>
+	tst	r0
+	beq	47$
+	call	logerr
+	br	50$
+47$:	add	#72.	,r3
+	sub	#72.	,r4
+	br	30$
+
+50$:	add	#64	,sp
+	unsave
+	return
+
+200$:	movb	(r0)+	,(r1)+
+	bne	200$
+	dec	r1
+	movb	#space	,(r1)+
+	return
+
+300$:	save	<r2,r1,r0>
+	mov	#4	,r2
+	mov	#lun.lo	,r1
+310$:	mov	#space	,r0
+	call	putcr0
+	sob	r2	,310$
+	unsave	<r0,r1,r2>
+	return
+
+	.save
+	.psect	$pdata
+110$:	.asciz	"Paknum"
+120$:	.asciz	"Type"
+130$:	.asciz	"Length"
+140$:	.asciz	"    "
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Error message handler
+
+error::	save	<r1,r2,r3,r4,r5>
+	mov	(r5)+	,r1
+	beq	100$
+
+	sub	#erbfsiz+2,sp
+	mov	sp	,r4
+	mov	#erbfsiz,r2
+
+30$:	mov	(r5)+	,r3
+40$:	movb	(r3)+	,@r4
+	beq	50$
+45$:	inc	r4
+	sob	r2	,40$
+	br	60$
+50$:	dec	r2
+	beq	60$
+	sob	r1	,30$
+60$:	clrb	@r4
+
+	mov	sp	,r4
+	strlen	r4
+	spack	#msg$error,paknum,r0,r4
+	bit	#log$pa	,trace
+	beq	99$
+	strlen	r4
+	calls	putrec	,<r4,r0,#lun.lo>
+	tst	r0
+	beq	99$
+	call	logerr
+99$:	add	#erbfsiz+2,sp
+100$:	unsave	<r5,r4,r3,r2,r1>
+	return
+
+
+	.sbttl	Logfile error handler
+
+logerr::calls	syserr	,<r0,#errtxt>
+	.close	#lun.lo
+	clr	trace
+	mov	#er$lwe	,r0
+	calls	syserr	,<r0,#spare1>
+	strcat	#spare1	,#RX2$
+	strcat	#spare1	,#errtxt
+	strlen	#spare1
+	spack	#MSG$ERROR,paknum,r0,#spare1
+	return
+
+
+	.sbttl	Process retry and sync errors
+
+m$retr::save	<r0>
+	bitb	#200	,recbit
+	beq	10$
+	tst	parity
+	bne	10$
+	calls	error	,<#2,#e$retr,#e$par>
+	br	100$
+10$:	calls	error	,<#1,#e$retr>
+100$:	unsave	<r0>
+	return
+
+m$sync::save	<r0>
+	calls	error	,<#1,#e$sync>
+	unsave	<r0>
+	return
+
+
+	.sbttl	Compute parity for an outgoing 8-bit link
+
+dopari::save	<r0,r1>
+	mov	parity	,r0
+	beq	10$
+	asl	r0
+	mov	6(sp)	,r1
+	jsr	pc	,@pardsp(r0)
+	mov	r1	,6(sp)
+10$:	unsave	<r1,r0>
+	return
+
+mark.p:	bisb	#200	,r1
+	return
+
+spac.p:	bicb	#200	,r1
+	return
+
+odd.p:	bic	#^c177	,r1
+	tstb	partab(r1)
+	bne	100$
+	bisb	#200	,r1
+100$:	return
+
+even.p:	bic	#^c177	,r1
+	tstb	partab(r1)
+	beq	100$
+	bisb	#200	,r1
+100$:	return
+
+	.save
+	.psect	$pdata
+pardsp:	.word	0  ,odd.p  ,even.p  ,mark.p  ,spac.p
+partab:	.byte	0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0
+	.byte	1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1
+	.byte	1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1
+	.byte	0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0
+	.byte	1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1
+	.byte	0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0
+	.byte	0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0
+	.byte	1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1
+	.restore
+
+	.end

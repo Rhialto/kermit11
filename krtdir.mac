@@ -1,0 +1,811 @@
+	.title	KRTDIR	RT-11 directory services
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	buffil back to root (KRTPAK), for speed and room now available
+;	add support for SET WILDCARDS
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	reorganized and substantially sped up
+;	added .csispc comma delimiter parsing
+;	fixed wildcard "%" match to no longer match on blanks
+;	add version testing to support RT-11 V4
+;	moved buffil here, has to be if not in root for getcr0 @sdodir..
+;	make hd$fir=:6 so badly initted disks don't crash DIR
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	this module has been extensively modified, please refer to it..
+;	add TSX+ create time, date slug, prot status, summary lines, etc
+;	corrected bugs in error handling
+;	added d$cvtnum for file sizes/sums larger than 32767.
+;	"DK" now uses defdir, not op system DK, needs fparse in krtrms
+;	ascdat patched for RT-11 V5.5, now also used for cvtdat
+;	add dirflg to control embedded blanks in file name
+;	getnth used to reread until context=diridx, now context saves it
+;	added summary only flag, for use with SPACE and REM SPACE
+;	force USR to re-read dir segment, allowing one to swap floppies..
+
+;	17-Sep-86  13:23:00  Handle Labels stuffed in by VMS Exchange
+;	18-Jun-84  16:33:01  Brian Nelson
+;
+;	Copyright 1984 Change Software, Inc
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+; /62/	.PVAL bypassed for V4, also expanded to allow assembly under same
+
+	.mcall	.CSISPC ,.DATE	,.GTIM	,.LOCK	,.LOOKUP
+	.mcall	.READW	,.PURGE	,.RCTRLO,.UNLOCK
+
+
+	.macro	R0toR2	ptr		; /62/ added..
+	.if nb ptr
+	mov	ptr	,r0		; load r0 if an arg is supplied
+	.endc
+	call	R0toR2			; copy string in (r0) to (r2)
+	.endm	R0toR2
+
+
+	.sbttl	Data offsets
+
+	SYSPTR	=	54		; /62/ pointer to RMON base
+		BLKEY	=	256	; /BBS/ RMON dir seg number in memory
+
+	; directory home block
+	HD$BLK	=	1		; vbn of the home block
+	HD$FIR	=	6		; /62/ first dir segment block number
+	HD$SYS	=	760		; volume id (DECRT11, DECVMSEX)
+
+	; directory segment header
+	H$NEXT	=	2		; next logical dir segment
+	H$EXT	=	6		; number of extra bytes per entry
+
+	; current directory entry
+	F.STAT	=	0		; status word
+	F.NAM1	=	2		; first three rad50 chars of name
+	F.NAM2	=	4		; last three rad50 chars of name
+	F.TYPE	=	6		; all three rad50 chars of type
+	F.LEN	=	10		; file size
+	F.TIME	=	12		; /BBS/ TSX+ file creation time
+	F.DATE	=	14		; creation date
+
+	; entry status word bits
+	PERM	=	2000		; permanent file
+	ENDSEG	=	4000		; end of a segment
+	PROT	=	100000		; /BBS/ protected entry
+
+
+	.sbttl	Data definitions
+
+;	STAR	=	134745		; RTEM (RSTS) .csispc for a "*"
+	STAR	=	132500		; real RT-11 .csispc for a "*"
+
+	.psect	rtdir	,rw,d,gbl,rel,con
+csidev:	.word	0 ,0 ,0 ,0		; /62/ rad50 dev name + 3 null words..
+dirsiz: .word	0			; length of a file's dir entry
+dirbuf:	.blkw	1000			; 2 block buffer for one dir segment
+dbsize	= .-dirbuf			; /62/ need this to prevent overruns..
+dirptr: .word	0			; server dirbfr read pointer
+endflg:	.word	0			; /BBS/ end of server dir listing flag
+h.next: .word	0			; link to next directory segment
+name1:	.blkb	56.			; /62/ ascii'd csinam(s), null, .even
+name2:	.blkb	12			; /62/ disk file name, for matching
+numblks:.word	0			; /BBS/ total blocks of listed files
+numfree:.word	0			; /BBS/ total blocks empty+tent files
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+L310$:	.word	0			; /58/ searched string base address
+L311$:	.word	0			; /58/ string width
+sluggy:	.blkw	41.			; /62/ slug buffer, .csispc, etc, etc.
+
+	.psect	$pdata			; /BBS/ all new..
+defext:	.word	star ,0 ,0 ,0		; /62/ input default extent is wild
+months:	.ascii "-ERR-Jan-Feb-Mar-Apr-May-Jun-Jul-Aug-Sep-Oct-Nov-Dec-" ; /BBS/
+nodate:	.asciz " No Date "		; /BBS/
+blocks:	.asciz	" Block"		; /62/ # of blocks for summary
+dcrlf:	.asciz	<cr><lf>		; a new line
+files:	.asciz	" File"			; /62/ tag line at end of dir list
+free:	.asciz	" Free block"		; /62/ free space..
+plural:	.asciz	"s"			; /63/ this allow easier translation..
+protspc:.asciz	"P  "			; where the P in protect lives
+rt:	.asciz	"DECRT11"		; /54/ home block disk id
+unpspc:	.ascii	" "			; come here for three blanks
+ prospc:.asciz	"  "			; or, come here for just two
+vms:	.asciz	"DECVMSEX"		; /54/ from EXCHANGE under VMS4.x
+	.even
+
+
+	.psect	$code
+	.sbttl	Wildcarded lookup
+
+;	L O O K U P			; /62/ merged getnth into this..
+;
+;	 (r5)	= possibly wildcarded input file specification
+;	2(r5)	= output file spec, name of file matching input spec
+;	index	= count of files found, init to 0 before first call
+;	  r0	= if <>, error code
+
+lookup::save	<r1,r2,r3>
+	tst	index			; /62/ new call sequence today?
+	bgt	10$			; /62/ no, already found a file
+	call	opndev			; ya, get the disk opened up please
+	tst	r0			; any errors?
+	bne	120$			; /62/ yes, we will have to die then
+10$:	mov	context	,r3		; /BBS/ recover where we were
+	bne	30$			; /BBS/ dir is already in progress
+	call	gethom			; read in the home block
+	tst	r0			; did it work?
+	bne	120$			; /62/ no, exit with the error please
+
+	mov	#hd$fir	,r1		; /62/ the first directory segment
+20$:	call	gethdr			; read in a dir segment
+	tst	r0			; did this work?
+	bne	120$			; /62/ no, return mapped error code
+	mov	#dirbuf ,r3		; point to the directory buffer
+	add	#5*2	,r3		; skip past the header information
+
+30$:	mov	#dirbuf	,r0		; /62/ top of the dir buffer
+	add	#dbsize	,r0		; /62/ end of the buffer
+	cmp	r3	,r0		; /62/ room for one more?
+	bhis	110$			; /62/ no, so avoid a trap to 4 here!
+	bit	#endseg ,f.stat(r3)	; end of this segment?
+	bne	100$			; yes, try the next one please
+	bit	#perm	,f.stat(r3)	; /62/ is this a real file?
+	bne	40$			; /62/ ya
+	add	f.len(r3),numfree	; /62/ no, add to total free blocks
+	br	90$			; /62/ next..
+40$:	call	match			; see if the file matches up
+	tst	r0			; well?
+	beq	90$			; no, try again please
+	inc	index			; /62/ ya, bump caller's match count
+	add	f.len(r3) ,numblks	; /62/ add size to total blocks
+	tst	summary			; /62/ need to do any file data?
+	bne	90$			; /62/ no
+	mov	2(r5)	,r2		; /62/ ya, pass buffer location
+	call	convert			; and convert name to asciz
+	mov	r2	,r0		; copy to process embedded spaces
+50$:	tstb	(r0)			; end of the string yet?
+	beq	80$			; yes
+	tst	dirflg			; /BBS/ retain embedded blanks?
+	bne	60$			; /BBS/ ya, this is for a dir display
+	cmpb	(r0)	,#space		; no, if it's a space
+	beq	70$			; then ignore it
+60$:	movb	(r0)	,(r2)+		; copy one byte
+70$:	inc	r0			; then point to the next char
+	br	50$			; and go check it
+80$:	clrb	(r2)			; ensure returned string is .asciz
+	mov	f.date(r3),lokdate	; /38/ save create date
+	mov	f.len(r3) ,loklen	; /38/ save file size
+	mov	f.stat(r3),lokstat	; /BBS/ file status word
+	mov	f.time(r3),loktime	; /BBS/ TSX+ file create time
+	add	dirsiz	,r3		; /BBS/ next time, try next one
+	mov	r3	,context	; /BBS/ save where next one is..
+	clr	r0			; success
+	br	130$
+
+90$:	add	dirsiz	,r3		; skip to the next entry please
+	br	30$			; and check it
+100$:	mov	h.next	,r1		; end of segment, check the next one
+	bne	20$			; /62/ if one is there
+110$:	mov	#er$nmf ,r0		; /BBS/ no more files..
+
+120$:	save	<r0>			; /63/ save the incoming error
+	.purge	#lun.sr			; /62/ dump the device on any error
+	clr	lokdate			; /62/ clear
+	clr	lokstat			; /62/ these
+	clr	loktime			; /62/ on
+	clr	loklen			; /62/ failure..
+	clr	dirflg			; /62/ done with this now
+	strcpy	2(r5)	,(r5)		; /62/ return input name causing error
+	unsave	<r0>			; /63/ restore the error code now
+130$:	unsave	<r3,r2,r1>
+	return
+
+
+	.sbttl	Replace "?" with "%" for RSTS/E users ; /BBS/ from K11RMS.MAC
+
+;	input:	(r5)	= address of string to process
+
+fixwil::save	<r2>
+	mov	@r5	,r2		; get the string address
+10$:	tstb	@r2			; done with the file name yet?
+	beq	30$			; yes, exit
+	cmpb	@r2	,#'?		; check for a "?" character
+	bne	20$			; no
+	movb	#'%	,@r2		; yes, replace with a percent sign
+20$:	inc	r2			; next please
+	br	10$			; back again
+30$:	unsave	<r2>
+	clr	r0			; no error
+	return
+
+
+	.sbttl	Display directory listing on terminal
+
+;	 D O D I R			; /62/ major rewrite using server code
+;
+;	 (r5)	= wildcarded filespec
+;	  r0	= if <>, error code
+
+dodir::	call	sdirini			; init directory lookup and
+	tst	r0			; pre-load output buffer
+	bne	40$			; an error occurred
+	br	20$			; enter loop writing..
+
+10$:	call	dirnex			; look for a matching file
+	bcs	30$			; done..
+	tst	endflg			; about to type the summary lines?
+	beq	20$			; no
+	.rctrlo				; ya, ensure totals are visible
+20$:	wrtall	dirbfr			; dump matching file spec to terminal
+	br	10$			; try for another match
+
+30$:	clr	r0			; no error
+40$:	return
+
+
+	.sbttl	Server directory	; /62/ condensed a bit..
+
+;	S D I R I N I  -  Initialization
+;	S D O D I R    -  Get next char
+;
+;	input:   (r5)	= wildcarded name
+;	output:   r1	= next character in the directory listing
+;		  r0	= if <>, error code
+;
+;	SDODIR is called by the server to respond to a remote directory
+;	command, returning one char at a time so BUFFIL can use it, via
+;	the GETCR0 routine.  SDIRINI must be called first, to check for
+;	a valid device and file spec, and to pre-load the date slug.
+
+sdirini::copyz	(r5)	,dirnam	,#80.	; /62/ copy name over, don't overwrite
+	clr	index			; /62/ init to
+	calls	lookup	,<dirnam,@r5>	; /62/ open device and check file spec
+	tst	r0			; /62/ well?
+	beq	10$			; /62/ no error
+	cmp	r0	,#er$nmf	; /62/ no good, but
+	bne	40$			; /62/ ignore no more files error
+10$:	clr	index			; /62/ reset match counter
+	mov	sp	,dirflg		; /62/ keep blanks in name
+	clr	endflg			; clear all done looking flag
+	mov	dirbfr	,r2		; the output buffer
+	mov	r2	,dirptr		; reset its pointer
+	mov	#sluggy	,r0		; /62/ scratch buff
+	calls	ascdat	,<r0,#-1>	; /62/ get date into a buffer
+	cmpb	#space	,(r0)		; leading space in date?
+	beq	20$			; ya, so skip adding one
+	movb	#space	,(r2)+		; no, so blank col. 1 ala RT-11
+20$:	R0toR2				; /62/ copy the date
+	tst	summary			; doing a summary only?
+	beq	30$			; /62/ nope
+	R0toR2	#dcrlf			; /62/ ya, prefix with <cr><lf>
+	R0toR2	dirnam			; /62/ display file spec for SPACE cmd
+30$:	clr	r0			; /62/ no error
+40$:	return
+
+sdodir::save	<r2,r3>
+10$:	movb	@dirptr ,r1		; get the next char please
+	beq	20$			; /63/ nothing left, reload buffer
+	inc	dirptr			; pointer++, something was there
+	clr	r0			; no errors
+	br	40$
+20$:	mov	dirbfr	,dirptr		; /63/ reset the pointer
+	clrb	@dirptr			; init the buffer
+	call	dirnex			; load next file's data into buffer
+	bcc	10$			; /63/ back to get next char loop
+30$:	mov	#er$eof ,r0		; failure, return(EOF)
+	clr	r1			; return no data also
+40$:	unsave	<r3,r2>
+	return
+
+dirnex:	mov	dirbfr	,r2		; pointer to buffer
+	mov	#sluggy	,r3		; /62/ local scratch buffer
+	tst	endflg			; /BBS/ done the tally lines yet?
+	bne	50$			; /BBS/ ya, time to bail out
+	calls	lookup	,<dirnam,r3>	; /62/ try to find a matching file
+	tst	r0			; successful?
+	bne	30$			; no
+	R0toR2	#dcrlf			; /62/ ya, prefix with <cr><lf>
+	R0toR2	r3			; /62/ copy file spec into buff
+	calls	d$cvtnum,<r3,loklen,#0>	; /BBS/ file size
+	R0toR2	r3			; /62/ append it please
+	bit	#prot	,lokstat	; /BBS/ protected file?
+	beq	10$			; /BBS/ nope..
+	R0toR2	#protspc		; /62/ ya, so flag it accordingly
+	br	20$			; /BBS/ and continue
+10$:	R0toR2	#unpspc			; /62/ three spaces..
+20$:	calls	ascdat	,<r3,lokdate>	; /62/ convert date to asciz
+	R0toR2	r3			; /62/ append the date please
+	tst	tsxsav			; /BBS/ if not TSX
+	beq	40$			; /63/ skip the file time
+	R0toR2	#prospc			; /62/ two blanks
+	calls	filtim	,<r3,loktime>	; /BBS/ make it displayable
+	R0toR2	r3			; /62/ copy that into dir string
+	br	40$
+
+30$:	cmp	r0	,#er$nmf	; no more files error?
+	bne	60$			; no
+	call	dirsum			; /63/ ya, do summary lines now
+40$:	clr	r0			; success
+	br	70$
+50$:	mov	#er$eof ,r0		; failure, return(EOF)
+60$:	sec				; indicate there was some error
+70$:	return
+
+dirsum:	mov	sp	,endflg		; /63/ flag it's all over
+	R0toR2	#dcrlf			; /62/ prefix with <cr><lf>
+	tst	summary			; doing a SPACE summary only?
+	bne	10$			; ya, skip the newline here
+	tst	index			; anything listed?
+	bgt	10$			; ya
+	R0toR2	#dcrlf			; no, so blank a line ala RT-11
+10$:	calls	d$cvtnum,<r3,index,#-1>	; number of files listed
+	R0toR2	r3			; copy to buffer
+	R0toR2	#files			; " File"
+	dec	index			; singular or plural?
+	beq	20$			; singular
+	R0toR2	#plural			; /63/ not 1, so make it plural
+20$:	movb	#comma	,(r2)+		; ","
+	calls	d$cvtnum,<r3,numblks,#-1> ; total blocks
+	R0toR2	r3			; append it please
+	R0toR2	#blocks			; " Block"
+	dec	numblks			; singular or plural?
+	beq	30$			; just one
+	R0toR2	#plural			; /63/ not 1, so make it plural
+30$:	R0toR2	#dcrlf			; <cr><lf>
+	calls	d$cvtnum,<r3,numfree,#-1> ; free blocks
+	R0toR2	r3			; put ascii number in buffer
+	R0toR2	#free			; " Free Block"
+	dec	numfree			; singular or plural?
+	beq	40$			; singular
+	R0toR2	#plural			; /63/ not 1, so make it plural
+40$:	R0toR2	#dcrlf			; <cr><lf>
+	return
+
+
+	.sbttl	Copy (r0) to (r2)	; /62/ replaces strcat here
+
+R0toR2:	movb	(r0)+	,(r2)+		; copy a byte
+	bne	R0toR2			; until hitting a null
+	dec	r2			; leave r2 on the null
+	return
+
+
+	.sbttl	Open device, build name list to search directory
+
+;	O P N D E V
+;
+;	input:	  (r5)	= file spec string
+;	output:	   r0	= if <>, error code
+
+opndev:	calls	fparse	,<(r5),#sluggy>	; /62/ check for valid device
+	tst	r0			; /BBS/ is it?
+	beq	10$			; /BBS/ ya
+	return				; /BBS/ no
+
+10$:	.purge	#lun.sr			; /62/ dump possible old device
+	mov	#sluggy	,r0		; /62/ input string address
+	copyz	r0	,dirnam		; /62/ return cleaned up file spec
+	clr	context			; /62/ init curr dir seg offset reg
+	clr	numblks			; /62/ clear total blocks of above
+	clr	numfree			; /62/ clear free space reg
+
+	sub	#ln$max+2.,sp		; /63/ .csispc input data buffer
+	mov	sp	,r1		; pointer to it
+	movb	#'=	,(r1)+		; /62/ fake an output file spec
+20$:	movb	(r0)+	,(r1)+		; copy input string to the CSI buffer
+	bne	20$			; until a null byte is found
+	mov	sp	,r1		; reset pointer (also saving sp)
+	.csispc #sluggy	,#defext ,r1	; /62/ try to parse the file spec(s)
+	mov	r1	,sp		; hose any switches, unsupported here
+	bcs	110$			; oops
+	mov	sluggy+36,csidev	; /62/ save a copy of device name only
+	calls	fetch	,<csidev>	; /62/ try to get the thing loaded
+	tst	r0			; well?
+	bne	150$			; exit with mapped error
+
+	mov	#6	,r1		; /62/ do implicit "*." wildcarding
+	mov	#sluggy+40,r0		; /62/ first input file name is here
+30$:	tst	(r0)			; /62/ does an input file name exist?
+	bne	40$			; /62/ something was indeed there
+; /63/	Following two lines are here if needed, but probably will never be..
+;	tst	dowild			; /63/ implicit wildcarding enabled?
+;	beq	40$			; /63/ not this time..
+	mov	#star	,(r0)		; /62/ nothing, convert to wildcard
+40$:	add	#10	,r0		; /62/ bump pointer to next descriptor
+	sob	r1	,30$		; /62/ do six input file descriptors
+	clr	-(r0)			; /62/ null terminate rad50 names
+
+	mov	#name1	,r0		; /62/ init this buffer with nulls
+	mov	#56./2	,r1		; /62/ clearing 2 bytes at a time
+50$:	clr	(r0)+			; /62/ is somewhat faster than one
+	sob	r1	,50$		; /62/ by one..
+
+	save	<r2>			; /63/
+	mov	#name1	,r1		; /62/ top of ascii'd names buffer
+	mov	#sluggy+36,r2		; /62/ offset to first input file spec
+60$:	tst	(r2)+			; /62/ ignore device name
+	beq	80$			; /62/ nothing left, done
+	mov	#3	,r0		; /62/ loop 3 times
+70$:	calls	rdtoa	,<r1,(r2)+>	; /62/ convert file name to ascii
+	add	#3	,r1		; /62/ increment pointer by 3 chars
+	sob	r0	,70$		; /62/ next please
+	br	60$			; /62/ then try next file name
+80$:	unsave	<r2>			; /63/
+
+	.lock				; /BBS/ lock the USR in memory
+	cmp	rt11ver	,#5		; /62/ is the RT-11 V5 or above?
+	bge	90$			; /62/ ya, .pval will work
+	tst	montyp			; /62/ if XM and V4..
+	bgt	100$			; /62/ ..tough luck
+	mov	@#sysptr,r0		; /62/ otherwise, get RMON base and
+	clr	blkey(r0)		; /63/ force USR to re-read the dir
+	br	100$
+90$:
+; /62/	.pval	#rtwork	,#blkey	,#0	; /BBS/ force USR to re-read the dir
+	MOV	#rtwork	,R0		; /62/ expanded to assemble under V4
+	MOV	#28.*^o400+2,@R0	; /62/ even though V4 can't run it
+	MOV	#blkey	,2.(R0)		; /62/
+	CLR	4.(R0)			; /62/
+	EMT	^o375			; /62/
+100$:	.lookup #rtwork	,#lun.sr,#csidev ; /62/ open the DEVICE for input
+	bcs	120$			; can not find it
+	clr	r0			; no errors
+	br	150$
+
+110$:	mov	#csierr ,r1		; .csispc error mapping
+	br	130$
+120$:	mov	#lokerr ,r1		; .lookup error mapping
+130$:	movb	@#errbyt,r0		; get the error code now
+	bpl	140$			; /51/ normal (non-fatal) RT-11 error
+	com	r0			; /51/ fatal error, flip it to map
+	mov	#faterr ,r1		; /BBS/ to a fatal error message
+140$:	asl	r0			; word indexing
+	add	r0	,r1		; now map the RT-11 error into
+	mov	@r1	,r0		; a fake RMS-11 error
+
+150$:	add	#ln$max+2,sp		; /63/ pop the .csispc input buffer
+	save	<r0>			; /63/ did an error occur?
+	beq	160$			; /51/ no
+	.purge	#lun.sr			; /51/ ya, purge the channel
+160$:	.unlock				; /BBS/ now release the USR..
+	unsave	<r0>			; /63/ restore possible error code
+	return
+
+
+	.sbttl	Read in the home block
+
+;	G E T H O M E
+;
+;	output:	   r0	= if <>, error code
+
+gethom: save	<r1,r2>			; /54/
+	.readw	#rtwork,#lun.sr,#dirbuf,#400,#hd$blk
+	bcs	50$			; it failed, bye
+	tst	rtvol			; really verify volume?
+	beq	30$			; no
+	mov	#dirbuf ,r2		; ya, get top of the buffer
+	add	#hd$sys ,r2		; now point to the volume ident
+	mov	r2	,r1		; /54/ copy of dirbuf pointer
+	mov	#rt	,r0		; /54/ check for DECRT11 id
+10$:	tstb	@r0			; /54/ done?
+	beq	30$			; /54/ yes, exit
+	cmpb	(r0)+	,(r1)+		; /54/ same?
+	beq	10$			; /54/ yes, keep looking
+	mov	#vms	,r0		; /54/ check for VMSEXCH id
+20$:	tstb	@r0			; /54/ done?
+	beq	30$			; /54/ yes, exit
+	cmpb	(r0)+	,(r2)+		; /62/ same?
+	beq	20$			; /54/ yes, keep looking
+	br	40$			; /54/ not valid
+30$:	clr	r0			; no error
+	br	60$
+
+40$:	mov	#er$vol ,r0		; return an error code
+	br	60$
+50$:	movb	@#errbyt,r0		; get the error code
+	asl	r0			; word indexing
+	mov	drderr(r0),r0		; /BBS/ disk read error mapping
+60$:	unsave	<r2,r1>			; /54/
+	return
+
+
+	.sbttl	Read in a segment, get header data
+
+;	G E T H D R
+;
+;	input:    r1	= desired segment begins at this block
+;	output:	dirbuf	= dir segment just read
+;		dirsiz	= size of each file's dir entry
+;		h.next	= link to next segment
+
+gethdr: .readw	#rtwork,#lun.sr,#dirbuf,#1000,r1
+	bcs	20$			; it failed, bye
+	mov	#dirbuf	,r0		; point to the buffer now
+	asl	h$next(r0)		; segments are two blocks in length
+	beq	10$			; no more segments if zero
+	add	#4	  ,h$next(r0)	; and at last, the offset
+10$:	mov	h$next(r0),h.next	; get the link to the next one
+	mov	#7*2	 ,dirsiz	; the default entry size
+	add	h$ext(r0),dirsiz	; plus extra bytes per entry
+	clr	r0			; no error
+	br	30$
+
+20$:	movb	@#errbyt,r0		; get the error code
+	asl	r0			; word indexing
+	mov	drderr(r0),r0		; /BBS/ disk read error mapping
+30$:	return
+
+
+	.sbttl	Convert a directory entry to .asciz
+
+;	C O N V E R T
+;
+;	input:	   r2	= buffer for the result
+;		   r3	= current directory entry pointer
+
+convert:save	<r2>
+	calls	rdtoa	,<r2,csidev>	; /62/ convert the device name please
+	add	#2	,r2		; skip past it and insert a ":"
+	cmpb	@r2	,#space		; a space (no unit number?)
+	beq	10$			; no
+	tstb	(r2)+			; a real unit, skip over number
+10$:	movb	#':	,(r2)+		; get DDn: format of device name
+	calls	rdtoa	,<r2,f.nam1(r3)> ; convert first 3 file name to ascii
+	add	#3	,r2		; and skip over those three characters
+	calls	rdtoa	,<r2,f.nam2(r3)> ; now get the rest of the file name
+	add	#3	,r2		; point to place a dot into the name
+	movb	#'.	,(r2)+		; a dot
+	calls	rdtoa	,<r2,f.type(r3)> ; get the file type at last
+	clrb	3(r2)			; ensure .asciz
+	unsave	<r2>
+	return
+
+
+	.sbttl	Wildcarded file name match test
+
+;	M A T C H
+;
+;	r3 = passed pointer to current entry in directory segment buffer
+;	r4 = internal pointer to current entry in file names data buffer
+
+	PERCENT = '.			; /58/ percent in a file spec string
+	WILDC	= '?			; /58/ wildcard flag in same
+
+match:	save	<r1,r2,r4>		; /62/
+	mov	#name2	,r1		; /62/ ascii name of file on disk
+	mov	r3	,r2		; /62/ address of its entry
+	add	#f.nam1 ,r2		; /62/ bump to start of file name
+	mov	#3	,r0		; /62/ loop 3 times
+10$:	calls	rdtoa	,<r1,(r2)+>	; /62/ convert to ascii
+	add	#3	,r1		; /62/ next please
+	sob	r0	,10$		; /62/
+
+	mov	#name1	,r4		; /62/ top of input file names buffer
+20$:	tstb	(r4)			; /62/ is there an entry here?
+	beq	50$			; /62/ nothing left, bail out..
+	mov	r4	,r1		; /62/ the file name pattern
+	mov	#name2	,r2		; the current file name on disk
+	mov	#6.	,r0		; the loop count for scanning
+	add	r0	,r4		; /62/ preset to file type location
+	call	m.char			; /58/ compare file name
+	bcs	30$			; /58/ match failure
+	mov	r4	,r1		; /62/ the file type pattern
+	mov	#name2+6,r2		; the current file type on disk
+	mov	#3.	,r0		; the loop count for scanning
+	add	r0	,r4		; /62/ preset to next file name
+	call	m.char			; /58/ compare file type
+	bcs	40$			; /62/ match failure
+	mov	sp	,r0		; flag success and exit
+	br	60$
+30$:	add	#3	,r4		; /62/ bump to next file name
+40$:	br	20$			; /62/ go try possible next file spec
+50$:	clr	r0			; /62/ failure, exit
+60$:	unsave	<r4,r2,r1>		; /62/
+	return
+
+m.char:	mov	r0	,L311$		; /63/ save for
+	mov	r1	,L310$		; /58/ later re-use
+10$:	cmpb	@r1	,@r2		; /58/ if they match, no problem
+	beq	20$			; /58/ simply check the next character
+	cmpb	@r1	,#wildc		; /58/ a translated * wildcard?
+	beq	30$			; /58/ yes - alternative check
+	cmpb	@r1	,#percent	; /58/ a translated % wildcard?
+	bne	80$			; /58/ no  - match failure..
+	cmpb	(r2)	,#space		; /62/ ya, but must be something here
+	ble	80$			; /62/ nothing there, match failure
+20$:	inc	r1			; /58/ match so far,
+	inc	r2			; /58/ update pointers
+	sob	r0	,10$		; /58/ and check the next ones
+	call	m.len			; /58/ are we at end of string?
+	bcs	70$			; /58/ yes - success
+	cmpb	@r1	,#space		; /58/ no - see if wildcarded
+	beq	70$			; /58/ if so, success
+	br	80$			; /58/ else failure..
+
+30$:	inc	r1			; /58/ point to char after wildcard
+	call	m.len			; /58/ are we at end of string?
+	bcs	70$			; /58/ if so, success..
+40$:	cmpb	@r1	,#space		; /58/ a space?
+	beq	70$			; /58/ end of matching check
+	cmpb	@r1	,#percent	; /58/ a translated % wildcard?
+	bne	50$			; /58/ no - compare strings
+	cmpb	(r2)	,#space		; /62/ ya, but must be something here
+	ble	80$			; /62/ nothing there, match failure
+	inc	r1			; /58/ point to char after wildc
+	sob	r0	,40$		; /58/ otherwise loop to find a char
+	br	70$			; /58/ all %s, assume success
+
+50$:	cmpb	@r1	,@r2		; /58/ find a matching character?
+	bne	60$			; /58/ not yet, see next..
+	cmpb	1(r2)	,@r2		; /58/ next = same?
+	bne	20$			; /58/ no - verify remainder
+60$:	inc	r2			; /58/ else point to next
+	sob	r0	,50$		; /58/ and loop until done
+	br	80$			; /58/ match failure
+70$:	tst	(pc)+			; /58/ skip next instr and clr carry
+80$:	sec				; /58/ or, flag failure by seting it
+	return
+
+m.len:	save	<r0>			; /63/
+	mov	r1	,r0		; /58/ copy searched string pointer
+	sub	L310$	,r0		; /62/ get number of chars checked
+	cmp	L311$	,r0		; /62/ compare with total char count
+	beq	10$			; /58/ a match - go flag it
+	tst	(pc)+			; /58/ else skip next instr, clr carry
+10$:	sec				; /58/ flag end of string
+	unsave	<r0>			; /63/
+	return
+
+
+	.sbttl	Convert date to .asciz
+
+;	A S C D A T E
+;
+;	input:   (r5)	= output buffer address
+;		2(r5)	= value of date, -1 for today's
+
+; /BBS/	modified for RT-11 V5.5 extension of max year to 2099
+
+	DOFOUR	= 1	; /62/ zero to display just last two digits of year
+
+ascdat::save	<r0,r1,r2,r3>
+	mov	@r5	,r1		; the result address
+	mov	2(r5)	,r0		; /62/ get the date desired please
+	bne	10$			; /62/ something is there
+	strcpy	r1	,#nodate	; /62/ else return " No Date "
+	br	60$			; bye
+
+10$:	cmp	r0	,#-1		; /62/ if -1, then return today's date
+	bne	20$			; it's something else..
+	cmp	-(sp)	,-(sp)		; /BBS/ a two word buffer
+	mov	sp	,r3		; /BBS/ point to it
+	.gtim	#rtwork	,r3		; /BBS/ roll over clock so date is ok
+	cmp	(sp)+	,(sp)+		; /BBS/ dump the time buffer
+	.date				; /BBS/ get today's date
+
+20$:	mov	r0	,r3		; copy the date to get day of month
+	ash	#3	,r3		; /62/ shift left 3 places
+	swab	r3			; then swap bytes to get
+	bic	#^c<37>	,r3		; the date, at last
+	call	i2toa			; /BBS/ write ascii to out buff
+
+	mov	r0	,r3		; get the date once again please
+	swab	r3			; get the month to bits 5..2
+	bic	#^c<74>	,r3		; /62/ hose yrs/days, leave at *4
+	cmp	r3	,#12.*4		; /62/ a legal month?
+	ble	30$			; /62/ most likely..
+	clr	r3			; /62/ no, force "-ERR-"
+30$:	add	#months	,r3		; /BBS/ the easy way to point to month
+	mov	#5	,r2		; /BBS/ prep to copy 5 chars "-Mon-"
+40$:	movb	(r3)+	,(r1)+		; /BBS/ copy to out buff
+	dec	r2			; /BBS/ one byte
+	bne	40$			; /BBS/ at a time
+
+	mov	r0	,r3		; copy the date
+	bic	#^c<37>	,r3		; hose all but the year
+
+	.if ne dofour			; /62/ display all four years digits
+	add	#1972.	,r3		; plus the bias please
+	.iff				; /62/ just last two digits of year
+	add	#72.	,r3		; plus the bias please
+	.iftf				; /63/ common code ahead..
+
+	bic	#^c<140000>,r0		; /BBS/ extend max year w/two hi bits
+	swab	r0			; /BBS/ two hi bits now are bits 7,6
+	asr	r0			; /BBS/ shift to bits 6,5 (true value)
+	add	r0	,r3		; /BBS/ add to total years
+
+	.ift				; /63/
+	call	i4toa			; /BBS/ write all 4 digits of year
+	.iff				; /62/ just last two digits of year
+	cmp	#100.	,r3		; /BBS/ is it 2000 (next century) yet?
+	bgt	50$			; /BBS/ no
+	sub	#100.	,r3		; /BBS/ ya, extract last 2 digits
+50$:	call	i2toa			; /BBS/ write ascii to out buff
+	.endc	; ne dofour
+
+	clrb	@r1			; .asciz
+	cmpb	#'0	,@(r5)		; /BBS/ leading zero to blank?
+	bne	60$			; /BBS/ not zero
+	movb	#space	,@(r5)		; /BBS/ ya
+60$:	unsave	<r3,r2,r1,r0>
+	return
+
+
+	.sbttl	Display TSX+ file creation time	; /BBS/ all new
+
+;	F I L T I M E
+;
+;	input:	  (r5)	= output buffer address
+;		 2(r5)	= input filtim in TSX+ "3 sec" format
+
+filtim:	save	<r0,r1,r2,r3>
+	mov	2(r5)	,r1		; get filtim (low) word
+	clr	r0			; clear hi word for divide
+	div	#20.	,r0		; get # of 3-secs since midnite
+	mov	r1	,-(sp)		; put on stack
+	asl	r1			; multiply by two
+	add	r1	,(sp)		; *3 = secs component of time value
+	mov	r0	,r1		; prep for divide to..
+	clr	r0			; ..get mins + hrs
+	div	#60.	,r0		; get minutes component of time value
+	mov	r1	,-(sp)		; save minutes
+	mov	r0	,r3		; put hrs where i2toa expects them
+	mov	@r5	,r1		; the result address
+	call	i2toa			; write hours to outbuff
+	movb	#':	,(r1)+		; format display
+	mov	(sp)+	,r3		; put mins where i2toa expects them
+	call	i2toa			; write mins to outbuf
+	movb	#':	,(r1)+		; format display
+	mov	(sp)+	,r3		; put secs where i2toa expects them
+	call	i2toa			; write secs to outbuf
+	clrb	@r1			; null terminate the whole thingie
+	unsave	<r3,r2,r1,r0>
+	return
+
+
+	.sbttl	Unsigned 16-bit integer conversion  ; /BBS/ all new
+
+;	D $ C V T N U M		accommodates sizes > 32767.
+;
+;	input:	  (r5)	= output buffer address
+;		 2(r5)	= unsigned 16-bit value to write into buffer
+;		 4(r5)	= display formatting:
+;			  0  = field set to 6 and right justified
+;			  <> = space at left, number from left, .asciz
+
+d$cvtnum:save	<r0,r1,r2,r3>		; /62/ cleaned up this code..
+	mov	(r5)	,r2		; write the number here
+	mov	#6	,r3		; make its width 6
+	mov	r3	,r1		; copy to clear buffer
+
+10$:	movb	#space	,(r2)+		; fill the buffer with blanks
+	sob	r1	,10$
+	clrb	@r2			; null terminate end of buffer
+	mov	2(r5)	,r1		; get the value to print out
+
+20$:	clr	r0			; set up for the divide by 10.
+	div	#10.	,r0		; remainder in r1, quotient r0
+	add	#'0	,r1		; convert remainder to character
+	movb	r1	,-(r2)		; and stuff that into output buffer
+	mov	r0	,r1		; copy for next iteration
+	beq	30$			; done
+	sob	r3	,20$		; next..
+
+30$:	tst	4(r5)			; field flag flyin?
+	beq	50$			; no, exit
+	 mov	@r5	,r1		; start of the buffer here
+	 inc	r1			; keep the leading blank in..
+40$:	 movb	(r2)+	,(r1)+		; move chars to front of buffer
+	 bne	40$			; copy to and including the null
+
+50$:	unsave	<r3,r2,r1,r0>
+	return
+
+	.end

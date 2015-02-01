@@ -1,0 +1,515 @@
+	.title	KRTCMD.MIN  Kermit-11 main loop, commands calling O:1
+	.macro	krt.id	RLS=V03	,VER=62	,PAT=5	,LASTED=<31-May-93>
+	.ident	"'RLS'.'VER'"
+
+	.ASECT
+.=110
+	.rad50	"'RLS'"
+	.word	'VER'.
+	.iif ne	'PAT'.	.word	'PAT'.
+	.word	-1
+	.psect	$pdata
+sho.ve::.ascii	"'RLS'.'VER'"
+	.iif ne	'PAT'.	.ascii	"-'PAT'"
+	.asciz	"_min  Last edit: 'LASTED'"
+	.even
+	.endm	krt.id
+
+	krt.id
+
+
+;	Change Software, Toledo, Ohio
+;	University of Toledo, Toledo, Ohio
+;
+;	Copyright 1983 Change Software, Inc.
+
+; /62/	V03.62-5_min  31-May-1993  by Billy Youdelman
+;
+; *** SPECIAL RT-11 V4 FLOPPY BASED MINIMUM SYSTEM VERSION ***
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTDEF.MIN"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MIN failed>
+
+	.mcall	.PURGE	,.RCTRLO
+
+
+	.psect	$code
+	.sbttl	Init the program
+
+kermit::mov	#stack	,sp
+	call	sho$version
+	call	kerini
+	tst	sy.ini
+	bne	1$
+	call	sho$line
+1$:	call	binini
+
+
+	.sbttl	Kermit main_program_loop
+
+NEW10$:	mov	argbuf	,argpnt
+	call	fixchk
+	textsrc
+	clr	status
+	clr	summary
+	clr	at$len
+	clr	pf2$ok
+	call	getcmd
+	mov	sp	,pf2$ok
+	tst	r0
+	blt	70$
+	jsr	pc	,@cmdadr
+12$:	tst	status
+	beq	NEW10$
+	br	700$
+
+
+	.sbttl	Parse errors or EOF come here
+
+70$:	save	<r0>
+	cmp	r0	,#cmd$bad
+	bhi	700$
+	mov	cmdbuf	,r4
+	cmpb	#'@	,(r4)+
+	bne	700$
+	tst	(sp)+
+	mov	argbuf	,r0
+17$:	movb	(r4)+	,(r0)+
+	bne	17$
+	call	c$take
+	br	12$
+
+700$:	unsave	<r0>
+	cmp	r0	,#cmd$ex
+	bne	80$
+	jmp	c$exit
+
+80$:	cmp	r0	,#cmd$bad
+	bne	85$
+	direrr	#er$unr
+	br	NEW10$
+
+85$:	cmp	r0	,#cmd$un
+	bne	NEW10$
+	direrr	#er$amb
+	br	NEW10$
+
+
+	.sbttl	Open and close the link device
+
+opentt::clr	r0
+	bne	100$
+	calls	ttyini	,<#0>
+	tst	r0
+	bne	100$
+100$:	return
+
+clostt::save	<r0>
+	calls	ttyrst
+	unsave	<r0>
+	return
+
+
+	.sbttl	Send file(s)
+	.enabl	lsb
+
+c$send::clr	wasmore
+	tst	inopn
+	beq	5$
+	calls	close	,<#lun.in>
+5$:	mov	argbuf	,r1
+	tstb	@r1
+	beq	9$
+	call	isitas
+	tst	r0
+	beq	10$
+9$:	mov	#er$snd	,r0
+	br	11$
+
+10$:	upcase	#srcnam
+	clr	index
+	calls	lookup	,<#srcnam,#spare1>
+	tst	r0
+	beq	13$
+	cmp	r0	,#er$nmf
+	bne	11$
+	mov	#er$fnf	,r0
+11$:	direrr	r0
+	.purge	#lun.sr
+	br	90$
+
+13$:	calls	suspend	,<sendly>
+	call	opentt
+	tst	r0
+	bne	90$
+	upcase	#asname
+	clr	index
+	call	getnxt
+	tst	r0
+	bne	90$
+	calls	sendsw	,<#'S&137>
+	tst	r0
+	bne	90$
+	mov	nextone	,r0
+	beq	100$
+173$:	cmpb	(r0)	,#space
+	bne	177$
+	inc	r0
+	br	173$
+177$:	copyz	r0 ,argbuf ,#ln$max
+	br	5$
+
+90$:	inc	status
+100$:	clrb	asname
+	call	clostt
+	jmp	clrcns
+
+	.dsabl	lsb
+
+
+	.sbttl	Shared parse routine
+
+isitas::mov	csi.fake,nextone
+	beq	17$
+	scan	#comma	,r1
+	mov	r0	,nextone
+	beq	17$
+	add	r1	,nextone
+	mov	nextone	,r0
+	clrb	-(r0)
+	tstb	(r1)
+	bne	7$
+	mov	#er$fnm	,r0
+	br	33$
+7$:	mov	sp	,wasmore
+17$:	calls	fixwild	,<r1>
+	mov	#srcnam	,r2
+	clrb	asname
+20$:	tstb	@r1
+	beq	40$
+	cmpb	@r1	,#space
+	beq	30$
+	movb	(r1)+	,(r2)+
+	br	20$
+30$:	clrb	@r2
+	inc	r1
+	tstb	@r1
+	beq	40$
+	calls	iswild	,<#srcnam>
+	tst	r0
+	beq	37$
+33$:	direrr	r0
+	return
+
+37$:	strcpy	#asname	,r1
+	calls	namcvt	,<r1,#spare1>
+	tstb	spare1
+	bne	39$
+	calls	namcvt	,<#srcnam,#spare1>
+	calls	fixfil	,<#spare1,#errtxt>
+	strcat	#asname	,#errtxt
+
+39$:	calls	iswild	,<#asname>
+	tst	r0
+	bne	33$
+40$:	clrb	@r2
+	clr	r0
+	return
+
+
+	.sbttl	Get command from the attached terminal
+	.enabl	lsb
+
+	CVTARG	= C.CRLF ! C.LSPA ! C.SSPA ! C.TSPA
+
+	.NAME	=	0
+	.MINLE	=	2
+	.CMDAD	=	4
+	.CMDAR	=	6
+
+getcmd::clrb	@argbuf
+10$:	clr	cmdnum
+	.rctrlo
+	mov	cmdbuf	,r4
+	calls	readcmd	,<r4,#prompt>
+	tst	r0
+	bne	110$
+	calls	cvt$$	,<r4,r1,#cvtarg>
+	tst	r0
+	beq	10$
+	add	cmdbuf	,r0
+	clrb	@r0
+	mov	sp	,pf2$ok
+	call	loacmd
+	calls	getcm0	,<r4,r0>
+	mov	r1	,cmdadr
+	mov	r0	,cmdnum
+	mov	r0	,r3
+	bmi	110$
+	tst	wasnul
+	bne	110$
+	call	loacmd
+	calls	getcm1	,<r4,r0,r3>
+	tst	r0
+	bmi	110$
+100$:	mov	cmdnum	,r0
+110$:	return
+
+
+	.sbttl	Get the next command
+	.enabl	lsb
+
+readcmd::mov	r2	,-(sp)
+10$:	tst	cmdlun
+	bne	101$
+	jmp	50$
+101$:	tst	tk.err
+	bne	11$
+	tst	status
+	beq	13$
+11$:	tst	infomsg
+	bne	111$
+	br	15$
+
+13$:	clr	r2
+	inc	exstal
+	calls	getrec	,<@r5,#lun.ta,#ln$max>
+	tst	r0
+	bne	30$
+	mov	r1	,r0
+	add	@r5	,r0
+	clrb	@r0
+	tst	infomsg
+	beq	21$
+	wrtall	2(r5)
+	wrtall	@r5
+	.newline
+
+21$:	tst	r1
+	beq	10$
+	mov	@r5	,r2
+22$:	scan	(r2)+	,#comment
+	tst	r0
+	bne	23$
+	tstb	@r2
+	bne	22$
+	br	27$
+
+23$:	clrb	-(r2)
+	strlen	@r5
+	mov	r0	,r1
+	beq	10$
+27$:	clr	r0
+	br	100$
+
+30$:	cmp	r0	,#er$eof
+	beq	40$
+	direrr	r0
+15$:	wrtall	#indnam
+	message	< failed at line #>
+	mov	exstal	,r0
+	call	L10266
+	mov	#':	,r0
+	call	writ1ch
+	.newline
+	message	<  ">
+	wrtall	@r5
+	message	<">,cr
+	mov	#space	,r0
+	call	writ1ch
+	call	writ1ch
+111$:	wrtall	#errtxt
+	call	incsts
+	.newline
+
+40$:	mov	sy.ini	,r2
+	beq	43$
+	call	defterm
+	br	45$
+43$:	tst	infomsg
+	beq	45$
+	wrtall	#indnam
+	message	< closed>,cr
+45$:	calls	close	,<#lun.ta>
+	clr	tk.err
+	clr	cmdlun
+
+50$:	tst	mcrcmd
+	bne	70$
+	calls	getmcr	,<@r5>
+	mov	r0	,r1
+	beq	70$
+	wrtall	2(r5)
+	wrtall	@r5
+	.newline
+80$:	clr	r0
+	br	100$
+
+70$:	calls	kbredi	,<2(r5),@r5>
+100$:	mov	(sp)+	,r2
+	return
+
+	.save
+	.psect	$pdata
+comment:.byte	73 ,'! ,0
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Find the command in the table
+	.enabl	lsb
+
+getcm0::save	<r2,r3,r4>
+	clr	wasnul
+	mov	#4	,-(sp)
+	mov	@r5	,r1
+	strlen	r1
+	mov	r0	,r3
+	beq	110$
+	cmpb	@r1	,#'?
+	bne	9$
+	mov	2(r5)	,r4
+
+5$:	mov	.name(r4),r1
+	beq	305$
+
+301$:	strlen	r1
+	mov	r0	,r3
+302$:	sub	#18.	,r3
+	neg	r3
+	bgt	303$
+	inc	r3
+	neg	r3
+	dec	(sp)
+	bne	302$
+	.newline
+	mov	#4	,(sp)
+	br	301$
+303$:	mov	#space	,r0
+	call	writ1ch
+	wrtall	r1
+304$:	add	#$listl*2,r4
+	dec	(sp)
+	beq	505$
+	mov	#space	,r0
+503$:	call	writ1ch
+	sob	r3	,503$
+	br	5$
+505$:	.newline
+	mov	#4	,(sp)
+	br	5$
+305$:	cmp	#4	,(sp)
+	beq	8$
+	.newline
+
+8$:	mov	#nulcmd	,r1
+	mov	sp	,wasnul
+	clr	r0
+	br	120$
+
+9$:	clr	r2
+	upone	r1
+10$:	scan	(r1)+	,#cmdch
+	tst	r0
+	beq	20$
+	inc	r2
+	sob	r3	,10$
+
+20$:	tst	r2
+	ble	110$
+	mov	2(r5)	,r4
+	clr	r3
+
+30$:	tst	.name(r4)
+	beq	110$
+	strlen	.name(r4)
+	calls	instr, <.name(r4),r0,@r5,r2>
+	cmp	r0	,#1
+	bne	35$
+	mov	r0	,@sp
+35$:	cmpb	r2	,.minle(r4)
+	blo	40$
+	 dec	r0
+	 beq	100$
+40$:	inc	r3
+	add	#$listl*2,r4
+	br	30$
+
+100$:	mov	r3	,r0
+	mov	.cmdad(r4),r1
+	br	120$
+
+110$:	mov	#cmd$ba	,r0
+	dec	@sp
+	bne	120$
+	mov	#cmd$un	,r0
+120$:	tst	(sp)+
+	unsave	<r4,r3,r2>
+	return
+
+	.save
+	.psect	$pdata
+cmdch:	.asciz	"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_-@."
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Check for additional input needed
+	.enabl	lsb
+
+getcm1::save	<r1,r2,r3>
+	sub	#ln$max+2,sp
+	mov	sp	,r2
+	tst	wasnul
+	beq	10$
+	clr	wasnul
+	clr	r0
+	br	110$
+10$:	mov	@r5	,r1
+	scan	#space	,r1
+	tst	r0
+	beq	30$
+	add	r1	,r0
+	copyz	r0,argbuf,#ln$max
+	br	100$
+
+30$:	clrb	@argbuf
+	mov	4(r5)	,r3
+	mul	#$listl*2,r3
+	add	2(r5)	,r3
+	mov	.cmdar(r3),r3
+	tstb	@r3
+	beq	100$
+	strcpy	r2	,r3
+40$:	calls	kbredi	,<r2,argbuf>
+	tst	r0
+	bne	90$
+	calls	cvt$$,<argbuf,r1,#cvtarg>
+	tst	r0
+	beq	40$
+	mov	r0	,r1
+	add	argbuf	,r1
+	clrb	@r1
+100$:	mov	4(r5)	,r0
+	br	110$
+
+90$:	cmp	r0	,#cmd$ex
+	bne	110$
+	mov	#cmd$nx	,r0
+110$:	add	#ln$max+2,sp
+	unsave	<r3,r2,r1>
+	return
+
+	.dsabl	lsb
+
+
+nulcmd:	clr	r0
+	return
+
+	.end	kermit

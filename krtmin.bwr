@@ -1,0 +1,14 @@
+KRTMIN.BWR  "Beware file" for KRTMIN V03.62-5_min  31-May-93
+----------  ------- ----- --- ------ ------------  ---------
+
+This release of Kermit-11 for RT-11/TSX-Plus has been extensively
+tested and is believed to be essentially bug free.  If you encounter
+any problem, please contact the maintainer of this software, which
+is actively supported.
+
+        Billy Youdelman                 youdelman@eisner.decus.org
+        PO Box 1207                     billy@mix.com
+        Culver City, California 90232
+        USA
+
+-eof-

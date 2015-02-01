@@ -1,0 +1,51 @@
+	.title	KRTSTD.MIN  SET command list overlay
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1985 Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTCDF.MIN"
+	.iif ndf  KRTCDF  .error 	<; .include for IN:KRTCDF.MIN failed>
+
+	.psect	$code
+	.sbttl	Define the SET commands
+
+	$CMGLOB	=	1
+
+loaset::mov	#setcmd	,r0
+	return
+
+command	setcmd	,ATTRIBUTES	,1  ,set$at  ,<On, Off? >
+command	setcmd	,BINARY_TYPE	,2  ,set$bi  ,<File type: >
+command	setcmd	,BLOCK_CHECK_TYPE,2 ,set$bl  ,<1, 2 or 3? >
+command setcmd	,DEBUG		,3  ,set$de  ,<Mode: >
+command setcmd	,DEFAULT	,3  ,c$cwd   ,<Directory: >
+command	setcmd	,DELAY		,3  ,set$dl  ,<Seconds: >
+command	setcmd	,END_OF_LINE	,2  ,set$eo  ,<Octal 1-36: >
+command	setcmd	,FILE_TYPE	,2  ,set$fi  ,<ASCII, Auto, Binary? >
+command setcmd	,HOME		,2  ,set$ho  ,<Directory: >
+command setcmd	,INCOMPLETE_FILE_DISPOSITION ,1 ,set$in ,<Keep, Discard? >
+command setcmd	,LOGFILE	,3  ,set$lo
+command setcmd	,LONG_PACKETS	,3  ,set$lp  ,<On, Off? >
+command	setcmd	,NOATTRIBUTES	,3  ,st$nat
+command setcmd	,NODEBUG	,3  ,sd$off
+command	setcmd	,NOLONG_PACKETS	,3  ,st$nlp
+command setcmd	,NOREPEAT_QUOTING,3 ,set$nrp
+command	setcmd	,PARITY		,3  ,set$pa  ,<Odd/Even/Mark/Space/None? >
+command	setcmd	,PAUSE		,3  ,set$ps  ,<Seconds: >
+command setcmd	,PROMPT		,2  ,set$pr  ,<New prompt: >
+command setcmd	,RECEIVE	,3  ,set$rc  ,<Option: >
+command setcmd	,REPEAT_QUOTING	,3  ,set$rp  ,<On, Off? >
+command	setcmd	,RETRY		,3  ,set$re  ,<Initial, Packet? >
+command	setcmd	,SEND		,3  ,set$sn  ,<Option: >
+command setcmd	,SERVER		,3  ,set$sv  ,<Option: >
+command setcmd	,SL		,2  ,set$sl  ,<On, Off, KED, NOKED: >
+command	setcmd	,START_OF_PACKET,2  ,set$so  ,<Octal 1-36: >
+command setcmd	,TERMINAL	,2  ,set$tt  ,<Type: >
+command setcmd	,TT:		,2  ,set$tt  ,<Type: >
+command	setcmd
+
+	.end

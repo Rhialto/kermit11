@@ -1,0 +1,334 @@
+	.title	Watch LCDTIM and stop tailgating
+	.ident	"09B"
+
+; /63/	27-Sep-97  Billy Youdelman
+; /62/	27-Jul-93  Billy Youdelman
+;
+;			* * *   N O T I C E   * * *
+;
+;	This program is intended for use with TSX-Plus V6.31 or LOWER
+;	releases, at least to V6.0.  It is NOT NECESSARY with V6.4 or
+;	above, and it may run on some of the later V5.x releases too.
+
+;	This file is named KRTAIL.MAC to be included with the Kermit-11
+;	for RT-11 (KRT) distribution.  It is actually NOTAIL.MAC, DECUS
+;	#110916, and is supplied here for your convenience.  Before use
+;	copy this file to NOTAIL.MAC, then edit that for your system.
+
+
+;			NOTAIL - Edit History
+;
+;   9-Feb-96  V9B - Included in KRT general clean-up, local labels reordered.
+;
+;   4-Jul-93  V9A - Add automatic 50Hz clock rate detection and support for
+;  watching more than 34. lines, just in case anyone ever achieves this..
+;
+;   9-Sep-91  V8A - modified to work with pre-V6.3 versions of TSX per Chester
+;  Wilson's KILL.MAC in his TSCLIB.
+;
+;  21-Oct-88  V7E - Initial release of detached job version as DECUS #11-916.
+;  Created from Howard Helman's TIMCK/USRCOP.
+
+
+;			NOTAIL - Documentation
+;
+;  Tailgating is the name commonly given to what happens when a modem data
+;  path is broken before the job using it has logged off, and the next call
+;  is connected to that still active session of the prior user.  Additional
+;  info may be found in Data Communications, March, 1988, page 55.
+;
+;  Beginning with V6.4 TSX-Plus was given improved modem control, with which
+;  tailgating incidents are easily prevented.  The following values are
+;  suggested for MNP/V.42 auto-answer operation (modem time out = 40 secs):
+;
+;  .show modem
+;  PHONE=1    Other modem control parameters (in 0.5 sec):
+;   ONTIM=80 OFFTIM=1 TIMIN=80 TIMLOC=1 TIMOUT=1
+;
+;  When no error correction is in use, ONTIM and TIMIN may be halved, and the
+;  modem's wait time for carrier (S7 register in Hayes-style units) set to 20
+;  seconds.  If the modem's wait time is not settable such that it's restored
+;  when reset (ala ATZ), then ONTIM and TIMIN must be set to match the modem.
+;  OFFTIM, TIMLOC and TIMOUT must = 1 (the minimum, don't use zero) to ensure
+;  the job is logged off immediately.  The $PHONE flag must be defined in the
+;  LINDEF (in TSGEN.MAC) for any line connected to an auto-answer modem.  And
+;  above all, the modem MUST be configured to hang up when DTR is dropped for
+;  any of this to be effective.
+;
+;    IF YOU ARE RUNNING TSX-PLUS V6.40 OR HIGHER DOING THE ABOVE MAKES USING
+;    THIS PROGRAM UNNECESSARY!  However, the info concerning use of a logoff
+;    command file (following) remains worthwhile reading.
+;
+;  If you're using TSX-Plus V6.31 or below, the TIMOUT value which governs
+;  how long a job will be held active after the data carrier has been lost
+;  also determines the time allowed for a caller to first connect, type two
+;  returns and initialize the line.  Thus, setting TIMOUT small enough to
+;  prevent tailgating means it's not likely anyone will be able to log on a
+;  phone line either.
+;
+;  This little program, running as a detached job, checks designated lines
+;  every 0.5 second and kills any that may still be logged on without DCD
+;  held true.  Phone lines on which DCD is true keep LCDTIM refreshed with
+;  TIMOUT, otherwise LCDTIM is decremented every 0.5 second.  Status of
+;  monitored jobs is kept here in an internal table, maintained by their
+;  broadcast status reports.  When LCDTIM no longer equals TIMOUT for a
+;  watched line that's still active, that job is killed by this program.
+;
+;  Most modems provide some immunity to brief hits in the carrier by including
+;  a small delay before dropping DCD, and the test done here is not sync'd
+;  with the LCDTIM refresh, so it may take as long as two seconds from actual
+;  loss of carrier until a logoff command file has run, however this is less
+;  time than it takes for a following call to be connected.  Modems which can
+;  retrain should be configured to keep DCD asserted true during that process.
+;  TSX-Plus has no provision for use of DCD to ignore the retrain string, but
+;  loss of DCD will result in the line being killed.
+;
+;    To use this program the appropriate values for the four user settable
+;    parameters, below, MUST BE PATCHED AS INDICATED.  Lines to be watched
+;    must be numerically contiguous, or the init routine suitably modified.
+;    Monitoring a non-phone line will definitely render it useless.  This
+;    program must be rebuilt any time any of these four parameters change,
+;    such as when a new system generation changes the LCDTIM table address.
+;
+;  Then assemble and link to create NOTAIL.SAV:
+;
+;	.MACRO NOTAIL
+;	.LINK NOTAIL
+;
+;  and copy that to SY.  Then add this command line to the end of an existing
+;  system start-up detached job command file (so that detached job slot ends
+;  up running NOTAIL forever) or create NOTAIL.DET containing the same command
+;  line and edit TSGEN.MAC to run it as a detached job when TSX is started:
+;
+;	R NOTAIL
+;
+;  The TSGEN parameter MAXMON must accommodate the number of lines monitored
+;  as well as any other use of it, and PHONE must be set true (PHONE=1), both
+;  of which may be done via TSXMOD, after which TSX+ must be restarted to read
+;  the new values, if there's an existing detached job running at start-up to
+;  which the above may be appended.  If not started by the system NOTAIL needs
+;  MEMMAP, PSWAPM, SEND and WORLD privileges to run.
+;
+;  As the modem itself is reset by dropping DTR, actually dumping a modem
+;  connection is most efficiently done by the use of a logoff command file,
+;  which is assigned in each phone line's start-up command file.  Example:
+;
+;	SET ERROR FATAL
+;	!ACCESS SY:CLEAR.COM/READ	..if access restrictions are used
+;	SET LOGOFF FILE=SY:CLEAR.COM
+;	SET TT PAGE			!see note for CLEAR.COM, below
+;	R LOGON
+;
+;  Then SY:CLEAR.COM would contain:
+;
+;	SET ERROR NONE
+;	SET PRIO 70			! be sure this runs before next call
+;	SET TT NOPAGE,NODTR,PHONE,AUTO,XON
+;	!Insert whatever else's needed here..
+;
+;  The reasons for the various SET TT options used above are:
+;
+;        NOPAGE ensures possible noise induced XOFF on DTR drop is harmless
+;        NODTR  resets the modem
+;        PHONE  ensures port is not in local mode, just in case..
+;        AUTO   ensures port not stuck at any particular speed
+;        XON    resets any XOFF which may have snuck thru..
+;
+;  This may seem a bit extreme on the SET TT end of things, but it definitely
+;  gets the job done, even after in and out buffers are overflowed, XOFF'd in
+;  both directions (deadlocked) and the caller has to hang up.
+;
+;  Note that TERMINAL privilege is required for the above to drop DTR.  As of
+;  TSX V6.5 installing a .COM file with TERM privilege doesn't work, the user
+;  must be given it.  If the user does not have TERM privilege, DTR won't get
+;  dropped until after the XON is done, which has been a problem in V6.20 and
+;  earlier releases.
+;
+;  It's also a good idea when using a Hayes-style modem to disable its escape
+;  character means of invoking the modem's command mode.  If one phones in to
+;  a TSX system and then uses another line on it to call out or talks to some
+;  one such that the other person's data are going into the modem (the one at
+;  the TSX system, to which your local system is connected) via its DCE port,
+;  there's no other way to prevent someone from using the escape sequence and
+;  taking control of that modem, after which they've got your phone line..
+;
+;	Billy Youdelman				billy@MIX.COM
+;	PO Box 1207			
+;	Culver City, California  90232-1207
+;	USA
+
+
+	.sbttl	User settable parameters
+
+FLINE	=	    6.		; first primary line number to check
+NLINES	=	    4.		; # contiguous lines to check from fline up..
+LCDTIM	=	20062		; TSX time out table addr, get from TSX.MAP
+TIMOUT	=	   20.		; time out value, must match TIMOUT in TSGEN
+
+	; end of user settable parameters
+
+
+	.mcall	.EXIT	,.GVAL	,.SERR	,.TWAIT
+	.enabl	lc
+
+
+	$INKMN	=	10000		; set in LSW4 to pretend pgm is TSKMON
+	CONFIG	=	  300		; RT-11 primary configuration word
+		HERTZ50	=  40		; 50Hz clock if set
+	ERRBYT	=	   52		; emt error byte location
+	TS.VER	=	  -32.		; offset to TSX version number
+
+	.ASECT
+	. = 56
+	.if le	<NLINES-34.>		; if watching 34. or less lines
+	.word	1			; setsiz notail.sav/t:1
+	.iff				; if more than 34. (ya never know..)
+	.word	2			; setsiz notail.sav/t:2
+	.endc				; le NLINES-34.
+
+
+	.psect
+	.sbttl	Initialization
+
+notail:	.serr				; don't crash on an error
+	mov	#lock	,r0		; lock into memory
+	emt	375			; so timing stuff won't ever be late
+	mov	#priority,r0		; bump up the priority
+	emt	375
+	mov	#newname,r0		; set the user name
+	emt	375			; to something informative
+
+	mov	#fline	,linno		; start at this TSX line number
+	mov	#nlines	,r4		; do this many contiguous lines
+
+10$:	mov	linno	,monlin		; give line number to monitor emt
+	mov	#monjob	,r0		; point to monitor emt arg block
+	emt	375			; begin monitoring for this line
+	bcc	20$			; it worked
+	jmp	errext			; it failed, go say why
+20$:	inc	linno			; prep for next line
+	sob	r4	,10$		; another to check?
+
+	.gval	#area	,#config	; get RMON configuration word into r0
+	bit	#hertz50,r0		; is clock 50Hz?
+	beq	10$			; nope..
+	mov	#25.	,time+2		; ya, overwrite 60Hz default
+	.gval	#area	,#ts.ver	; get TSX version number
+	bcs	loop			; this doesn't work before V6.0
+	mov	r0	,tsxver		; save it
+
+
+	.sbttl	Main loop		; search + destroy every 0.5 sec
+
+loop:	mov	#fline	,linno		; start at this line
+	mov	#nlines	,r4		; how many to do
+
+10$:	mov	linno	,r0		; get a line number
+	asl	r0			; word indexing for data table
+	tst	flags(r0)		; is this line active?
+	beq	40$			; nope, on to the next one
+	mov	r0	,lindex		; save shifted TSX line number
+	add	#lcdtim	,r0		; convert to physical address for line
+	mov	r0	,addr		; save for peek
+	mov	#pkemt	,r0		; set up peek
+	emt	375			; get lcdtim register value
+	cmp	r0	,#timout	; if lcdtim<>timout DCD has gone away
+	beq	40$			; if lcdtim=timout skip to next..
+
+	cmp	tsxver	,#630.		; will documented kill emt work?
+	bge	20$			; ya
+
+	mov	#kmnon	,r0		; no, set the "in KMON" bit in LSW4
+	emt	375			; so the following will work
+	mov	lindex	,job		; pass job_# * 2 (word indexing)
+	mov	#kmnkill,r0		; load args for KMON's kill emt
+	emt	375			; do it
+	mov	#kmnoff	,r0		; now clear the "in KMON" bit..
+	emt	375
+	br	30$
+
+20$:	mov	linno	,knum		; give job number to kill emt
+	mov	#kill	,r0		; point to args
+	emt	375			; kill the line
+
+30$:	mov	lindex	,r0		; recover pointer
+	clr	flags(r0)		; clear flag for this line
+40$:	inc	linno			; prep for next line
+	sob	r4	,10$		; another to check?
+	.twait	#area	,#time		; wait for lcdtim regs to be updated
+	br	loop
+
+
+	.sbttl	Monitoring completion routine
+
+moncpl:	asl	r0			; word index and dump sys message bit
+	bcc	20$			; not a system message..
+	cmp	r1	,#1		; is this job init message?
+	bne	10$			; no
+	mov	sp	,flags(r0)	; set the line's entry as logged on
+	br	20$			; and return
+10$:	cmp	r1	,#5		; has job logged off?
+	bne	20$			; no so return
+	clr	flags(r0)		; clear flag for this line
+20$:	return				; that's it..
+
+
+	.sbttl	Job monitor scheduling error
+
+errext:	movb	@#errbyt,r1		; get emt error code
+	add	#'0	,r1		; convert to ascii numeral
+	movb	r1	,errcod		; stuff into error message
+	mov	linno	,r1		; recover line number
+	mov	#<which+2>,r2		; get pointer to end of buffer
+	mov	#2	,r3		; setup for two loops
+10$:	clr	r0			; prepare for divide
+	div	#10.	,r0		; get value of digit
+	add	#'0	,r1		; convert it to ascii
+	movb	r1	,-(r2)		; put ascii number in buffer
+	mov	r0	,r1		; get tens digit for second pass
+	sob	r3	,10$		; two digits only
+	mov	#yell	,r0		; load emt arg block
+	emt	375			; display error on system console
+	.exit				; then stop this program
+
+
+	.sbttl	Data..
+
+area:	.blkw	2			; 2 word arg area for .twait
+flags:	.blkw	fline+nlines		; lines data table
+kill:	.byte	2 ,132			; kill emt
+knum:	.word	0			; job number
+kmnkill:.byte	0 ,126			; TSKMON kill a job emt
+	.word	5
+job:	.word	0			; "job" = tsx_line_number * 2
+kmnoff:	.byte	3 ,130			; clear $INKMN bit in TSX's LSW4
+	.word	4
+	.word	$inkmn
+kmnon:	.byte	2 ,130			; set $INKMN bit in TSX's LSW4
+	.word	4
+	.word	$inkmn
+lindex:	.word	0			; asl'd linno for word indexing
+linno:	.word	0			; current loop line number
+lock:	.byte	7 ,140			; lock into low memory emt
+name:	.ascii	"DCD_time_out"		; must = 12. bytes
+newname:.byte	1 ,147			; change the user name emt args
+	.word	name
+monjob:	.byte	0 ,157			; emt arg block to monitor a line
+monlin:	.word	0			; monitor this line
+	.word	moncpl			; completion routine address
+pkemt:	.byte	1 ,34			; .peek emt arg block
+addr:	.word	0			; where to peek
+priority:.byte	0 ,150			; set priority emt
+	.word	55.			; bump it up to here
+time:	.word	0			; time high word
+	.word	30.			; time low word - sleep for 0.5 sec
+tsxver:	.word	0			; TSX version number
+yell:	.byte	1 ,127			; display text on
+	.word	1			; operator's console
+	.word	monerr			; what to send starts here
+monerr:	.ascii	<15><12><7>"?NOTAIL-F-Monitor EMT error #"
+errcod:	.ascii	"0 for Line #"		; error # goes here
+which:	.asciz	"00"<15><12>		; line # goes here
+	.even
+
+	.end	notail

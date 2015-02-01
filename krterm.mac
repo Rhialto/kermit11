@@ -1,0 +1,256 @@
+	.title	KRTERM	Packet I/O via TT
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	use hi-efficiency print emt in T.BINWRITE under TSX
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	add support for RT-11 V4
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	this module has been extensively modified, please refer to it
+;	added SET TT XON (TSX) emt to t.ttxon, uses tsxsav for lnum
+;	add dummy routines for inqdtr, inqcd
+;	ttyini - suspend TSX window processing, as in connect, packets
+;	added support for vlflag under TSX+ to ttyini
+;
+;	drop TSX hi eff term mode and declare a list of activation chars
+;	instead, allowing single char input (so packets can be longer
+;	than TSX's internal I/O buffers) whilst offing ^B, ^T, ^W, etc
+;	so line noise doesn't trigger various annoying things as when
+;	using the server via TT, also allows passing to remote when in
+;	the connect mode
+
+;	Copyright 1984 Change Software, Inc.
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+; /62/	.PEEK,.POKE bypassed for V4, also expanded to allow assy under same
+
+	.mcall	.GVAL	,.RCTRLO,.TTINR	,.TTYOUT,.TWAIT
+
+
+	$TCFIG	=	424		; terminal configuration word
+		CRLF$	=	2	; ignore width bit
+		PAGE$	=	200	; /BBS/ SET TT [NO]PAGE bit
+
+	.psect	$pdata
+ttime:	.word	0 ,1			; a tick sleep for .twait
+w$suspen:.byte	3 ,161			; /BBS/ suspend TSX window processing
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+xonemt:	.byte	1 ,154			; /BBS/ TSX SET TT XON emt
+xonlin:	.byte	0 ,0			; /BBS/ line_to_XON ,0
+	.word	0			; /BBS/ speed (unused here)
+wrtemt:	.byte	0 ,114			; /63/ TSX hi-eff write to TT emt
+wrtloc:	.word	0			; /63/ address of buffer to write
+wrtlen:	.word	0			; /63/ write this many chars
+
+
+	.psect	$code
+	.sbttl	Initialize the terminal	; /BBS/ heavily hacked
+
+;	T T Y I N I
+;
+;	input:	  (r5)	= if <> don't force ^W/^B off, as for CONNECT mode
+;	output:	   r0	= cleared, no error possible
+
+t.ttyini::save	<r1,r2>
+	tst	tsxsave			; running under TSX?
+	bne	30$			; ya, skip to TSX term init
+	.gval	#rtwork,#$tcfig		; no, get term config word addr
+	cmp	rt11ver	,#5		; /62/ is this RT-11 V5 or above?
+	bge	10$			; /62/ ya, .peek will work
+	tst	montyp			; /62/ if XM and V4..
+	bgt	20$			; /62/ ..tough luck
+	bic	#crlf$	,(r0)		; /62/ no CR/LF, ignore width that is
+	br	20$
+10$:	mov	r0	,r1		; copy for peek, which uses r0
+; /62/	.peek	#rtwork	,r1		; must do it this way for XM
+	MOV	#rtwork	,R0		; /62/ expanded to assemble under V4
+	MOV	#28.*^o400+1.,@R0	; /62/ even though V4 can't run it
+	MOV	r1	,2.(R0)		; /62/
+	EMT	^o375			; /62/
+	mov	r0	,r2		; copy for poke, which also uses r0
+	bic	#crlf$	,r2		; no CR/LF, ignore width that is..
+; /62/	.poke	#rtwork	,r1,r2		; stuff in new term config word
+	MOV	#rtwork	,R0		; /62/ expanded to assemble under V4
+	MOV	#28.*^o400+3,@R0	; /62/ even though V4 can't run it
+	MOV	r1	,2.(R0)		; /62/
+	MOV	r2	,4.(R0)		; /62/
+	EMT	^o375			; /62/
+20$:	.rctrlo				; force update of it in the os
+	br	80$			; skip past TSX init code
+
+30$:	mov	#1	,r1		; offset to second byte
+	mov	#11.	,r2		; 11 of 'em to do
+40$:	movb	#'D	,limits(r1)	; load activation char prefix
+	add	#3	,r1		; bump to next one
+	sob	r2	,40$		; next one
+
+	tst	(r5)			; come here via CONNECT?
+	bne	50$			; ya
+	movb	limits	,vl$chr		; no, ensure ^W gets off'd
+	br	60$			; and continue
+50$:	movb	vlflag	,vl$chr		; set/clear ^B/^W lead-in char
+	beq	70$			; ^W stays on, keep windowing on
+60$:	mov	#w$suspen,r0		; suspend TSX window processing
+	emt	375			; for packets and connect mode
+70$:	wrtall	#limits			; set some terminal parameters
+
+80$:	mov	#1000	,r2		; eat anything that's pending please
+90$:	calls	t.binrea,<#-1>		; force call to t.binread
+	dec	r2			; don't loop forever please
+	beq	100$			; exit the loop
+	tst	r0			; did we get anything at all?
+	beq	90$			; yes, eat some more input
+100$:	clr	r0			; indicate success
+	unsave	<r2,r1>
+	return
+
+
+	.sbttl	Binary read
+
+;	B I N R E A
+;
+;	input:	  (r5)	= time-out
+;	output:	   r1	= character just read
+;		   r0	= if <>, error code
+
+t.xbinre::				; same here, different in KRTXL
+t.binrea::cmp	(r5)	,#-1		; read without any wait?
+	bne	10$			; no
+	.ttinr				; try to read a single character
+	bcs	40$			; nothing was there, so exit
+	mov	r0	,r1		; return character in r1
+	clr	r0			; no errors
+	br	50$			; done
+
+10$:	mov	(r5)	,r1		; get the time-out in seconds
+	mul	clkflg	,r1		; /BBS/ into ticks now
+
+20$:	.ttinr				; try and read console
+	bcs	30$			; nothing there
+	mov	r0	,r1		; save character
+	clr	r0			; success
+	br	50$			; done
+
+30$:	dec	r1			; been here too long?
+	beq	40$			; yes, exit with error
+	.twait	#rtwork	,#ttime		; no, sleep one tick
+	br	20$			; and try again please
+
+40$:	mov	#er$nin	,r0		; no data today
+	clr	r1			; /BBS/ ensure nothing output
+50$:	return
+
+
+	.sbttl	Binary write
+
+;	B I N W R I
+;
+;	output:	  r0	= if <>, error code
+
+t.binwri::tst	tsxsav			; /63/ running under TSX?
+	beq	10$			; /63/ no
+	mov	2(r5)	,wrtlen		; /63/ ya, get the string length
+	beq	40$			; /63/ nothing to do
+	mov	@r5	,wrtloc		; /63/ get the string address
+	mov	#wrtemt	,r0		; /63/ point to write emt arg block
+	emt	375			; /63/ do the write to TT
+	br	40$			; /63/ done
+
+10$:	save	<r1,r2>			; /63/ RT-11 output done here
+	mov	2(r5)	,r2		; get the string length
+	beq	30$			; /63/ nothing to do
+	mov	@r5	,r1		; get the string address
+20$:	.ttyou	(r1)+			; dump one char
+	sob	r2	,20$		; next please
+30$:	unsave	<r2,r1>			; /63/
+
+40$:	clr	r0			; no error possible
+	return
+
+
+	.sbttl	Reset an XOFF		; /BBS/ all new
+
+t.ttxon::movb	tsxsave	,xonlin		; TSX line number
+	beq	10$			; not TSX
+	cmp	tsxver	,#620.		; TSX, but which version?
+	blo	10$			; if less than 6.2 use RT-11 code
+	mov	#xonemt	,r0		; load args for XON emt
+	emt	375			; SET TT XON
+	br	40$
+
+10$:	save	<r1,r2>
+	.gval	#rtwork,#$tcfig		; get term config word addr
+	cmp	rt11ver	,#5		; /62/ is this RT-11 V5 or above?
+	bge	20$			; /62/ ya, .peek will work
+	tst	montyp			; /62/ if XM and V4..
+	bgt	30$			; /62/ ..tough luck
+	mov	r0	,r2		; /62/ copy term config word address
+	bic	#page$	,(r2)		; /62/ clear page bit
+	.rctrlo				; /62/ force update
+	bis	#page$	,(r2)		; /62/ restore page bit
+	br	30$
+20$:	mov	r0	,r1		; save copy as peek eats r0
+; /62/	.peek	#rtwork	,r1		; must do it this way for XM
+	MOV	#rtwork	,R0		; /62/ expanded to assemble under V4
+	MOV	#28.*^o400+1.,@R0	; /62/ even though V4 can't run it
+	MOV	r1	,2.(R0)		; /62/
+	EMT	^o375			; /62/
+	mov	r0	,r2		; save copy as poke also eats r0
+	bic	#page$	,r2		; clear page bit
+; /62/	.poke	#rtwork	,r1,r2		; set tt nopage
+	MOV	#rtwork	,R0		; /62/ expanded to assemble under V4
+	MOV	#28.*^o400+3,@R0	; /62/ even though V4 can't run it
+	MOV	r1	,2.(R0)		; /62/
+	MOV	r2	,4.(R0)		; /62/
+	EMT	^o375			; /62/
+	.rctrlo				; force update
+	bis	#page$	,r2		; restore page bit
+; /62/	.poke	#rtwork	,r1,r2		; set tt page
+	MOV	#rtwork	,R0		; /62/ expanded to assemble under V4
+	MOV	#28.*^o400+3,@R0	; /62/ even though V4 can't run it
+	MOV	r1	,2.(R0)		; /62/
+	MOV	r2	,4.(R0)		; /62/
+	EMT	^o375			; /62/
+30$:	unsave	<r2,r1>
+
+40$:	.rctrlo				; force update again
+	.ttyout	#xon			; send an XON
+	clr	r0			; success
+	return
+
+
+	.sbttl	Hose the terminal port, cancel type_ahead
+
+t.hose::				; same here, different in KRTXL
+t.cantyp::call	t.ttxon			; /BBS/ dump a possible XOFF then
+	jmp	clrcns			; /62/ eat any pending terminal input
+
+
+	.sbttl	Handler functions not needed for TT
+
+t.dcdtst::				; /62/
+t.ttspee::clr	r0			; /62/ not available
+	return
+
+t.inqcd::
+t.inqdtr::
+t.ttyfin::
+	mov	#-1	,r0		; /BBS/ not available
+	return
+
+t.setspd::mov	#er$spx	,r0		; /BBS/ TT speed not settable here
+	return
+
+t.ttyhan::mov	#er$pls	,r0		; /BBS/ please SET LINE first..
+	return
+
+	.end

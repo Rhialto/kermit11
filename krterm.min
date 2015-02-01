@@ -1,0 +1,137 @@
+	.title	KRTERM.MIN  Packet I/O via TT
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984 Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.mcall	.GVAL	,.RCTRLO,.TTINR	,.TTYOUT
+
+	$TCFIG	=	424
+		CRLF$	=	2
+		PAGE$	=	200
+
+
+	.psect	$code
+	.sbttl	Initialize the terminal
+
+ttyini::save	<r1,r2>
+	.gval	#rtwork,#$tcfig
+	cmp	rt11ver	,#5
+	bge	71$
+	bic	#crlf$	,(r0)
+	br	77$
+71$:	mov	r0	,r1
+	MOV	#rtwork	,R0
+	MOV	#28.*^o400+1.,@R0
+	MOV	r1	,2.(R0)
+	EMT	^o375
+	mov	r0	,r2
+	bic	#crlf$	,r2
+	MOV	#rtwork	,R0
+	MOV	#28.*^o400+3,@R0
+	MOV	r1	,2.(R0)
+	MOV	r2	,4.(R0)
+	EMT	^o375
+77$:	.rctrlo
+	mov	#1000	,r2
+10$:	calls	binrea,<#-1>
+	dec	r2
+	beq	20$
+	tst	r0
+	beq	10$
+20$:	clr	r0
+	unsave	<r2,r1>
+	return
+
+
+	.sbttl	Binary read
+
+xbinre::
+binrea::cmp	(r5)	,#-1
+	bne	20$
+	.ttinr
+	bcs	80$
+	mov	r0	,r1
+	clr	r0
+	br	100$
+
+20$:	mov	(r5)	,r1
+	mul	#60.	,r1
+
+30$:	.ttinr
+	bcs	40$
+	mov	r0	,r1
+	clr	r0
+	br	100$
+
+40$:	dec	r1
+	beq	80$
+	calls	suspend	,<#0,#1>
+	br	30$
+
+80$:	mov	#er$nin	,r0
+	clr	r1
+100$:	return
+
+
+	.sbttl	Binary write
+
+binwri::save	<r1,r2>
+	mov	@r5	,r1
+	mov	2(r5)	,r2
+	beq	100$
+10$:	.ttyou	(r1)+
+	sob	r2	,10$
+100$:	clr	r0
+	unsave	<r2,r1>
+	return
+
+
+	.sbttl	Reset an XOFF
+
+ttxon::	save	<r1,r2>
+	.gval	#rtwork,#$tcfig
+	cmp	rt11ver	,#5
+	bge	71$
+	mov	r0	,r2
+	bic	#page$	,(r2)
+	.rctrlo
+	bis	#page$	,(r2)
+	br	77$
+71$:	mov	r0	,r1
+	MOV	#rtwork	,R0
+	MOV	#28.*^o400+1.,@R0
+	MOV	r1	,2.(R0)
+	EMT	^o375
+	mov	r0	,r2
+	bic	#page$	,r2
+	MOV	#rtwork	,R0
+	MOV	#28.*^o400+3,@R0
+	MOV	r1	,2.(R0)
+	MOV	r2	,4.(R0)
+	EMT	^o375
+	.rctrlo
+	bis	#page$	,r2
+	MOV	#rtwork	,R0
+	MOV	#28.*^o400+3,@R0
+	MOV	r1	,2.(R0)
+	MOV	r2	,4.(R0)
+	EMT	^o375
+77$:	unsave	<r2,r1>
+	.rctrlo
+	.ttyout	#xon
+	clr	r0
+	return
+
+
+	.sbttl	Hose the terminal port, cancel type_ahead
+
+hose::
+cantyp::call	ttxon
+	jmp	clrcns
+
+	.end

@@ -1,0 +1,1204 @@
+	.title	KRTST0	SET command overlay zero
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	add SET CONTROL-CHARACTER
+;	consolidate local data..
+;	add file name to when logging to LP so later OS versions are happy
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	add support for call back modems, SET DIAL/PHONE [NO]ANSWER
+;
+;	report file size (blocks free) when opening a log file
+;	simply set binary flag instead of close/reopen file for raw I/O debug
+;	fix typo causing a new logfile of same name not to get opened
+;	combine FILE, STATE and PACKET into one DEBUG mode (ON)
+;	redo SET DIAL ECHO and INIT-ONCE as [NO]ECHO and [NO]INIT-ONCE
+;	SET SETTLE-TIME is now SET DIAL SETTLE-TIME
+;	drop SET HAND XON, as RT-11 and TSX eat same..
+;	drop SET DIAL INFO, as any undefined message defaults to it
+;
+;	rename SET DIAL PROMPT to WAKE-ACK, add BLIND, PULSE, TONE, DIAL-ACK,
+;	INITIATE-PROMPT, CONFIRM-ACK, [NO]BINARY-RESPONSE (were missing)..
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	set$pa - fixed display bug with "?" arg
+;	enhanced set$speed error handling
+;	added SET PHONE XMODE for Hayes extended response modes
+;	cleaned up all debug code, allowing debug to TT w/o a disk file
+;	moved set$line to KRTDSP, so it can call c$idle in adjacent overlay
+;	make SET DEBUG NONE off ALL debugging, including TT
+;	add separate parameter for retrying initial-connection ala VMS Kermit
+;	add SET INCOMPLETE-FILE-DISPOSITION
+;	add SET SL
+;	move [SET] LOGFILE here, integrate with SET DEBUG..
+;	make logfile default type .LOG
+;	allow LP as the log file, please SPOOL this in the op system!
+;
+;	added SET DIAL RINGING, CONnnnn for supported speeds, ABORT,
+;	COMMENT, IDLE, PROMPT and INIT.ONCE for user-defined modem
+
+;	Copyright 1984  Change Software, Inc.
+;
+;	31-Jan-84  15:13:45  Brian Nelson
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+	.include "IN:KRTCDF.MAC"
+	.iif ndf  KRTCDF  .error	<; .include for IN:KRTCDF.MAC failed>
+
+	.mcall	.PURGE	,.SPFUN		; /63/
+
+
+	.macro	malloc	size		; /62/ moved this here
+	mov	size	,r0
+	call	malloc
+	.endm	malloc
+
+
+	.sbttl	Local data
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+savpnt:	.word	0			; save pointer to next arg here
+
+	.psect	$pdata			; /63/ consolidate all data here..
+log2lp:	.asciz	"KRTLOG.OUT"		; /63/ need a name for later os vers
+logext:	.asciz	".LOG"
+prefix:	.asciz	"Logfile "
+closit:	.asciz	" is open - Close it? "
+ovrwrt:	.asciz	" exists - Overwrite? "
+st0.01:	.asciz	"Number: "
+st0.02:	.asciz	"Seconds: "
+st0.03:	.asciz	"Abort dialing string: "
+st0.04:	.asciz	"Enable auto-answer string: "
+st0.05:	.asciz	"Blind dialing string: "
+st0.06:	.asciz	"Modem description: "
+st0.07:	.asciz	"Connect at 300 message: "
+st0.08:	.asciz	"Connect at 1200 message: "
+st0.09:	.asciz	"Connect at 2400 message: "
+st0.10:	.asciz	"Connect at 4800 message: "
+st0.11:	.asciz	"Connect at 9600 message: "
+st0.12:	.asciz	"Connect at 19.2k message: "
+st0.13:	.asciz	"Connect at 38.4k message: "
+st0.14:	.asciz	"String: "
+st0.15:	.asciz	"Character(s): "
+st0.16:	.asciz	"Ticks: "
+st0.17:	.asciz	"Failed call message: "
+st0.18:	.asciz	"Dial format string: "
+st0.19:	.asciz	"Modem reset string: "
+st0.20:	.asciz	"Initiate dialing string: "
+st0.21:	.asciz	"Initiate dialing prompt string: "
+st0.22:	.asciz	"Disable auto-answer string: "
+st0.23:	.asciz	"Pulse dial string: "
+st0.24:	.asciz	"Ringing message: "
+st0.25:	.asciz	"Connect (speed locked) message: "
+st0.26:	.asciz	"Seconds: "
+st0.27:	.asciz	"Tone dial string: "
+st0.28:	.asciz	"Response to wake-up: "
+st0.29:	.asciz	"Init modem to dial string: "
+st0.30:	.asciz	"Name Phone-Number: "
+st0.31:	.asciz	"Extended Mode: "
+st0.32:	.asciz	"Numbers or ALL: "
+st0.33:	.asciz	"No LOGFILE is open"<cr><lf>
+st0.34:	.asciz	" opened, "
+st0.35:	.asciz	" block"
+st0.36:	.asciz	"s"
+st0.37:	.asciz	"BINARY-MODE (fixed 512, no carriage control) enabled"<cr><lf>
+st0.38:	.asciz	" closed"<cr><lf>
+st0.39:	.asciz	" is already open"<cr><lf>
+st0.40:	.asciz	"?SET$DEBUG-W-Bad option"<cr><lf>
+st0.41:	.asciz	"You must SET DEBUG as desired to write to this file"<cr><lf>
+st0.42:	.asciz	"Caution: Binary files will require 8-bit prefixing"<cr><lf>
+st0.43:	.asciz	" requires hardware flow control"
+st0.44:	.asciz	" must always be quoted"
+st0.45:	.asciz	" is not a control character"
+	.even
+
+
+	.psect	$code
+	.sbttl	LOGFILE, SET LOGFILE	; /BBS/ heavily modified..
+	.enabl	lsb
+
+	CVTARG	= C.CRLF ! C.LSPA ! C.SSPA ! C.LCUC ! C.TSPA ; arg processing
+
+c$logf::call	set$log			; try to open the logfile
+	tst	r0			; did that work?
+	beq	10$			; ya
+	direrr	r0			; no, display any error
+	call	incsts			; set global error flag
+10$:	return
+
+set$lo::tstb	@argbuf			; any arg(s) supplied?
+	bne	40$			; ya
+	bit	#log$op	,trace		; no, is there a logfile open?
+	bne	20$			; no
+	wrtall	#st0.33			; /63/ "No LOGFILE is open"
+	clr	r0			; return no error
+	br	30$
+20$:	call	sd$off			; ya, close the current logfile
+30$:	return
+
+40$:	bit	#log$op	,trace		; is there a logfile open?
+	beq	90$			; no
+
+	; /BBS/ if a logfile is already open, query before closing it
+	wrtall	#prefix			; ya, build prompt, "Logfile " first
+	wrtall	#logfil			; append the file name, say it's open
+	wrtall	#closit			; and ask if it can be closed
+	calls	kbread	,<#spare1>	; get the answer, sans SL processing
+	tst	r0			; successful terminal read?
+	beq	50$			; ya
+	.newline			; no, after ^C, ensure a new line..
+	br	60$
+50$:	calls	cvt$$	,<#spare1,r1,#cvtarg> ; remove garbage, upper case
+	tst	r0			; anything left?
+	beq	70$			; no, exit please
+	cmpb	spare1	,#'Y&137	; does string begin with a "Y" ?
+	beq	80$			; ya, it does, meaning zap this file
+60$:	clr	r0			; success, either way a file is open
+70$:	return
+
+80$:	call	sd$off			; close the current logfile
+
+90$:	clr	savpnt			; init to say no second arg parsed yet
+	mov	argbuf	,r0		; set to recover next arg in buffer
+100$:	tstb	(r0)			; find EOS yet?
+	beq	110$			; yes, exit without changing anything
+	cmpb	(r0)+	,#space		; found a delimiter yet?
+	bne	100$			; no, keep looking
+	clrb	-1(r0)			; replace space delimiter with a null
+	mov	r0	,savpnt		; save address of second argument
+
+110$:	call	L1$			; call shared open the logfile code
+	bcs	70$			; /63/ file open failed, error's in r0
+	mov	savpnt	,argpnt		; pass debug mode argument to set$deb
+	beq	120$			; nothing there, so skip the call..
+	call	set$debug		; process next arg as debug mode
+	tst	r0			; /62/ did it work?
+	beq	120$			; /62/ ya
+	wrtall	#st0.40			; /63/ "SET$DEBUG-W-Bad option"
+	call	incsts			; /62/ flag error
+120$:	clr	savpnt			; re-init this right away..
+	mov	trace	,r0		; copy of log status word
+	bic	#<log$rp!log$de!log$op>,r0 ; /62/ hose non-relevant bits
+	bne	60$			; /63/ some disk mode is already set
+	wrtall	#st0.41			; /63/ "You must SET DEBUG .."
+	br	60$			; /63/ done
+
+	; /BBS/ shared code, so set$debug can call this much of it too..
+L1$:	bic	#log$al!log$io,trace	; /62/ clear all disk debug bits now
+	upcase	argpnt			; ensure file name is upper case
+	calls	fparse	,<argpnt,#spare1> ; /63/ parse the file name please
+	tst	r0			; did the $parse work?
+	beq	130$			; /63/ ya
+	jmp	190$			; /63/ no, return error in r0
+130$:	mov	#spare1	,r2		; pointer to possible "LP:"
+	cmpb	#'L&137	,(r2)+		; is first byte an "L" ?
+	bne	140$			; nope..
+	cmpb	#'P&137	,(r2)+		; is second byte a "P" ?
+	bne	140$			; nope..
+	cmpb	#':	,(r2)+		; is "LP" followed by a colon?
+	bne	140$			; no
+	tstb	(r2)			; ya, but is that null terminated?
+	bne	200$			; /63/ no, user supplied a file name
+	strcat	#spare1	,#log2lp	; /63/ ya, a name is required here
+	br	200$			; /63/ go do the file open
+
+140$:	scan	#'.	,#spare1	; look for a dot in the name
+	tst	r0			; find one?
+	bne	160$			; ya..
+	clrb	errtxt			; /63/ init buffer for possible [size]
+	scan	#'[	,#spare1	; /63/ did the user specify a size?
+	tst	r0			; /63/ well?
+	beq	150$			; /63/ no
+	add	#spare1	,r0		; /63/ ya, get pointer to the "["
+	dec	r0			; /63/ it's really here
+	copyz	r0	,#errtxt	; /63/ now save a copy of size data
+	clrb	@r0			; /63/ then mark end of file name
+150$:	strcat	#spare1	,#logext	; add .LOG to it
+	tstb	errtxt			; /63/ need to restore the size?
+	beq	160$			; /63/ no
+	strcat	#spare1	,#errtxt	; /63/ ya, put it back after extent
+
+160$:	calls	iswild	,<#spare1>	; wildcarded file spec??
+	tst	r0			; no support for it yet here..
+	bne	190$			; disallow wildcarded file name
+
+	; /BBS/ if logfile already exists, query before overwriting it
+	clr	index			; /62/ clear lookup's file counter
+	calls	lookup,<#spare1,#errtxt> ; /62/ does file already exist?
+	tst	r0			; /62/ find it?
+	bne	200$			; /62/ no
+	.purge	#lun.sr			; /62/ ya, hose dir search channel
+	wrtall	#spare1			; ya, build prompt, file name first
+	wrtall	#ovrwrt			; append some informative text
+	calls	kbread	,<argbuf>	; get the answer, sans SL processing
+	tst	r0			; successful terminal read?
+	beq	170$			; ya
+	.newline			; no, after ^C, ensure a new line..
+	bne	180$			; go set carry and exit
+170$:	calls	cvt$$	,<argbuf,r1,#cvtarg> ; remove garbage, upper case
+	tst	r0			; anything left?
+	beq	190$			; no, exit please
+	cmpb	@argbuf	,#'Y&137	; does string begin with a "Y" ?
+	beq	200$			; /62/ ya, all is well
+180$:	clr	r0			; no, don't pass back this error
+190$:	sec				; flag in case called by set$debug
+	return				; error is in r0
+
+200$:	calls	create	,<#spare1,#lun.lo,#text> ; open the file
+	tst	r0			; did it work?
+	bne	190$			; /BBS/ no
+	bis	#log$op	,trace		; yes, say it's open please
+	copyz	#spare1	,#logfil ,#26	; save the debug file name for show
+	tst	infomsg			; /41/ verbose today?
+	beq	220$			; /BBS/ no
+	wrtall	#prefix			; /BBS/ a prefix, "Logfile "
+	wrtall	#logfil			; confirm the logfile name
+	wrtall	#st0.34			; /62/ " opened, "
+	mov	#lun.lo	,r0		; /62/ logfile lun
+	asl	r0			; /62/ word indexing
+	mov	sizof(r0),r0		; /62/ recover size
+	mov	r0	,r1		; /62/ copy to test for plurality
+	call	L10266			; /62/ dump it to TT
+	wrtall	#st0.35			; /62/ say it's block(s)
+	dec	r1			; /62/ just one?
+	beq	210$			; /62/ ya, don't make it plural
+	wrtall	#st0.36			; /63/ no, toss in an "s"
+210$:	.newline			; /62/
+220$:	clr	r0			; success, also clears carry
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET DEBUG
+	.enabl	lsb			; /63/
+
+set$de::upcase	argpnt			; /BBS/ upper case all args
+	calls	getcm0	,<argpnt,#dbglst> ; find out which option was given
+	tst	r0			; find one?
+	bmi	30$			; /63/ no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	30$			; /63/ ya
+	jmp	@r1			; /63/ dispatch now
+
+	command	dbglst	,ALL	,1	,sd$on
+	command	dbglst	,CONNECT,2	,sd$con
+	command	dbglst	,CONSOLE,2	,sd$con
+	command	dbglst	,NONE	,3	,sd$none
+	command	dbglst	,NORPACK,3	,sd$nrp
+	command	dbglst	,NOTERMINAL,3	,sd$not
+	command	dbglst	,NOTT:	,3	,sd$not
+	command	dbglst	,OFF	,2	,sd$off
+	command	dbglst	,ON	,2	,sd$on
+	command	dbglst	,PACKET	,1	,sd$pak
+	command	dbglst	,RAW	,2	,sd$raw
+	command	dbglst	,RPACK	,2	,sd$rpa
+	command	dbglst	,TERMINAL,2	,sd$ter
+	command	dbglst	,TT:	,2	,sd$ter
+	command	dbglst
+
+sd$con:	call	sdopen			; logfile open?
+	bcs	30$			; no
+	call	rawchk			; disallow other logging
+	bcs	30$			; if raw is on
+	bic	#log$al	,trace		; /BBS/ clear all disk debug bits now
+	bis	#log$co	,trace		; enable connect mode logging
+	br	20$			; /63/ success
+
+sd$none:call	sd$off			; /BBS/ do this first
+	clr	trace			; /BBS/ dump everything
+	br	20$			; /63/ success
+
+sd$not:	bic	#log$de	,trace		; /62/ turn off terminal debugging
+	br	20$			; /63/ success
+
+sd$nrp:	bic	#log$rp	,trace		; /BBS/ off just RPACK debugging
+	br	20$			; /63/ success
+
+sd$off::bit	#log$op	,trace		; is there a logfile open?
+	beq	10$			; no
+	calls	close	,<#lun.lo>	; close it
+	bic	#log$op	,trace		; say it's closed please
+	tst	infomsg			; /41/ inform the user?
+	beq	10$			; /41/ no
+	wrtall	#prefix			; /41/ call it Logfile now
+	wrtall	#logfil			; /BBS/ include the actual file name
+	wrtall	#st0.38			; /63/ " closed"<cr><lf>
+10$:	bic	#log$al!log$io,trace	; /BBS/ clear all disk debug bits now
+20$:	clr	r0			; success
+30$:	return
+
+sd$on:	call	rawchk			; disallow other logging
+	bcs	30$			; if raw is on
+	call	sdopen			; a debug file already open?
+	bcs	30$			; no
+	bis	#log$al	,trace		; set debug on turns on the world
+	br	20$			; /63/ success
+
+sd$pak:	call	sdopen			; logfile open?
+	bcs	30$			; no
+	call	rawchk			; disallow other logging
+	bcs	30$			; if raw is on
+	bic	#log$al	,trace		; /BBS/ clear all disk debug bits now
+	bis	#log$pa	,trace		; enable packet logging
+	br	20$			; /63/ success
+
+sd$rpa:	bis	#log$rp	,trace		; enable RPACK debugging
+	br	20$			; /63/ success
+
+sd$ter:	bis	#log$de	,trace		; /62/ I/O to the local terminal
+	br	20$			; /63/ success
+
+sdopen:	bit	#log$op	,trace		; a logfile open?
+	beq	50$			; no
+	tst	savpnt			; /BBS/ come here from file opener?
+	bne	40$			; /BBS/ ya, skip this message..
+	wrtall	#prefix			; /BBS/ no, say it's already there
+	wrtall	#logfil			; /BBS/ including what it is
+	wrtall	#st0.39			; /63/ " is already open"<cr><lf>
+40$:	br	20$			; /63/ no error, clr r0 clears carry
+
+50$:	mov	argbuf	,r0		; /BBS/ bump argpnt to the next arg..
+60$:	tstb	@r0			; /63/ find EOS yet?
+	beq	70$			; /BBS/ yes, exit with an error
+	cmpb	(r0)+	,#space		; /BBS/ found a delimiter yet?
+	bne	60$			; /63/ no, keep looking
+	mov	r0	,argpnt		; /BBS/ pass name to logfile opener
+	call	L1$			; /BBS/ jump in at appropriate place
+	bcc	30$			; /BBS/ carry clear = logfile open
+70$:	mov	#er$lgf	,r0		; /BBS/ please opn a LOGFILE first
+80$:	sec				; /63/ error exit
+	return
+
+rawchk:	bit	#log$io	,trace		; raw I/O debugging?  (clears carry)
+	beq	30$			; /63/ no
+	mov	#er$rax	,r0		; /BBS/ can't with raw I/O logging on
+	br	80$			; /63/ failure
+
+sd$raw:	call	sdopen			; logfile open?
+	bcs	30$			; no
+	mov	trace	,r0		; copy of debugging status word
+	bic	#<log$rp!log$op>,r0	; hose RPACK and disk file open bits
+	beq	90$			; no other disk_based option is on
+	mov	#er$raw	,r0		; /BBS/ can't do raw I/O w/other opts
+	br	30$
+90$:	bis	#log$io	,trace		; enable raw I/O logging
+	mov	#lun.lo	,r0		; /62/ copy of lun
+	asl	r0			; /62/ word indexing
+	mov	sp	,filtyp(r0)	; /62/ flag to use binary mode
+	tst	infomsg			; SET TT QUIET?
+	beq	20$			; /63/ ya, skip info message
+	wrtall	#prefix			; /62/ "Logfile "
+	wrtall	#st0.37			; /62/ say binary mode is enabled
+	br	20$			; /63/ success
+
+	.dsabl	lsb
+
+
+	.sbttl	SET PARITY
+	.enabl	lsb			; /63/
+
+set$pa::upcase	argbuf			; /BBS/ upper case all args
+	calls	getcm0	,<argbuf,#parlst> ; find out which option was given
+	tst	r0			; did we find one
+	bmi	30$			; no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	20$			; /BBS/ ya
+	jmp	@r1			; /63/ dispatch
+
+	command	parlst	,EVEN	,1	,spa$ev
+	command	parlst	,MARK	,1	,spa$ma
+	command	parlst	,NONE	,1	,spa$no
+	command	parlst	,ODD	,1	,spa$od
+	command	parlst	,SPACE	,1	,spa$sp
+	command	parlst
+
+spa$ev:	mov	#par$ev	,r0		; even
+	br	10$			; /63/
+
+spa$od:	mov	#par$od	,r0		; odd
+	br	10$			; /63/
+
+spa$ma:	mov	#par$ma	,r0		; mark
+	br	10$			; /63/
+
+spa$sp:	mov	#par$sp	,r0		; space
+	br	10$			; /63/
+
+spa$no:	clr	r0			; /BBS/ none
+10$:	mov	r0	,parity		; /63/ save returned value
+	beq	20$			; /BBS/ skip msg if parity is set none
+	tst	infomsg			; SET TT QUIET?
+	beq	20$			; ya
+	wrtall	#st0.42			; /63/ "Binary files will be prefixed"
+20$:	clr	r0			; no error
+30$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET HANDSHAKE
+	.enabl	lsb			; /63/
+
+	SQUOTE	= 47	; '
+	DQUOTE	= 42	; "
+
+set$ha::upcase	argbuf			; /BBS/ leaves r0 pointing to argbuf
+	cmpb	@r0	,#squote	; a literal ' quoted character?
+	beq	10$			; yes, use next char as the handshake
+	cmpb	@r0	,#dquote	; look for " also
+	bne	20$			; not there
+10$:	movb	1(r0)	,r0		; get the handshake character please
+	br	30$			; and copy it please
+20$:	calls	getcm0	,<r0,#hanlst>	; which option was given?
+	tst	r0			; find one?
+	bmi	50$			; no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	40$			; /BBS/ ya
+	jmp	@r1			; /63/ dispatch now
+
+	command	hanlst	,CR	,1	,sha$cr
+	command	hanlst	,NONE	,1	,sha$no
+	command	hanlst
+
+sha$no:	clrb	r0			; no handshake (the default)
+	br	30$			; /63/
+
+sha$cr:	movb	#cr	,r0		; wait for a carriage return
+30$:	movb	r0	,handch		; save the result
+40$:	clr	r0			; success
+50$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET DUPLEX, SET LOCAL-ECHO	; /BBS/ add _ECHO to LOCAL
+	.enabl	lsb			; /63/
+
+;	Provide both SET DUPLEX FULL/HALF and SET LOCAL-ECHO ON/OFF
+;	to provide users with compatibility with the different ways
+;	other Kermits do this.
+
+set$lc::mov	#lcelst	,r5		; load pointer to LOCAL commands
+	br	dulc			; share common code
+
+set$du::mov	#duplst	,r5		; load pointer to DUPLEX commands
+dulc:	upcase	argbuf			; /BBS/ upper case all args
+	calls	getcm0	,<argbuf,r5>	; find out which option was given
+	tst	r0			; did we find one
+	bmi	20$			; no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	10$			; /BBS/ ya
+	jmp	@r1			; /63/ dispatch
+
+	command	duplst	,FULL	,1	,sdu$fu
+	command	duplst	,HALF	,1	,sdu$ha
+	command	duplst
+
+	command	lcelst	,OFF	,2	,sdu$fu
+	command	lcelst	,ON	,2	,sdu$ha
+	command	lcelst
+
+sdu$ha:	mov	sp	,duplex		; force local echo on
+	br	10$			; /63/
+
+sdu$fu:	clr	duplex			; no local echo, the default
+10$:	clr	r0			; no error
+20$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET UPDATE
+
+set$nu::clr	blip			; SET NOUPDATE
+	clr	r0			; no error
+	return
+
+set$up::calls	l$val	,<argbuf>	; get the interval into decimal
+	tst	r0			; ok?
+	bne	10$			; /63/ er$bad stuffed in r0 by l$val
+	mov	r1	,blip		; yes, set it up please (r0 is clear)
+10$:	return
+
+
+	.sbttl	SET RETRY		; /BBS/ enhanced..
+	.enabl	lsb			; /63/
+
+set$re::upcase	argbuf			; /BBS/ upper case argument buffer
+	calls	getcm0	,<argbuf,#trylst> ; try to parse the first arg
+	tst	r0			; did it work?
+	bmi	20$			; /63/ nope
+	tst	wasnul			; were commands listed via "?"
+	bne	20$			; /63/ ya
+	calls	getcm1	,<argbuf,#trylst,r0> ; /63/ check for possible arg
+	tst	r0			; /63/ well?
+	bmi	20$			; /63/ bad arg..
+	jmp	@r1			; /63/ dispatch
+
+	command	trylst	,INITIAL-CONNECTION,1	,stry$i	,st0.01
+	command	trylst	,PACKET		   ,1	,stry$p	,st0.01
+	command	trylst
+
+stry$i:	call	stry$$			; initial-connection retries
+	tst	r0			; did it work?
+	bne	20$			; /63/ no
+	mov	r1	,initry		; ya, save value
+	return
+
+stry$p:	call	stry$$			; data packet retries
+	tst	r0			; did it work?
+	bne	20$			; /63/ no
+	mov	r1	,maxtry		; ya, save value
+	return
+
+stry$$:	call	nextarg			; get the next argument
+	tstb	@r1			; well?
+	beq	10$			; not there
+	calls	l$val	,<r1>		; SET RETRY decimal-number
+	tst	r0			; well?
+	bne	10$			; no, bad value
+	cmp	r1	,#3.		; a reasonable minimum?
+	blo	10$			; nope..
+	cmp	r1	,#30.		; a reasonable maximum?
+	blos	20$			; ya
+10$:	mov	#er$try	,r0		; no, must be between 3. and 30.
+20$:	return
+
+	.dsabl	lsb			; /63/
+
+
+	.sbttl	SET SERVER
+	.enabl	lsb			; /63/
+
+set$sv::upcase	argbuf			; /BBS/ upper case all args
+	calls	getcm0	,<argbuf,#svlst> ; find out which option was given
+	tst	r0			; did we find the option?
+	bmi	20$			; /63/ no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	20$			; /63/ ya
+	calls	getcm1	,<argbuf,#svlst,r0> ; yes, look for value clause now
+	tst	r0			; find it (or read it?)
+	bmi	20$			; /63/ no
+	jmp	@r1			; /63/ getcm1 always returns in argbuf
+
+	command svlst	,NOTIME-OUT	,1	,srv$nt
+	command svlst	,TIME-OUT	,1	,srv$ti	,st0.02
+	command svlst
+
+srv$ti:	calls	l$val	,<argbuf>	; convert ascii number to integer
+	tst	r0			; did it work?
+	bne	20$			; /63/ no, l$val loads er$bad into r0
+	cmp	r1	,#1092.		; /62/ too big?  note r0 is clear here
+	bhi	10$			; /62/ ya, don't set it
+	mov	r1	,serwait	; it's ok, save desired time out
+	br	20$
+10$:	mov	#er$bad	,r0		; error, a bad value was given
+20$:	return
+
+srv$nt:	mov	#1092.	,serwait	; /62/ wait the max, 18.2 mins @ 60Hz
+	clr	r0			; no error possible here
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET EOF [NO]EXIT
+	.enabl	lsb			; /63/
+
+set$ef::upcase	argbuf			; /BBS/ upper case all args
+	calls	getcm0	,<argbuf,#eflist> ; parse the first arg
+	tst	r0			; did it work?
+	bmi	20$			; no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	20$			; /BBS/ ya
+	jmp	@r1			; /63/ dispatch
+
+	command	eflist	,EXIT	,1	,sef$ex
+	command	eflist	,NOEXIT	,1	,sef$ne
+	command	eflist
+
+sef$ne:	clr	exieof			; don't exit at end of TAKE file
+	br	10$			; /63/
+
+sef$ex:	mov	sp	,exieof		; exit to monitor at end of TAKE file
+10$:	clr	r0			; no error
+20$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET INCOMPLETE-FILE-DISPOSITION	; /BBS/ all new..
+	.enabl	lsb			; /63/
+
+set$in::upcase	argbuf			; upper case all args
+	calls	getcm0	,<argbuf,#inclist> ; try to parse the first arg
+	tst	r0			; well?
+	bmi	20$			; didn't work
+	tst	wasnul			; was arg a question mark?
+	bne	20$			; ya, don't dispatch on that
+	jmp	@r1			; /63/ dispatch the command
+
+	command	inclist	,DISCARD,1	,sin$ds
+	command	inclist	,KEEP	,1	,sin$kp
+	command	inclist
+
+sin$kp:	clr	incfile			; keep incomplete files
+	br	10$			; /63/
+
+sin$ds:	mov	sp	,incfile	; dump incomplete files
+10$:	clr	r0			; no error
+20$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET DIAL		; /BBS/ substantially enhanced
+	.enabl	lsb			; /63/
+
+set$di::mov	#dialst	,r3		; pointer to command dispatch table
+	mov	#spare1	,r4		; /63/ pointer to a temp buffer
+	upone	argbuf			; upcase just next arg only..
+	calls	getcm0	,<argbuf,r3>	; parse the first arg
+	tst	r0			; did it work?
+	bmi	60$			; /63/ no, bad option
+	tst	wasnul			; were commands listed via "?"
+	bne	60$			; /63/ ya
+	calls	getcm1	,<argbuf,r3,r0>	; no, look for next arg
+	tst	r0			; get one?
+	bmi	60$			; /63/ no
+	jmp	@r1			; /63/ dispatch
+
+	command dialst ,ABORT		,2	,ss$abo	,st0.03
+	command dialst ,ANSWER		,2	,ss$ans	,st0.04
+	command dialst ,BINARY-RESPONSE	,2	,ss$bin
+	command dialst ,BLIND		,2	,ss$bli	,st0.05
+	command dialst ,COMMENT		,3	,ss$com	,st0.06
+	command dialst ,CON300		,5	,ss$300	,st0.06
+	command dialst ,CON1200		,5	,ss$120	,st0.08
+	command dialst ,CON2400		,4	,ss$240	,st0.09
+	command dialst ,CON4800		,4	,ss$480	,st0.10
+	command dialst ,CON9600		,4	,ss$960	,st0.11
+	command dialst ,CON19200	,5	,ss$192	,st0.12
+	command dialst ,CON38400	,5	,ss$384	,st0.13
+	command dialst ,CONFIRM		,4	,ss$con	,st0.14
+	command dialst ,CONFIRM-ACKNOWLEDGE,8.	,ss$cak	,st0.14
+	command dialst ,DIAL-ACKNOWLEDGE,6	,ss$dak	,st0.14
+	command dialst ,DIAL-PAUSE	,6	,ss$pau	,st0.15
+	command dialst ,DIAL-RATE	,6	,ss$dra	,st0.16
+	command dialst ,ECHO		,1	,ss$eko
+	command dialst ,FAILURE		,2	,ss$fai	,st0.17
+	command dialst ,FORMAT		,2	,ss$for	,st0.18
+	command dialst ,IDLE		,2	,ss$idl	,st0.19
+	command dialst ,INITIATE	,5	,ss$ini	,st0.20
+	command dialst ,INITIATE-PROMPT	,9.	,ss$inp	,st0.21
+	command dialst ,INIT-ONCE	,5	,ss$one
+	command dialst ,NOANSWER	,3	,ss$anx	,st0.22
+	command dialst ,NOBINARY-RESPONSE,3	,ss$bix
+	command dialst ,NOECHO		,3	,ss$ekx
+	command dialst ,NOINIT-ONCE	,3	,ss$onx
+	command dialst ,PULSE		,1	,ss$pul	,st0.23
+	command dialst ,RINGING		,1	,ss$rin	,st0.24
+	command dialst ,SETTLE-TIME	,2	,sst$st	,st0.16
+	command dialst ,SUCCESS		,2	,ss$suc	,st0.25
+	command dialst ,TIME-OUT	,2	,ss$tmo	,st0.26
+	command dialst ,TONE		,2	,ss$ton	,st0.27
+	command dialst ,WAKE-ACKNOWLEDGE,6	,ss$pro	,st0.28
+	command dialst ,WAKE-RATE	,6	,ss$wra	,st0.16
+	command dialst ,WAKE-STRING	,6	,ss$wak	,st0.29
+	command dialst
+
+ss$300:	mov	#300.	,r3		; connect at 300
+	br	sd.res
+
+ss$120:	mov	#1200.	,r3		; 1200
+	br	sd.res
+
+ss$240:	mov	#2400.	,r3		; 2400
+	br	sd.res
+
+ss$480:	mov	#4800.	,r3		; 4800
+	br	sd.res
+
+ss$960:	mov	#9600.	,r3		; 9600
+	br	sd.res
+
+ss$192:	mov	#19200.	,r3		; 19.2k
+	br	sd.res
+
+ss$384:	mov	#38400.	,r3		; /62/ 38.4k
+	br	sd.res
+
+ss$suc:	mov	#2	,r3		; connect without speed change
+	br	sd.res
+
+ss$rin:	mov	#1	,r3		; ring, or rring if Telebit modem
+	br	sd.res
+
+ss$fai:	mov	#-1	,r3		; call failed
+	.br	sd.res			; /63/
+
+sd.res:	prsbuf	r4			; expand and copy string to workbuffer
+	tst	r0			; successful?
+	bne	60$			; no
+	strlen	r4			; get the length of the result
+	add	#2	,r0		; plus one for the null terminator
+	bic	#1	,r0		; ensure on a word boundary
+	add	#4	,r0		; space for link and status
+	mov	#usermd	,r5		; /BBS/ get base address of structure
+	add	#res.hea,r5		; link to first entry
+20$:	tst	(r5)			; end of the chain yet?
+	beq	30$			; yes
+	mov	(r5)	,r5		; no, get the next one please
+	br	20$			; and recheck
+30$:	malloc	r0			; ask for an allocation
+	mov	r0	,(r5)		; /63/ get it?
+	beq	40$			; no, exit
+	mov	(r5)	,r5		; point directly to new area
+	clr	(r5)+			; no link to next
+	mov	r3	,(r5)+		; message class type
+	strcpy	r5	,r4		; insert the string
+	br	50$
+40$:	mov	#er$mal	,r0		; /BBS/ no space left for string
+	return
+50$:	clr	r0			; /BBS/ no error
+60$:	return
+
+ss$abo:	mov	#dial.xabort,r5		; abort call from modem
+	br	sd.chk
+
+ss$ans:	mov	#ph.answer,r5		; /62/ enable auto-answer mode
+	br	sd.chk
+
+ss$anx:	mov	#ph.noanswer,r5		; /62/ disable auto-answer mode
+	br	sd.chk
+
+ss$com:	mov	#mod.comment,r5		; brief modem description
+	br	sd.chk
+
+ss$dak:	mov	#dial.ack,r5		; /62/ modem response to confirm
+	br	sd.chk			; /62/ number is dialing (optional)
+
+ss$idl:	mov	#dial.idle,r5		; place modem in idle state
+	br	sd.chk
+
+ss$pau:	mov	#dial.wait,r5		; pause string
+	br	sd.chk
+
+ss$wak:	mov	#wake.string,r5		; init string
+	br	sd.chk
+
+ss$for:	mov	#dial.string,r5		; formatting for dialing
+	br	sd.chk
+
+ss$pro:	mov	#wake.prompt,r5		; string modem returns for wakeup
+	br	sd.chk
+
+ss$ini:	mov	#dmod.string,r5		; SET DIAL INITIATE string
+	br	sd.chk
+
+ss$inp:	mov	#dmod.prompt,r5		; /62/ possible prompt returned after
+	br	sd.chk			; /62/ INITIATE string is sent
+
+ss$con:	mov	#dial.confirm,r5	; to confirm number is correct
+	br	sd.chk
+
+ss$cak:	mov	#dial.go,r5		; /62/ to confirm the confirmation
+	br	sd.chk			; /62/ is correct (!)
+
+ss$bli:	mov	#dial.blind,r5		; /62/ BLIND dialing string
+	br	sd.chk			; /62/
+
+ss$pul:	mov	#dial.pulse,r5		; /62/ PULSE dialing string
+	br	sd.chk			; /62/
+
+ss$ton:	mov	#dial.nopulse,r5	; /62/ TONE dialing string
+	.br	sd.chk			; /63/
+
+sd.chk:	prsbuf	r4			; expand and copy string to workbuffer
+	tst	r0			; successful?
+	bne	60$			; no
+	strlen	r4			; get the length of the result
+	inc	r0			; plus one for the null terminator
+	inc	r0			; ensure next allocation begins
+	bic	#1	,r0		; on an even address boundary
+	malloc	r0			; ask for the allocation
+	tst	r0			; /BBS/ did we get it?
+	beq	40$			; /BBS/ no, exit
+	add	#usermd	,r5		; /BBS/ ya, point to next free address
+	mov	r0	,(r5)		; insert the new buffer address
+	strcpy	(r5)	,r4		; copy the string
+	br	50$			; /BBS/ share exit code
+
+ss$eko:	mov	#dial.echo,r5
+	br	ss$$1			; /63/ modem echoes dial commands
+
+ss$ekx:	mov	#dial.echo,r5
+	br	ss$$0			; /63/ modem doesn't echo commands
+
+ss$one:	mov	#init.once,r5
+	br	ss$$1			; /63/ modem stays init'd
+
+ss$onx:	mov	#init.once,r5
+	br	ss$$0			; /63/ modem does not stay init'd
+
+ss$bin:	mov	#res.bin,r5
+ss$$1:	movb	#'1	,r1		; /62/ modem does single char response
+	br	ss$$$
+
+ss$bix:	mov	#res.bin,r5
+ss$$0:	movb	#'0	,r1		; /62/ modem responds normally
+	.br	ss$$$			; /63/
+
+ss$$$:	mov	argbuf	,r0		; /62/ where to pass l$val's argument
+	movb	r1	,(r0)+		; /62/ do it
+	clrb	(r0)			; /62/ null terminate
+	br	sd.val			; /62/ and off to common code..
+
+ss$dra:	mov	#dial.rate,r5		; in ticks
+	br	sd.val
+
+ss$wra:	mov	#wake.rate,r5		; in ticks
+	.br	sd.val			; /63/
+
+sd.val:	calls	l$val	,<argbuf>	; convert ascii number to integer
+	tst	r0			; success?
+	bne	80$			; no
+70$:	mov	r1	,usermd(r5)	; yes, insert the value
+80$:	return				; /62/ done
+
+sst$st:	calls	l$val	,<argbuf>	; /62/ convert to an integer
+	tst	r0			; /62/ ok?
+	bne	80$			; /62/ nope
+	mov	r1	,settle		; /62/ ya, save it
+	mov	#time.settle,r5		; /62/ prep to stuff into USER-DEFINED
+	br	70$			; /62/ go do it
+
+ss$tmo:	calls	l$val	,<argbuf>	; convert ascii number to integer
+	tst	r0			; success?
+	bne	80$			; no
+	mov	r1	,diatmo		; number is ok
+	mov	#dial.time,r5		; /62/ prep to stuff into USER-DEFINED
+	br	70$			; /62/ go do it
+
+	.dsabl	lsb
+
+
+	.sbttl	SET PHONE		; /45/ added
+
+set$ph::upone	argbuf			; /BBS/ upper case just next arg
+	calls	getcm0	,<argbuf,#pholst> ; which option was given?
+	tst	r0			; find one?
+	bmi	sph$zz			; /63/ no, bad option
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	sph$zz			; /63/ ya
+	calls	getcm1	,<argbuf,#pholst,r0> ; look for next argument
+	tst	r0			; find one?
+	bmi	sph$zz			; /63/ no
+	jmp	@r1			; /63/ ya, dispatch
+
+	command pholst	,ANSWER	,1	,sph$an
+	command pholst	,BLIND	,1	,sph$bl
+	command pholst	,NOANSWER,2	,sph$no
+	command pholst	,NUMBER	,2	,sph$nu	,st0.30
+	command pholst	,PULSE	,1	,sph$pu
+	command pholst	,TONE	,1	,sph$to
+	command pholst	,XMODE	,1	,sph$xm	,st0.31
+	command pholst
+
+sph$an:	mov	sp	,answer		; /62/ modem not enabled until dialing
+	br	sph$xx			; /62/ thus nothing special here..
+
+sph$no:	clr	answer			; /62/ don't enable next time dialing
+	tst	mready			; /62/ is a modem currently on-line?
+	beq	sph$xx			; /62/ no
+	tst	(sp)+			; /62/ pop local dispatch return addr
+	jmp	set$dtr			; /62/ reinit modem so no answer works
+
+sph$to:	mov	#1	,pulse		; make it tone dialing
+	br	sph$xx			; /62/
+
+sph$pu:	mov	#-1	,pulse		; make it pulse dialing
+	br	sph$xx			; /62/
+
+sph$bl:	mov	#1	,blind		; dial blindly
+	br	sph$xx			; /62/
+
+sph$nu:	mov	#pnhead	,r5		; get listhead for phone numbers
+10$:	tst	(r5)			; found the last entry yet?
+	beq	20$			; yes, insert new element here
+	mov	(r5)	,r5		; no, check the next one
+	br	10$			; keep looking
+20$:	call	skipit			; /BBS/ ignore comma in argument
+	strlen	argbuf			; get total length of data
+	add	#4	,r0		; add in space for nulls and ensure
+	bic	#1	,r0		; even length, also link next field
+	malloc	r0			; ask for the space please
+	mov	r0	,(r5)		; insert the address
+	bne	30$			; space is available
+	mov	#er$mal	,r0		; /BBS/ no space left for string
+	return
+30$:	clr	(r0)+			; this is now the tail
+	strcpy	r0	,argbuf		; stuff the data in
+sph$xx:	clr	r0			; Indicate success
+sph$zz:	return				; /63/
+
+sph$xm::upcase	argbuf			; /BBS/ global for SET CL LIN *
+	calls	getcm0	,<argbuf,#xmlist> ; check the table for type
+	tst	r0			; did it work?
+	bmi	40$			; no
+	tst	wasnul			; were commands listed via "?"
+	bne	sph$xx			; /62/ ya
+	jsr	pc	,@r1		; yes, dispatch on it please
+	br	sph$xx			; /62/
+40$:	mov	#er$bad	,r0		; bad value or option error
+	return
+
+	command	xmlist	,0	,1	,sxm$st
+	command	xmlist	,1	,1	,sxm$st
+	command	xmlist	,2	,1	,sxm$st
+	command	xmlist	,3	,1	,sxm$st
+	command	xmlist	,4	,1	,sxm$st
+	command	xmlist	,5	,1	,sxm$st
+	command	xmlist	,6	,1	,sxm$st
+	command	xmlist	,10	,2	,sxm$st
+	command	xmlist	,11	,2	,sxm$st
+	command	xmlist	,12	,2	,sxm$st
+	command	xmlist	,13	,2	,sxm$st
+	command	xmlist	,14	,2	,sxm$st
+	command	xmlist	,OFF	,1	,sxm$of
+	command	xmlist
+
+sxm$of:	clrb	xresult			; the default, no xmode selected
+	mov	#-1	,r1		; /62/ update USER-DEFINED modem data
+	br	sxm$$$			; /62/ common code
+
+sxm$st:	strcpy	#xresult,argbuf		; /62/ move argument into buffer
+	calls	l$val	,<argbuf>	; /62/ convert ascii number to integer
+sxm$$$:	mov	#usermd	,r0		; /62/ top of USER-DEFINED modem data
+	mov	r1	,x.result(r0)	; /62/ update it too..
+	return
+
+
+	.sbttl	SET SL			; /BBS/ added..
+	.enabl	lsb			; /63/
+
+set$sl::upcase	argbuf			; upper case all args
+	calls	getcm0	,<argbuf,#sl.lst> ; which option was given?
+	tst	r0			; well?
+	bmi	20$			; bad option
+	tst	wasnul			; were commands listed via "?"
+	bne	20$			; ya
+	call	kp.clr			; reset the keypad
+	jmp	@r1			; /63/ dispatch
+
+	command sl.lst	,KED	,1	,ssl$ke
+	command sl.lst	,NOKED	,1	,ssl$no
+	command sl.lst	,OFF	,2	,ssl$of
+	command sl.lst	,ON	,2	,ssl$on
+	command sl.lst
+
+ssl$ke:	mov	sp	,sl.ked		; put SL into KED mode
+	br	10$			; /63/
+
+ssl$no:	clr	sl.ked			; put SL in normal mode
+	br	10$			; /63/
+
+ssl$of:	clr	sl.on			; turn SL off
+	br	10$			; /63/
+
+ssl$on:	mov	sp	,sl.on		; turn SL on
+10$:	clr	r0			; no error
+20$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET CONTROL-CHARACTER	; /63/ all new..
+	.enabl	lsb
+
+; Control character quoting may be disabled for each byte individually 
+; by making its corresponding flag byte in CLTFLGS <> 0.
+;
+;	flags offset	character controlled
+;	------------    --------------------
+;	CTLFLGS+  0  =  ascii 377  <200!DEL>
+;	       +  1  =  ascii   0  <NUL>
+;	        ...
+;	       + 40  =  ascii  37  <US>
+;	       + 41  =  ascii 177  <DEL>
+;	       + 42  =  ascii 200  <200!NUL>
+;	        ...
+;	       +101  =  ascii 237  <200!US>
+
+;	r2  =   buffer pointer for register indexing
+;	r3  =	loop counter for sct$all
+;	r4  =	command mode flag byte: 0 = unprefixed, 1 = prefixed
+;	r5  =   error message text address
+
+	CL.FLOW	= 40			; CLSTAT spfun flow control type bit
+	CT.WID	= 4			; pad numbers in err msgs this wide
+
+set$ct::upcase	argbuf			; upper case the whole argument buffer
+	calls	getcm0	,<argbuf,#ctset> ; try to parse the first arg
+	tst	r0			; did it work?
+	bmi	ct.done			; nope
+	tst	wasnul			; were commands listed via "?"
+	bne	ct.done			; ya
+	calls	getcm1	,<argbuf,#ctset,r0> ; get required second arg(s)
+	tst	r0			; well?
+	bmi	ct.done			; bad arg..
+	jmp	@r1			; dispatch
+
+	command	ctset	,PREFIXED   ,1	,sct$pr	,st0.32
+	command	ctset	,UNPREFIXED ,1	,sct$un	,st0.32
+	command	ctset
+
+sct$pr:	mov	#1	,r4		; command was PREFIXED
+	br	sct$$
+sct$un:	clr	r4			; or UNPREFIXED
+
+sct$$:	calls	getcm0	,<argbuf,#ctlst> ; look for "ALL"
+	tst	wasnul			; check this first here..
+	bne	ct.exit			; commands were listed via "?"
+	tst	r0			; did getcm0 work?
+	bne	10$			; no
+	jsr	pc	,@r1		; yes, dispatch on it please
+	br	ct.loop			; then loop for more input
+10$:	cmp	r0	,#cmd$bad	; a ^C or ^Z abort?
+	blos	ct.num			; it may be a number
+ct.exit:clr	r0			; no error here is fatal
+ct.done:return
+
+ct.num:	mov	#spare1	,r0		; handy buffer for current arg
+	mov	argbuf	,r1		; pointer to the arg to process
+20$:	movb	(r1)+	,(r0)		; is this char a null?
+	beq	30$			; ya, done
+	cmpb	(r0)+	,#space		; no, but is it a delimiter?
+	bne	20$			; no, loop for more chars
+	clrb	-(r0)			; ya, null terminate copy in spare1
+
+30$:	calls	l$val	,<#spare1>	; try to recover a number
+	tst	r0			; well?
+	bne	ct.bad			; no, bad value
+	bit	#^c<377>,r1		; if > 377
+	bne	ct.bad			; it's a bad number
+	incb	r1			; wrap 377 to 0, others ch=ch+1
+	cmp	r1	,#41		; was char 37..0,377 (now 40..0)?
+	blo	ct.all			; yes, it's a control char
+	sub	#137	,r1		; bump 240..200 down to 101..41
+	cmp	r1	,#41		; if now < 41 then it's
+	blo	ct.bad			; not a control char
+	cmp	r1	,#101		; if now <= 101 then
+	blos	ct.all			; it's a control char
+
+ct.bad:	tst	infomsg			; report the bad number?
+	beq	ct.loop			; no, info messages are disabled
+	strlen	#spare1			; get length of the offending string
+	sub	#ct.wid	,r0		; subtract total width allowed here
+	neg	r0			; how much do we need to pad?
+	ble	50$			; it's already there or overflowed..
+	mov	r0	,r1		; copy number of blanks needed
+	mov	#space	,r0		; load a blank into the output reg
+40$:	call	writ1char		; write it to the terminal
+	sob	r1	,40$		; repeat until done
+50$:	wrtall	#spare1			; now write the number itself to tt
+	mov	#st0.45	,r5		; load message tag text location
+	br	110$			; go print it
+
+ct.all:	tst	r4			; allow anything
+	bne	70$			; to be set prefixed
+	cmp	r1	,#1		; unprefixing, is this a NULL?
+	blo	70$			; no but it is ascii 377
+	beq	90$			; ya
+	cmp	r1	,#22		; an XON?
+	beq	60$			; ya
+	cmp	r1	,#24		; an XOFF?
+	beq	60$			; ya
+	cmp	r1	,#63		; maybe it's <200!XON>
+	beq	60$			; ya
+	cmp	r1	,#65		; how about <200!XOFF>
+	bne	70$			; nope..
+60$:	tst	km.lock			; hardware flow control here is
+	beq	80$			; only supported on the KM handler
+	clr	-(sp)			; a one word buffer
+	mov	sp	,r2		; pointer to it
+	.spfun	#rtwork,#xc.control,#clstat,r2,#0,#1 ; get the status
+	bit	#cl.flow,(sp)+		; if <> it's done in hardware
+	beq	80$			; it's software flow control
+70$:	movb	r4	,ctlflgs(r1)	; set or clear as req'd ..
+
+ct.loop:call	nextarg			; look for another arg
+	tstb	(r1)			; find one?
+	beq	ct.exit			; nothing left to do
+	copyz	r1 ,argbuf ,#ln$max-4	; pull it up to top of argument buffer
+	jmp	sct$$			; loop back and give it a go..
+
+80$:	mov	#st0.43	,r5		; enter here for XOFF warning
+	movb	#1	,ctlflgs(r1)	; ensure char gets quoted
+	br	ct.err
+90$:	mov	#st0.44	,r5		; enter here for NULL warning
+ct.err:	tst	infomsg			; info messages on?
+	beq	ct.loop			; no, skip this stuff
+	cmp	r1	,#41		; is this a shifted down char?
+	blo	100$			; no
+	add	#137	,r1		; ya, bump 101..41 back to 240..200
+100$:	decb	r1			; now back to where we started
+	mov	#errtxt	,r2		; a handy buffer
+	deccvt	r1 ,r2 ,#ct.wid		; integer > ascii, right justify
+	clrb	ct.wid(r2)		; null terminate the ascii string
+	wrtall	r2			; display it then
+110$:	wrtall	r5			; add the appropriate tag line
+	.newline
+	br	ct.loop
+
+	command	ctlst	,ALL	,1	,sct$al
+	command	ctlst
+
+sct$al:	clr	r3			; start off at offset = zero
+120$:	mov	r3	,r1		; do this character position in table
+	call	ct.all			; ..one by one
+	inc	r3			; next time do next char
+	cmp	r3	,#101		; there are 65. total control chars
+	blos	120$			; loop until they've all been done
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Get the next argument
+
+nextarg:mov	argbuf	,r1		; pointer to top of args buffer
+10$:	tstb	@r1			; is this char a null?
+	beq	20$			; ya, done
+	cmpb	(r1)+	,#space		; no, but is it a delimiter?
+	bne	10$			; no, try the next char..
+20$:	return
+
+
+	.sbttl	Memory allocation	; /62/ moved this here
+
+;	input:   r0	Amount of memory needed
+
+malloc:	inc	r0			; ensure r0 is pointing
+	bic	#1	,r0		; to an even word boundary
+	mov	r0	,-(sp)		; save a copy of this address
+	add	@albuff	,(sp)		; add used part of buffer to it
+	cmp	(sp)	,#alsize	; is there any room left?
+	bhis	10$			; no
+	mov	albuff	,r0		; ya, compute pointer to this
+	add	#2	,r0		; new allocation
+	add	@albuff	,r0		; it begins here..
+	mov	(sp)+	,@albuff	; this is the new start of free memory
+	return
+10$:	clr	r0			; indicate failure
+	tst	(sp)+			; dump needed memory buffer
+	return
+
+	.end

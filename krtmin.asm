@@ -1,0 +1,30 @@
+ass dk in
+r macro
+krtatr=krtnhd.min,krtatr.min
+krtcmd=krtnhd.min,krtcmd.min
+krtcm1=krtnhd.min,krtcm1.min
+krtcom=krtnhd.min,krtcom.min
+krtcvt=krtnhd.min,krtcvt.min
+krtdat=krtnhd.min,krtdat.min
+krtdeb=krtnhd.min,krtdeb.min
+krtdir=krtnhd.min,krtdir.min
+krtdsp=krtnhd.min,krtdsp.min
+krtedi=krtnhd.min,krtedi.min
+krterm=krtnhd.min,krterm.min
+krterr=krtnhd.min,krterr.min
+krthlp=krtnhd.min,krthlp.min
+krtini=krtnhd.min,krtini.min
+krtosi=krtnhd.min,krtosi.min
+krtpak=krtnhd.min,krtpak.min
+krtrec=krtnhd.min,krtrec.min
+krtrms=krtnhd.min,krtrms.min
+krtsen=krtnhd.min,krtsen.min
+krtser=krtnhd.min,krtser.min
+krtsho=krtnhd.min,krtsho.min
+krtsj=krtnhd.min,krtsj.min
+krtstd=krtnhd.min,krtstd.min
+krtst0=krtnhd.min,krtst0.min
+krtst1=krtnhd.min,krtst1.min
+krtsub=krtnhd.min,krtsub.min
+krtutl=krtnhd.min,krtutl.min
+^C

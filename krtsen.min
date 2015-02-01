@@ -1,0 +1,663 @@
+	.title	KRTSEN.MIN  Send file processing
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1983,1984 Change Software, Inc.
+;
+;	This software is furnished under a license and may
+;	be  used  and  copied  only in accordance with the
+;	terms of such license and with  the  inclusion  of
+;	the  above copyright notice.  This software or any
+;	other copies thereof may not be provided or other-
+;	wise made available to any other person.  No title
+;	to and ownership of the software is hereby  trans-
+;	ferred.
+;
+;	The information in this  software  is  subject  to
+;	change  without notice and should not be construed
+;	as a commitment by the author.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTDEF.MIN"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MIN failed>
+
+	.mcall	.PURGE
+
+
+	.sbttl	Local data
+
+	.psect	$pdata
+SE22$:	.byte	eof$dis	,0
+S2$:	.asciz	"SEN.SW"
+	.even
+
+	.psect	recpkt	,rw,d,lcl,rel,con
+recpkt:	.blkb	maxpak+2
+
+
+	.psect	$code
+	.sbttl	State controller for send file processing
+	.enabl	lsb
+
+sen.sw::
+sendsw::movb	@r5	,state
+	movb	#defchk	,chktyp
+	mov	#1	,chksiz
+	mov	$image	,image
+	clr	paknum
+	clr	numtry
+	cmpb	conpar+p.chkt,#'1
+	bne	1$
+	cmpb	senpar+p.chkt,#'1
+	beq	5$
+1$:	movb	#sta.sin,state
+5$:	call	senhdr
+	clr	dpnumber
+	movb	sentim	,senpar+p.time
+
+10$:	call	sendeb
+	scan	state	,#200$
+	asl	r0
+	jsr	pc	,@210$(r0)
+	movb	r1	,state
+	bcc	10$
+
+100$:	movb	#defchk	,chktyp
+	mov	#1	,chksiz
+	save	<r0>
+	tst	inopn
+	beq	110$
+	calls	close	,<#lun.in>
+	clr	inopn
+110$:	.purge	#lun.sr
+	unsave	<r0>
+	return
+
+	.save
+	.psect	$pdata
+200$:	.byte	sta.abo	,sta.brk,sta.com,sta.dat,sta.fil,sta.atr,sta.sin
+	.byte	sta.eof
+	.byte	0
+	.even
+210$:	.word	send.$
+	.word	send$$	,sbreak	,send.c	,sdata	,sfile	,sattr	,sinit
+	.word	seof
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	State routines for SENDSW
+	.enabl	lsb
+
+send.$:	call	bad$pak
+	movb	state	,r1
+	clc
+	return
+
+send$$:	mov	sp	,r0
+	movb	#sta.abo,r1
+	br	90$
+
+send.c:	clr	r0
+90$:	sec
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Received bad ACK/NAK and error handling
+	.enabl	lsb
+
+sndx$$:	movb	state	,r1
+	br	10$
+sndx.$:	cmp	numtry	,maxtry
+	blo	bad$pak
+s$retry:
+sndx.e:
+s$sync:
+sabort:	movb	#sta.abo,r1
+10$:	clr	datauk
+	return
+
+bad$pak:mov	#1	,datauk
+	br	20$
+bad$ack:mov	#-1	,datauk
+20$:	inc	numtry
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Send debugging and logging
+
+sendeb:	bit	#log$pa	,trace
+	beq	50$
+	save	<r1,r2>
+	sub	#100.	,sp
+	mov	sp	,r1
+	mov	#S2$	,r2
+	call	paksta
+	sub	sp	,r1
+	mov	sp	,r2
+	calls	putrec	,<r2,r1,#lun.lo>
+	tst	r0
+	beq	30$
+	call	logerr
+30$:	add	#100.	,sp
+	unsave	<r2,r1>
+50$:	return
+
+
+	.sbttl	Send attribute data for the current file
+	.enabl	lsb
+
+sattr:	clr	datauk
+	inc	numtry
+	cmp	numtry	,maxtry
+	blos	10$
+	jmp	s$retry
+
+10$:	tst	doattr
+	beq	90$
+	calls	w$attr	,<#lun.in,#packet>
+	tst	r0
+	bne	90$
+	tst	r1
+	beq	90$
+
+	spack	#msg$atr,paknum,r1,#packet
+20$:	rpack	r2 ,r3	,#recpkt,#maxpak
+	scan	r1	,#200$
+	asl	r0
+	jsr	pc	,@210$(r0)
+	tst	datauk
+	bne	20$
+	br	99$
+
+90$:	calls	buffil	,<#packet>
+	mov	r1	,size
+	movb	#sta.dat,r1
+99$:	clc
+	return
+
+	.save
+	.psect	$pdata
+200$:	.byte	msg$err	,msg$nak,msg$ack,timout	,badchk
+	.byte	0
+	.even
+210$:	.word	sndx.$
+	.word	sndx.e	,satr.n	,satr.y	,sndx$$	,sndx.$
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Process response to SATTR
+	.enabl	lsb
+
+satr$$:	jmp	sndx$$
+
+satr.n:	cmp	r3	,paknum
+	beq	satr$$
+	dec	r3
+	bge	1$
+	mov	#63.	,r3
+1$:	cmp	r3	,paknum
+	beq	10$
+	br	2$
+
+satr.y:	cmp	r3	,paknum
+	beq	10$
+2$:	cmp	numtry	,maxtry
+	blos	3$
+	jmp	s$sync
+
+3$:	tst	datauk
+	blt	satr$$
+	jmp	bad$ack
+
+10$:	clr	datauk
+	clr	numtry
+	incm64	paknum
+	calls	buffil	,<#packet>
+	mov	r1	,size
+	movb	#sta.dat,r1
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Send a break packet
+	.enabl	lsb
+
+sbreak:	clr	datauk
+	inc	numtry
+	cmp	numtry	,maxtry
+	blos	10$
+	jmp	s$retry
+
+10$:	spack	#msg$bre,paknum,#0,#packet
+20$:	rpack	r2 ,r3	,#recpkt,#maxpak
+	scan	r1	,#200$
+	asl	r0
+	jsr	pc	,@210$(r0)
+	tst	datauk
+	bne	20$
+	return
+
+	.save
+	.psect	$pdata
+200$:	.byte	msg$err	,msg$nak,msg$ack,timout	,badchk
+	.byte	0
+	.even
+210$:	.word	sndx.$
+	.word	sndx.e	,sbrk.n	,sbrk.y	,sndx$$	,sndx.$
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Process response to SBREAK
+	.enabl	lsb
+
+sbrk$$:	jmp	sndx$$
+
+sbrk.n:	cmp	r3	,paknum
+	beq	sbrk$$
+	dec	r3
+	bge	1$
+	mov	#63.	,r3
+1$:	cmp	r3	,paknum
+	beq	10$
+	br	2$
+
+sbrk.y:	cmp	r3	,paknum
+	beq	10$
+2$:	cmp	numtry	,maxtry
+	blos	3$
+	jmp	s$sync
+
+3$:	tst	datauk
+	blt	sbrk$$
+	jmp	bad$ack
+
+10$:	clr	datauk
+	clr	numtry
+	incm64	paknum
+	movb	#sta.com,r1
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Send file init
+	.enabl	lsb
+
+sinit:	movb	#msg$snd,-(sp)
+	call	.sinit
+	return
+
+.sinit::clr	datauk
+	inc	numtry
+	cmp	numtry	,initry
+	blos	10$
+	call	s$retry
+	br	101$
+
+10$:	mov	chktyp	,-(sp)
+	mov	chksiz	,-(sp)
+	movb	#defchk	,chktyp
+	mov	#1	,chksiz
+	calls	spar	,<#packet>
+	call	cantyp
+	movb	6(sp)	,r5
+	spack	r5,paknum,sparsz,#packet
+20$:	rpack	r2 ,r3	,#recpkt,#maxpak
+	scan	r1	,#200$
+	asl	r0
+	jsr	pc	,@210$(r0)
+	tst	datauk
+	bne	20$
+
+100$:	mov	(sp)+	,chksiz
+	mov	(sp)+	,chktyp
+101$:	mov	(sp)+	,@sp
+	return
+
+	.save
+	.psect	$pdata
+200$:	.byte	msg$err	,msg$nak,msg$ack,timout	,badchk
+	.byte	0
+	.even
+210$:	.word	sndx.$
+	.word	sini.e	,sini.n	,sini.y	,sndx$$	,sndx.$
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Process response to SINIT
+	.enabl	lsb
+
+sini.$:	jmp	sndx.$
+sini$$:	jmp	sndx$$
+
+sini.e:	cmpb	r5	,#msg$ser
+	beq	33$
+	jmp	sabort
+
+sini.n:	cmp	r3	,paknum
+	bne	sini.$
+	cmpb	r5	,#msg$ser
+	bne	101$
+	cmp	numtry	,#2
+	bhis	33$
+101$:	br	sini$$
+
+sini.y:	cmp	r3	,paknum
+	beq	10$
+	cmp	numtry	,initry
+	blos	3$
+	jmp	s$sync
+
+3$:	tst	datauk
+	blt	sini$$
+	jmp	bad$ack
+
+10$:	calls	rpar	,<#recpkt,r2>
+33$:	clr	datauk
+	clr	numtry
+	incm64	paknum
+	movb	#sta.fil,r1
+	jmp	inirepeat
+
+	.dsabl	lsb
+
+
+	.sbttl	Send a file
+	.enabl	lsb
+
+sfile:	clr	datauk
+	inc	numtry
+	cmp	numtry	,maxtry
+	blos	10$
+	jmp	s$retry
+
+10$:	movb	conpar+p.chkt,chktyp
+	movb	chktyp	,chksiz
+	sub	#'0	,chksiz
+	mov	$image	,image
+	mov	#filnam	,r3
+	clr	skipfl
+	call	clratr
+	call	inirepeat
+	sub	#100	,sp
+	mov	sp	,r4
+	tst	inopn
+	beq	20$
+	calls	close	,<#lun.in>
+	clr	inopn
+20$:	tstb	filnam
+	bne	21$
+	jmp	45$
+21$:	tst	doauto
+	beq	25$
+	tst	image
+	bne	25$
+	calls	chkext	,<#filnam>
+	tst	r0
+	ble	25$
+	mov	#binary	,image
+25$:	calls	open	,<#filnam,#lun.in,image>
+	tst	r0
+	beq	30$
+	calls	syserr	,<r0,#errtxt>
+	calls	error	,<#3,#errtxt,#aspace,#filnam>
+	movb	#sta.abo,r1
+	br	100$
+
+30$:	mov	sp	,inopn
+	tst	xmode
+	bne	45$
+	calls	namcvt	,<#filnam,r4>
+	tstb	asname
+	beq	40$
+	mov	#asname	,r4
+
+40$:	strlen	r4
+	spack	#msg$fil,paknum,r0,r4
+	clrb	asname
+	br	50$
+
+45$:	spack	#msg$tex,paknum
+50$:	rpack	r2 ,r3	,#recpkt,#maxpak
+	scan	r1	,#200$
+	asl	r0
+	jsr	pc	,@210$(r0)
+	tst	datauk
+	bne	50$
+100$:	add	#100	,sp
+	return
+
+	.save
+	.psect	$pdata
+200$:	.byte	msg$err	,msg$nak,msg$ack,timout	,badchk
+	.byte	0
+	.even
+210$:	.word	sndx.$
+	.word	sndx.e	,sfil.n	,sfil.y	,sndx$$	,sndx.$
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Process response to SFILE
+	.enabl	lsb
+
+sfil$$:	jmp	sndx$$
+
+sfil.n:	cmp	r3	,paknum
+	beq	sfil$$
+	dec	r3
+	bge	1$
+	mov	#63.	,r3
+1$:	cmp	r3	,paknum
+	beq	10$
+	br	2$
+
+sfil.y:	cmp	r3	,paknum
+	beq	10$
+2$:	cmp	numtry	,maxtry
+	blos	3$
+	jmp	s$sync
+
+3$:	tst	datauk
+	blt	sfil$$
+	jmp	bad$ack
+
+10$:	clr	datauk
+	clr	numtry
+	incm64	paknum
+	movb	#sta.atr,r1
+	tst	xmode
+	beq	20$
+	calls	buffil	,<#packet>
+	mov	r1	,size
+	movb	#sta.dat,r1
+20$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Send file data
+	.enabl	lsb
+
+sdata:	clr	datauk
+	inc	numtry
+	cmp	numtry	,maxtry
+	blos	10$
+	jmp	s$retry
+
+10$:	spack	#msg$dat,paknum,size,#packet
+20$:	rpack	r2 ,r3	,#recpkt,#maxpak
+	scan	r1	,#200$
+	asl	r0
+	jsr	pc	,@210$(r0)
+	tst	datauk
+	bne	20$
+	return
+
+	.save
+	.psect	$pdata
+200$:	.byte	msg$err	,msg$nak,msg$ack,timout	,badchk
+	.byte	0
+	.even
+210$:	.word	sndx.$
+	.word	sndx.e	,sdat.n	,sdat.y	,sdat$$	,sndx.$
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Process response to SDATA
+
+sdat$$:	tst	dpnumber
+	bne	100$
+	cmp	senlng	,#maxpak
+	blos	100$
+	asr	senlng
+100$:	jmp	sndx$$
+
+
+	.enabl	lsb
+
+sdat.n:	cmp	r3	,paknum
+	beq	sdat$$
+	dec	r3
+	bge	1$
+	mov	#63.	,r3
+1$:	cmp	r3	,paknum
+	beq	10$
+	br	2$
+
+sdat.y:	cmp	r3	,paknum
+	beq	10$
+2$:	cmp	numtry	,maxtry
+	blos	3$
+	jmp	s$sync
+
+3$:	tst	datauk
+	blt	sdat$$
+	jmp	bad$ack
+
+10$:	clr	datauk
+	add	#1	,dpnumber
+	bcc	15$
+	mov	#1	,dpnumber
+15$:	clr	numtry
+	incm64	paknum
+
+40$:	cmpb	recpkt	,#abt$cur
+	beq	80$
+41$:	cmpb	recpkt	,#abt$all
+	bne	90$
+	 mov	#-1	,index
+80$:	 movb	#sta.eof,r1
+	 return
+
+90$:	add	size	,charout+2
+	adc	charout+0
+	calls	buffil	,<#packet>
+	mov	r1	,size
+	bne	100$
+	 movb	#sta.eof,r1
+	 return
+100$:	movb	#sta.dat,r1
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Send end of file packet
+	.enabl	lsb
+
+seof:	clr	datauk
+	inc	numtry
+	cmp	numtry	,maxtry
+	blos	10$
+	jmp	s$retry
+
+10$:	tst	skipfl
+	beq	20$
+	spack	#msg$eof,paknum,#1,#SE22$
+	br	30$
+20$:	spack	#msg$eof,paknum
+30$:	rpack	r2 ,r3	,#recpkt,#maxpak
+	scan	r1	,#200$
+	asl	r0
+	jsr	pc	,@210$(r0)
+	tst	datauk
+	bne	30$
+	clr	skipfl
+	return
+
+	.save
+	.psect	$pdata
+200$:	.byte	msg$err	,msg$nak,msg$ack,timout	,badchk
+	.byte	0
+	.even
+210$:	.word	sndx.$
+	.word	sndx.e	,seof.n	,seof.y	,sndx$$	,sndx.$
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Process response to SEOF
+	.enabl	lsb
+
+seof$$:	jmp	sndx$$
+
+seof.n:	cmp	r3	,paknum
+	beq	seof$$
+	dec	r3
+	bge	1$
+	mov	#63.	,r3
+1$:	cmp	r3	,paknum
+	beq	10$
+	br	2$
+
+seof.y:	cmp	r3	,paknum
+	beq	10$
+2$:	cmp	numtry	,maxtry
+	blos	3$
+	jmp	s$sync
+
+3$:	tst	datauk
+	blt	seof$$
+	jmp	bad$ack
+
+10$:	clr	datauk
+	clr	numtry
+	incm64	paknum
+	calls	close	,<#lun.in>
+	clr	inopn
+	cmp	index	,#-1
+	beq	20$
+	clr	r0
+	tst	xmode
+	bne	20$
+	call	getnxt
+	tst	r0
+	bne	20$
+	movb	#sta.fil,r1
+	return
+20$:	movb	#sta.brk,r1
+	return
+
+	.dsabl	lsb
+
+	.end

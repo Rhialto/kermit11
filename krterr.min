@@ -1,0 +1,193 @@
+	.title	KRTERR.MIN  Error code to message text translation
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984 Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.psect	$pdata
+	.sbttl	Error codes defined
+
+	cmd$ab	==	-1
+	cmd$ex	==	-2
+	cmd$nx	==	-3
+	cmd$bad	==	-4
+	cmd$un	==	-5
+	er$ful	==	-6
+	er$nmf	==	-7
+	er$iop	==	-10
+	er$sys	==	-11
+	er$lby	==	-12
+	er$rer	==	-13
+	er$wer	==	-14
+	er$prv	==	-15
+	er$rtb	==	-16
+	er$que	==	-17
+	er$nin	==	-20
+	er$lgf	==	-21
+	er$raw	==	-22
+	er$rax	==	-23
+	er$sy1	==	-24
+	er$sy2	==	-25
+	er$sy3	==	-26
+	er$vol	==	-27
+	er$nop	==	-30
+	er$wld	==	-31
+	er$bnl	==	-32
+	er$one	==	-33
+	fa$imp	==	-34
+	fa$nhd	==	-35
+	fa$dio	==	-36
+	fa$ovr	==	-37
+	fa$dfl	==	-40
+	fa$adr	==	-41
+	fa$lun	==	-42
+	er$try	==	-43
+	er$tim	==	-44
+	ld$bsy	==	-45
+	er$txp	==	-46
+	er$bad	==	-47
+	er$sam	==	-50
+	er$sun	==	-51
+	er$ass	==	-52
+	er$unr	==	-53
+	er$amb	==	-54
+	er$snd	==	-55
+	er$dk	==	-56
+	er$tam	==	-57
+	er$tun	==	-60
+	er$ser	==	-61
+	er$inr	==	-62
+	er$oct	==	-63
+	er$dev	==	-64
+	er$eof	==	-65
+	er$fnf	==	-66
+	er$iln	==	-67
+	er$aop	==	-70
+	er$lwe	==	-71
+	er$fnm	==	-72
+	
+	maxerr	==	 72
+
+
+	.sbttl	Error messages mapped
+
+errmap:	.word	baderr
+	.word	10$,20$,30$,40$,50$,60$,70$,100$,110$,120$
+	.word	130$,140$,150$,160$,170$,200$,230$,240$,250$
+	.word	300$,310$,320$,340$,350$,360$,400$,410$,440$
+	.word	450$,460$,500$,510$,520$,530$,560$,610$,620$
+	.word	630$,640$,650$,660$,700$,730$,740$,750$
+	.word	1000$,1010$,1020$,1030$,1060$,1300$,1310$
+	.word	1320$,1330$,1340$,1350$,1550$,1560$
+
+10$:
+20$:
+30$:
+40$:
+50$:	.asciz	"Error handling failed!"
+60$:	.asciz	"Not enough room"
+70$:	.asciz	"No more files"
+100$:	.asciz	"Invalid I/O request"
+110$:	.asciz	"System error"
+120$:	.asciz	"Logical unit already open"
+130$:	.asciz	"Device read error"
+140$:	.asciz	"Device write error"
+150$:	.asciz	"File is protected"
+160$:	.asciz	"Record too long for GETREC buffer"
+170$:	.asciz	"No queue element free"
+200$:	.asciz	"No data available"
+230$:	.asciz	"Please open a LOGFILE first"
+240$:	.asciz	"Can't log RAW I/O with another disk_based DEBUG option set"
+250$:	.asciz	"Can't do this with RAW I/O logging on"
+300$:	.asciz	".CLOSE system error"
+310$:	.asciz	".CSISPC system error"
+320$:	.asciz	".ENTER system error"
+340$:	.asciz	"Disk home block not RT-11 format, see HELP SET FILE NOVOL"
+350$:	.asciz	"I/O channel not open"
+360$:	.asciz	"Multiple files or wildcarding not supported here"
+400$:	.asciz	"Maximum of 31 entries in the BINARY_TYPE list"
+410$:	.asciz	"Illegal file type string"
+440$:	.asciz	"Unknown .SERR error"
+450$:	.asciz	"No device handler or device not responding"
+460$:	.asciz	"Directory I/O error"
+500$:	.asciz	"Overlay read error"
+510$:	.asciz	"Directory is full"
+520$:	.asciz	"Invalid address"
+530$:	.asciz	"Invalid channel"
+560$:	.asciz	"Retries must be between 3 and 30"
+610$:	.asciz	"Time_out must be between 0 and 94"
+620$:	.asciz	"Channel open to a logical disk"
+630$:	.asciz	"Minimum packet length is 20"
+640$:	.asciz	"Bad option or value"
+650$:	.asciz	"Ambiguous SET command"
+660$:	.asciz	"Unrecognizable SET command"
+700$:	.asciz	"Syntax is ASS dev DK, only DK is supported"
+730$:	.asciz	"Unrecognizable command"
+740$:	.asciz	"Ambiguous command"
+750$:	.asciz	"Syntax is SEND file.typ [dev:][asfile.new]"
+1000$:	.asciz	"The only supported logical assign is DK"
+1010$:	.asciz	"Ambiguous topic"
+1020$:	.asciz	"Unrecognizable topic"
+1030$:	.asciz	"Server sub-commands are not supported"
+1060$:	.asciz	"Invalid number of retries"
+1300$:	.asciz	"Range is 1 to 36 octal"
+1310$:	.asciz	"Device not responding"
+1320$:	.asciz	"End of file"
+1330$:	.asciz	"File not found"
+1340$:	.asciz	"Illegal logical name"
+1350$:	.asciz	"Ambiguous option or value"
+1550$:	.asciz	"Logfile write error"
+1560$:	.asciz	"Bad file name"
+baderr:	.asciz	"Unknown error  r0 = "
+	.even
+
+
+	.psect	$code
+	.sbttl	Error message generator
+
+syserr::save	<r0,r1,r2>
+	mov	#baderr	,r1
+	mov	2(r5)	,r2
+
+	movb	#'?	,(r2)+
+	mov	#prompt	,r0
+1$:	movb	(r0)+	,(r2)+
+	beq	2$
+	cmpb	-1(r2)	,#'z!40
+	bhi	1$
+	cmpb	-1(r2)	,#'a!40
+	blo	1$
+	 bicb	#40	,-1(r2)
+	br	1$
+2$:	dec	r2
+	cmpb	-1(r2)	,#'>
+	bne	3$
+	tstb	-(r2)
+3$:	movb	#'-	,(r2)+
+	movb	#'E	,(r2)+
+	movb	#'-	,(r2)+
+	mov	(r5)	,r0
+	bge	10$
+	neg	r0
+10$:	cmp	r0	,#maxerr
+	bhi	20$
+	asl	r0
+	mov	errmap(r0),r1
+20$:	mov	r1	,-(sp)
+30$:	movb	(r1)+	,(r2)+
+	bne	30$
+	cmp	(sp)+	,#baderr
+	bne	100$
+	movb	#'<	,-1(r2)
+	calls	l$otoa	,<r2,2(r5)>
+	add	#6	,r2
+	movb	#'>	,(r2)+
+	clrb	(r2)
+100$:	unsave	<r2,r1,r0>
+	return
+
+	.end

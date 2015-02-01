@@ -1,0 +1,1703 @@
+
+
+
+
+
+	  K E R M I T - 1 1   f o r   R T - 1 1 / T S X - P L U S
+
+
+	I N S T A L L A T I O N   a n d   R E L E A S E   N O T E S
+
+
+		V  0  3 . 6  3        2 7 - S E P - 1 9 9 7
+
+
+
+
+
+
+KRTTSX is  a  special  version  of  Kermit-11 (PDP-11 Kermit written by Brian
+Nelson of the University of Toledo) enhanced for use with TSX-Plus.  This was
+begun primarily to support its use on a public bulletin board system and then
+was expanded to produce a  reliable,  general purpose communications program.
+Numerous bugs have been fixed and several  new  routines  added.  All changes
+are documented in the edit history in KRTCMD.MAC,  or may be read from within
+Kermit by HELP Release-Notes.  Please note not only has KRTTSX's on-line HELP
+text been greatly enhanced and expanded, lookups in it now execute at maximum
+speed, thus this document is rather short.  Use HELP for operating info.  You
+may use HPRINT to generate hard copy of anything needed for handy reference.
+
+For an in-depth discussion of Kermit fundamentals there's no substitute for:
+
+   "Kermit, A File Transfer Protocol" by Frank da Cruz, 1987
+   Digital Press, order number: EY-6705E-DP  (in USA phone: 800 343-8321)
+   DP ISBN 0-932376-88-6, PH ISBN 0-13-514753-0
+
+This Kermit does not yet offer character set translation, labeled file types,
+sliding windows, a script programming language or command macros, but it does
+provide everything else one would expect after reading the above.
+
+This program is for use with RT-11 V4.0 or TSX-Plus V5.0 and up, though a few
+new features use EMTs added in slightly later releases.   KRTTSX runs what it
+can with earlier releases of either RT-11 or TSX.   Debugging was done on TSX
+V6.5 and RT-11 V5.5, under which its operation has been thoroughly tested and
+is extremely reliable.  All RT-11 V5.6 and above monitors are also supported,
+including separate I&D space.
+
+Thanks for some of the ideas, additions, fixes and above all, bugs eliminated
+in this program are due to Tim Clarke, Tom McCoy, Bill Walker, Roger Wallace,
+Jim Whitlock and Chester Wilson.  Additionally,  appreciation is owed all who
+contributed  to  VMS-Kermit  and C-Kermit, from which many other new features
+were derived, and to Brian Nelson, author of the original Kermit-11.  Some of
+the most  obscure  yet  serious  bugs  were  discovered by Bill Walker, Roger
+Wallace and Jim Whitlock, without  whose  help this Kermit would hardly be as
+bullet-proof as it now is.
+
+
+	Billy Youdelman				billy@MIX.COM
+	PO Box 1207
+	Culver City, California  90232-1207
+	USA
+
+
+Installation and Release Notes	KRT V03.63			Page Two
+
+
+
+
+
+		   T A B L E   O F   C O N T E N T S
+		   ---------   ---   ---------------
+
+
+
+
+	I N S T A L L A T I O N				Three
+
+
+	K R T . I N I   E x a m p l e s			Five
+
+
+	R T - 1 1   S p e c i f i c   I n f o		Six
+
+
+	A   "K e r m i t   M o d e m"   H a n d l e r	Eight
+
+
+	T S X - P l u s   S p e c i f i c   I n f o	Ten
+
+
+	M O D E M S					Thirteen
+
+		Anchor Automation MK24			Fourteen
+
+		Telebit T2500/T3000			Fifteen
+
+		US Robotics "Courier" 2400/2400e	Seventeen
+
+		USER-DEFINED MODEM			Eighteen
+			SET DIAL Commands		TwentyOne
+
+
+	R E S T R I C T I O N S				TwentyNine
+
+
+	O b t a i n i n g   U p g r a d e s		TwentyNine
+
+
+	F i l e s   R e q u i r e d			Thirty
+
+
+
+Installation and Release Notes	KRT V03.63			Page Three
+
+
+			I N S T A L L A T I O N
+			-----------------------
+
+This program will run under RT-11 or TSX-Plus.  The system clock must be
+running.  As  distributed  KRT  is built to run on a non-EIS CPU, KRTTSX
+is built for EIS processors.  These monitors and handlers are supported:
+
+ RT-11SJ   V5.0 + up   TT  KM  XL	; SYSGEN for TIMER support
+ RT-11FB   V4.0 + up   TT  KM  XL	; SYSGEN for..
+ RT-11XM   V5.1 + up   TT  KM  XC  XL	;  ..SPCPS support
+ RT-11 all V5.6 + up   TT  KM  XC  XL	; including separate I&D space
+ TSX-Plus  V5.0 + up   TT  CL  KM  XL	; see HELP INSTALL TSX
+
+ NOTE:  XL first appeared in RT-11 V5.1.  Prior releases must use either
+ TT (the console terminal port) or KM (a "Kermit Modem" handler supplied
+ with this program) for communicating with the outside world.
+
+KRTTSX.SAV uses extended memory overlays for XB,XM,ZB,ZM,TSX and KRT.SAV
+low memory overlays for  FB,SB,SJ,TSX  to accommodate small systems.  FB
+is the ONLY RT-11 V4 monitor which can run this program.  VBGEXE or VRUN
+may be used under mapped RT-11 monitors.  It's best to load any handlers
+required first, even for a background task.  KRT's maximum packet-length
+is 600., KRTTSX's is 1920., this is determined by the NONEIS conditional
+code for MAXLNG in KRTMAC.MAC.
+
+KRTTSX requires 166kb of memory to load, KRT only needs 41kb.  Under TSX
+it's 172kb and 47kb for V6.5 or 171kb and 46kb with V6.4.  KRT increases
+disk I/O as its overlays are not kept resident.  When none of these will
+load KRTMIN (sometimes distributed separately) is a special version that
+uses less memory by only communicating through the console terminal port
+(see KRTMIN.DOC for details).
+
+If you already have some form of Kermit on your system, you may try this
+one out by copying to a disk containing no other Kermit files, assigning
+that disk DK, deassigning HLP, INI and KRT, and running the new program.
+Assuming LD0 is a scratch disk and you have an 8" floppy:
+
+	.COP DY0:*.(SAV,HLP,INI) LD0:
+	.ASS LD0 DK
+	.DEA HLP
+	.DEA INI
+	.DEA KRT
+	.SET USR SWAP	! if running RT-11
+	.RU KRTTSX	! use KRT if KRTTSX won't load
+
+To dial out, edit the copy  of  KRT.INI  on LD0 as needed for your site.
+It is not necessary to use a command file for such things as attaching a
+CL unit to a TSX line before running this Kermit - everything may now be
+easily handled during its initialization.  At this point it is suggested
+you use the running Kermit to read through its own HELP,  especially the
+SET LINE and SET CL topics.  If you opt to use any sort of indirect .COM
+file to actually run  KRT/KRTTSX,  please  note that under TSX using the
+^>R KRT.. option to force command file input to the running program will
+cause the test for TT input during the strike any key abort when dialing
+to hang and you won't be able to dial out from the command file.  Kermit
+does process indirect command (take) files as well as arguments from the
+command line used to run it, either of which may be used instead of ^>R:
+
+
+Installation and Release Notes	KRT V03.63			Page Four
+
+
+	.KRTTSX DIAL TOMMY  ! dials a phone number defined as "tommy"
+	.KRTTSX TAKE TOMMY  ! runs the indirect command file tommy.com
+
+You may also have to force arguments for the program to it when run from
+a command file under TSX:
+
+	R KRTTSX ^1 ^2 ^3   ! as needed, up to 6 args
+
+There is an additional problem when forcing command line input to Kermit
+in that comment delimiters "!" and ";" are processed as normal chars and
+will cause errors.  This allows them to be passed to a remote system for
+RSX/VMS version numbers and the like.  They are treated as delimiters in
+Kermit's internal command file processing, thus the best procedure is to
+dump the "^>R KERMIT" line from such files and treat them as Kermit take
+files.  If typing in arguments when starting Kermit is a problem one may
+use a separate command file run from the monitor containing only:
+
+	R KRTTSX TAKE TOMMY
+
+This allows tommy.com to contain comments without crashing when run.
+
+If it's decided to permanently install this program all old Kermit files
+(K*.HLP, K*.INI, K*.SAV, etc) should be backed up then replaced by those
+from this package.  Dialing from a command file (if in use) will need to
+be treated per the above.
+
+After ensuring RT-11 or TSX requirements are met patch KRT.INI (examples
+follow) for your site, then copy these to SY:
+
+KRTTSX.SAV  -  or KRT.SAV, the executable image, rename as desired
+KRTHLP.HLP  -  HELP text file, may also be on HLP, KRT or DK
+
+and this to the logical INI, KRT or a default disk of your choice:
+
+KRT.INI  -  initialization command file
+
+When  started  KRT/KRTTSX  will  check  INI,  KRT, DK and SY for KRT.INI.
+Keeping it off SY allows others to use a different init file, and permits
+the program to be easily run in the remote mode by callers to the system.
+Or, one may SET LINE TT to accomplish the same thing.  For multiple users
+sharing a group of lines check HELP SET CL before editing KRT.INI.
+
+The HELP text file search (for KRTHLP.HLP) path is HLP, KRT, SY and DK.
+
+KRTTSX.SAV/KRT.SAV  may  be  renamed as is convenient (K11 or KERMIT) but
+KRT.INI  and  KRTHLP.HLP  are called (by these names) by Kermit, and thus
+must not be renamed.  If the HELP text (KRTHLP.HLP) is altered in any way
+Kermit must be rebuilt.  See KRTHLP.PRE for details.
+
+Kermit is then run by its name, and an initial command line may be passed
+to it as argument(s) to the KMON command:
+
+	.K11		! run Kermit
+	.K11 DIAL DEC	! run Kermit, dialing number set in init file
+
+Also check the specific info for your operating system if Kermit will not
+be the only task running.
+
+
+Installation and Release Notes	KRT V03.63			Page Five
+
+
+		K R T . I N I   E x a m p l e s
+		- - - - - - -   - - - - - - - -
+
+! Multiple users under TSX-Plus with possibly assorted modems
+! This seeks the first available line/port from those specified
+! May be installed on SY to be shared by all users, see HELP SET CL
+SET CL PORTS 9/19200/T25/3 11/2400/H/6 8/2400/H/4
+SET CL UNITS 2 1 0
+SET CL PRIORITY 71	! don't drop chars at high speeds
+SET CL LINE *	! search for first available combination of the above
+! For efficiency's sake, the above may be reduced to:
+!SET CL POR 9/19200/T25/3 11/2400/H/6 8/2400/H/4,UNI 2 1 0,PRI 71,LIN *
+SET VLSWCH REMOTE	! emulate SET HOST/PORT if needed
+ ... other items as required ...
+
+! Single user under TSX-Plus
+SET CL0 LINE 9		! includes "SET LINE CL0," unneeded by PRO-series
+SET SPE 2400		! CL or KM only, others must do from monitor
+SET PHO XMODE 4		! enable CONNECT/speed messages for fall back
+SET MOD HAYES
+ ...
+
+! Generic RT-11 ..
+SET LINE KM		! to call out..
+SET FLOW-CONTROL RTS	! if preferred, must be enabled in hardware too
+SET MOD HAYES
+ ...
+
+! System-independent items
+SET LONG ON		! enable long packets
+SET SL ON,KED		! turn on SL editor, enable its KED mode
+SET PHONE TONE
+SET PROMPT "Kermit-11> "
+SET PHO NUM DECUS 1 800 521-8950	! Username: INFORMATION for info..
+
+By default init file commands and informational responses to them are not
+echoed to the screen.  After the init completes the default terminal mode
+becomes NOQUIET, unless set in said file, which overrides these defaults.
+If you wish to display the entire init process, make SET TT NOQ the first
+line in KRT.INI.  A file may be tested by running it as a take file:
+
+	Kermit-11>@dev:KRT.INI
+
+SHOW FILE to check the name of the init file Kermit-11 used at start-up.
+
+
+Installation and Release Notes	KRT V03.63			Page Six
+
+
+			    R T - 1 1
+			    ---------
+
+The RT-11 FB,XB,XM,ZB,ZM monitors must include .SPCPS support if you want
+^C to abort anything in the program without actually stopping the program
+itself.  If KRT is not the only job running it should be FRUNed to ensure
+it will be able to process incoming data from the remote system.  RT-11SB
+and SJ must be sysgenned for .mrkt and .twait (TIMER) support.
+
+If you are using RT-11 V4, the ONLY monitor which can run KRT is RT-11FB.
+
+SET USR SWAP if it is not already there, this program needs the space.
+
+RT-11 multi-terminal support has been pulled to keep the size reasonable.
+Only a handler, or the controlling terminal line, may be used to exchange
+files with the outside world.  Use XL with RT-11, XC with PRO/RT.  KM may
+be used with either, it adds speed fallback and support for TSX functions
+that make life with Kermit more enjoyable.
+
+As distributed KRTTSX has just enough buffer to load the KM handler built
+for a DLV11-E in a PDP-11 system.  This may be altered by the extend size
+(octal number of bytes) specified in KRTLNK.COM:
+
+krttsx,krttsx=krtxm/t/e:3010//	! APR0, the root   extending HNBUFF
+
+WARNING:   Because it's impossible to bomb an outstanding read completion
+routine once KM/XC/XL has been assigned the link the only way to deassign
+it is to exit Kermit.
+
+WARNING:   Any SET from KMON on KM/XC/XL while its interrupts are enabled
+will OVERWRITE THE QUEUE and hose any data then in it.
+
+Note XC/XL is NOT an eight-bit device thus Kermit's parity will be forced
+to SPACE under RT-11.  If you have hacked it into handling 8-bits you may
+SET PARITY NONE either in the init file or from the keyboard after Kermit
+is running and AFTER you have SET LINE XL or XC.
+
+HANGUP (DTR control) isn't available unless XL is from RT-11 V5.2 and up,
+or the KM handler is used.
+
+To use a handler, you must have an DL-11/DLV-11 interface (in addition to
+the console interface).  The XL handler supports two DCL commands:
+
+        .SET XL CSR=n
+        .SET XL VECTOR=m
+
+Where "n" is the address of the CSR (control status register)  and "m" is
+the  interrupt  vector address.  The defaults are 176500 for the CSR, and
+300 for the interrupt vector.  The DLV-11 speed is set with wire wrapping
+and it's not settable on the XL handler.  If you have a DLV-11E XL may be
+built with XL$DVE=1 and the speed set from KMON as with XC.
+
+
+Installation and Release Notes	KRT V03.63			Page Seven
+
+
+The XC handler is a special version of XL for the PRO/300 series, its CSR
+is 173300 and vector is 210(8).  You must SET XC SPEED=nn from KMON prior
+to running  Kermit  to  change XC's 1200 baud default.  You may also need
+to UNLOAD XC before Kermit can be FRUN:
+
+	.UNLOAD XC
+	.FRUN KRTTSX.SAV/PAUSE
+	.LOAD XC=KRTTSX
+	.RESUME
+
+Also, when running in the foreground
+
+        Kermit-11>SET TT QUIET
+
+allows one to work in the background during file transfers.
+
+   To operate properly at high speeds (2400 and up) and with Kermits
+   not supporting XOFF flow control the XL or XC device handler MUST
+   be modified to increase the internal buffer size and repress XOFF
+   transmission within a packet.  This is very easy to do.
+
+   First copy XM.MAC, XL.MAC, XM.ANS, SYSGEN.COM and for the PRO/300
+   series XC.MAC from the RT-11  distribution  to DK, ASSIGN DK SRC,
+   and then in the copy of the file XL.MAC change the line:
+
+	from:	BUFSIZ	= 64.
+	to:	BUFSIZ	= 256.
+
+   Then IND SYSGEN and tell it to use the saved answer file XM.ANS.
+   When SYSGEN exits, it  will  have created, among other things, a
+   file called XM.CND which is needed for the driver assembly.  For
+   the PRO/300 series substitute XC for XL in the following command
+   procedure to build the handler:
+
+	.COPY SY:XLX.SYS SY:XLX.OLD		! save a copy
+	.REN/NOPRO SY:XLX.SYS SY:XLX.SYS	! unprotect file
+	.UNLOAD XL				! unload handler
+	.REMOVE XL				! and remove it
+	.MACRO/OBJ:XLX (XM,XM.CND,XL)		! assemble new
+	.LINK/EXE:SY:XLX.SYS XLX		! RT V4, handler on SY
+	.LINK/NOBIT/EXE:SY:XLX.SYS XLX		! if RT V5, do this
+	.INSTALL XL				! install it and
+	.LOAD XL				! load into memory
+
+Last, but not least, if there is no way to get an  additional  interface
+into your system (perhaps you have a four slot Q-bus backplane), you can
+force Kermit to use the console.  This implies, of course, that it won't
+be possible to dial out from the RT-11 system - it may only be used with
+the remote Kermit connected via the console port.  Kermit-11 defaults to
+TT as its link device and sets the packet length to 60 bytes.  Otherwise
+the command
+
+        Kermit-11>SET LINE TT
+
+does the same thing.  You may increase the packet size if larger packets
+will work, or modify RT-11's default SPACE parity, AFTER the SET LINE is
+done.
+
+
+Installation and Release Notes	KRT V03.63			Page Eight
+
+
+			The KM Handler
+
+KM is a "Kermit Modem" communications handler provided to support
+TSX-Plus features not otherwise available under RT-11, as well as
+older releases of TSX that preceded its CL handler.   KM combines
+the best of both worlds, including the following under RT-11:
+
+	o  Works with DL(V), Falcon and PRO serial interfaces
+	o  Speed may be SET and SHOWn from within Kermit
+	o  Automatic fallback to the connected speed
+	o  An eight-bit data path
+	o  Selectable hardware (RTS/CTS) flow control
+	o  Emulation of TSX's CLCLR (flush pending I/O)
+	o  DTR toggling to support Kermit's HANGUP command
+	o  Usable with RT-11 V4.0 and up, and TSX-Plus V5.0 and up
+
+To use KM you must first edit the appropriate conditional assembly
+files for the serial line interface in your system:
+
+	KRTSJ .CND  -  for RT-11FB, RT-11SB, and RT-11SJ
+	KRTXM .CND  -  for RT-11XB, RT-11XM, RT-11ZB and RT-11ZM
+	KRTTSX.CND  -  for TSX-Plus
+
+Then assemble and link using KRTSYS.COM if being done under RT-11
+V5.0 or above, or KRTSV4.COM if using any RT-11 V4 release.  This
+will create KM.SYS, KMX.SYS and KM.TSX, which should be copied to
+your system device (SY) where they may be INSTALLed and LOADed as
+needed.  Note that KRTKM.MAC (the handler source file) must be on
+the default disk for this assembly.  Under TSX you'll have to use
+TSXMOD to add a definition for KM as shown below, or define it in
+TSGEN.MAC and rebuild the system.  In either case you must reboot
+as it only loads handlers when started.  KM may be mapped to save
+low memory:
+
+	DEVDEF	<KM>,MAPH
+
+To build KM under RT-11 V5 (KRTSYS.COM):
+MAC/OBJ:KM KRTSJ.CND+KRTKM
+LINK/NOBIT/EXE:KM.SYS KM
+MAC/OBJ:KMX KRTXM.CND+KRTKM
+LINK/NOBIT/EXE:KMX.SYS KMX
+MAC/OBJ:KMTSX KRTTSX.CND+KRTKM
+LINK/NOBIT/EXE:KM.TSX KMTSX
+
+To build KM under RT-11 V4 (KRTSV4.COM):
+MAC/OBJ:KM KRTSJ.CND+KRTKM	! KRT will only run under RT-11FB if V4
+LINK/EXE:KM.SYS KM
+MAC/OBJ:KMTSX KMTSX.CND+KRTKM
+LINK/EXE:KM.TSX KMTSX
+
+NOTE:  Comments must be stripped to run these command files under RT-11.
+
+
+Installation and Release Notes	KRT V03.63			Page Nine
+
+
+KM supports the following SET commands from the monitor (KMON):
+
+	SET KM CSR=octal-address	! except on the PRO for
+	SET KM VECTOR=octal-address	! which these are fixed
+
+Hardware flow control REQUIRES pins 4 and 5 be carried through in
+the modem cable, 4 to 4 (RTS) and 5 to 5 (CTS), DTE (the port) to
+DCE (the modem), in addition to those otherwise normally present.
+
+The port should be set up for 8 data bits and NO parity as Kermit
+does parity in software.
+
+WARNING:  If the interface provides selectable interrupt priority
+and your max speed will be greater than 4800 you will likely have
+to use BIRQ 5 to avoid dropping chars.
+
+NOTE:  This handler does NOT support VTCOM, nor is it intended to
+be used with anything other than KRT V03.62 or future releases.
+
+WARNING:  Because it's  impossible  to  bomb  an outstanding read
+completion routine once KM has been assigned the  link  the  only
+way to deassign KM is to exit Kermit.
+
+See the top of KRTKM.MAC for detailed installation instructions.
+
+
+Installation and Release Notes	KRT V03.63			Page Ten
+
+
+			    T S X - P l u s
+			    ---------------
+
+One may communicate via TT when calling in,  and  use CL0 to CL7, KM or XL
+when calling out.  The CL handler is suggested as it's more efficient with
+TSX-Plus.  See HELP SET CL for details.   On PRO/300 series systems Kermit
+will try to assign CL0 or CL1 to TSX Line #3 at startup.
+
+If there is any chance of swapping on your system use TSX's MEMLOCK option
+when running the program.  This is easily done via the INSTALL facility.
+
+WARNING:  If you build XL with XL$DVE (set speed) enabled be advised under
+  TSX-Plus (as of V6.5) the KMON command SET XL SPEED=nnnn will modify the
+  hardware port which XL is serving instead of the handler itself and thus
+  fail to produce the expected result.  And regardless, if you must use XL
+  see HELP INSTALL RT-11 regarding this handler's limitations.  Mapping it
+  is recommended to save low memory.
+
+KRTTSX uses  208.  blocks  in the  TSX  PLAS  swap file.  The TSGEN/TSXMOD
+parameter  determining  its size is SEGBLK.  If modified, TSX must then be
+restarted to create the new swap file.
+
+In the CONNECT mode 11.  activation  characters  are declared so the TSGEN
+parameter MXSPAC must be => 11.
+
+Under TSX one must SET IO ABORT so errors won't cause waits for the I/O to
+rundown.  In  TSGEN  this may be accomplished by making IOABT = 1.  It may
+also be done as a keyboard command.
+
+XOFF operation without dropping characters in the CONNECT mode at 2400 and
+up may require enlarging TSX's silo and input buffer on lines to which the
+CL units are attached.
+
+	BUFSIZ	1024.,1024.
+	SILO	255.,64.,16.
+
+in the LINDEF does the job though this is a bit big if 2400 is the fastest
+speed used.  Kermit also can raise its priority when actually talking to a
+CL unit so as not to drop chars at high speeds, see HELP SET CL.
+
+The above also applies to file transfers via the controlling terminal line
+(TT).   When sending to a TSX system you may also need to set its priority
+below any other interactive job and use TSX's /HIGHEFF switch when running
+Kermit-11 to avoid excessive degradation of response time for other users.
+This is due to the overhead involved in processing input by TSX's terminal
+handler, and is not a problem when sending output from a TSX system.  Note
+this only concerns I/O via TT - comm handlers (CL, XL, etc) are no problem
+in either direction.
+
+Binary file transfers  via  TT  might require you to SET TT 8BIT.  You may
+also need to SET TT BITS=8 but this is a hardware function and thus should
+ONLY be done from a primary line first, before any subprocess that may run
+Kermit is spawned.  Setting this via a subprocess may write garbage in the
+line-parameters word.
+
+TERMINAL privilege is required to assign a CL unit to a time-sharing line.
+
+Modem control is an extremely significant system security issue under TSX.
+The problem is if a dial-in user's phone connection fails that job must be
+
+
+Installation and Release Notes	KRT V03.63			Page Eleven
+
+
+killed before a following call can be answered and connected to it, and to
+the still-logged-on session of the previous caller.
+
+Beginning with V6.4 TSX was given improved modem control, with which these
+"tailgating" incidents are easily prevented.  The following parameters are
+suggested for MNP/V.42 auto-answer operation (modem time-out = 40 secs):
+
+.SH MODEM
+PHONE=1    Other modem control parameters (in 0.5 sec):
+ ONTIM=80 OFFTIM=1 TIMIN=80 TIMLOC=1 TIMOUT=1
+
+When no error correction is in use, ONTIM and TIMIN may be halved, and the
+modem's wait time for carrier (S7 register in Hayes-style units) set to 20
+seconds.  If the modem's wait time is not settable such that it's restored
+when reset (ala ATZ), then ONTIM and TIMIN must be set to match the modem.
+OFFTIM, TIMLOC and TIMOUT must = 1 (the minimum, don't use zero) to ensure
+the job is logged off immediately.  The $PHONE flag must be defined in the
+LINDEF (in TSGEN.MAC) for any line connected to an auto-answer modem.
+
+One then includes this in the start-up command files for "phone" lines:
+
+SET ERROR FATAL
+!ACCESS SY:CLEAR.COM/READ		! add if other access limited here
+SET LOGOFF FILE=SY:CLEAR.COM		! add this..
+SET TT 8BIT,BITS=8			! ..and this for Kermit
+...					! other necessary items
+R LOGON
+
+and CLEAR.COM contains:
+
+SET ERROR NONE
+SET PRIO 70				! be sure this runs before next call
+SET TT NOPAGE,NODTR,PHONE,AUTO,XON
+...					! anything else needed should follow
+
+This may seem a bit extreme on the SET TT end of things, but it definitely
+gets the job done, even after in and out buffers are overflowed, XOFF'd in
+both directions (deadlocked) and the caller has to hang up.  The rationale
+for the various options used above is:
+
+	NOPAGE	ensures possible noise induced XOFF on DTR drop is harmless
+	NODTR	resets the modem
+	PHONE	ensures port is not in local mode, just in case..
+	AUTO	ensures port not stuck at any particular speed
+	XON	resets any XOFF which may have snuck through..
+
+Note that TERMINAL privilege is required for the above to drop DTR.  As of
+TSX V6.5 installing a .COM file with TERM privilege doesn't work, the user
+must be given it or DTR will not be dropped and the phone line may not get
+hung up.
+
+If your version of TSX-Plus is earlier than 6.4 and you must allow dial-in
+operation there is a program named NOTAIL which runs as a detached job and
+provides the same protection against tailgating.  See KRTAIL.MAC, included
+with this Kermit's distribution.
+
+
+Installation and Release Notes	KRT V03.63			Page Twelve
+
+
+It's also a good idea when using a Hayes-style modem to disable its escape
+character means of invoking the modem's command mode.  If one phones in to
+a TSX system and then uses another line on it to call out or talks to some
+one such that the other person's data are going into the modem (the one at
+the TSX system, to which your local system is connected) via its DCE port,
+there's no other way to prevent someone from using the escape sequence and
+taking control of that modem, after which they've got your phone line..
+
+
+Installation and Release Notes	KRT V03.63			Page Thirteen
+
+
+			    M O D E M S
+			    -----------
+
+Generally, connecting a modem requires an appropriate interface such
+as a DL-11E, which supports DTR and software speed selection.  It is
+possible to get by without such things, however (and particularly on
+TSX) this may pose a security risk in that the system has no control
+signals with which to log out a disconnected job.
+
+Keeping the above in mind, note that if your modem requires  DTR  to
+be present, you must use an interface that asserts it, force it high
+internally in the modem, or build a cable to force it high.  Without
+an appropriate interface HANGUP will not function and TSX is open to
+serious security problems if incoming calls are allowed.
+
+ WARNING:  If the interface provides selectable interrupt priority
+ and your max speed will be greater than 4800 you will likely have
+ to use BIRQ 5 to avoid dropping chars.  The port should be set up
+ for 8 data bits and NO parity as Kermit does parity in software.
+
+The modem cable must at a minimum carry through pins 2 and 3 (data),
+7 (ground), 8 (DCD) and 20 (DTR).  Under TSX the modem may be set to
+answer the line (pin 22, the ring indicator, must also be connected)
+then when Kermit is started if a CL unit is attached to the line and
+a modem set Kermit retains control of it all until dropping the line
+or exiting the program,  when the modem and line will be restored to
+their idle (auto-answer) state.
+
+The SET MODEM command is used to establish the type of modem you are
+using for the DIAL command.  Enter SET MODEM ? for a current list of
+of pre-defined modem types.  See HELP SET DIAL for information about
+entering a USER-DEFINED modem structure.
+
+This Kermit is capable of matching the DTE (system) speed to that of
+the DCE (modem) in response to a message by the modem (CONNECT nnnn)
+only if using the CL or KM handler.  Currently the generic Hayes and
+Telebit T2500/T3000 modem definitions support this.  Under XL/XC the
+speed can't be changed after Kermit is running, it must be done from
+the monitor first otherwise the queue will be lost.  The DCE must be
+locked to the same speed, which must be at least the highest desired
+carrier speed.  The MNP and V.42 versions of the above support this.
+If this is not suitable, a USER-DEFINED modem structure may be used.
+
+Be aware that file transfers FROM this Kermit via a modem who's DTE
+speed is greater than the connected speed (with the distant system)
+will require XOFF flow control, and servicing the interrupts caused
+by it may substantially increase the cpu's loading.  If the maximum
+connected speed possible is 2400 or less, dropping the DTE speed to
+9600 (when same must be locked for MNP/V.42) is a good idea.  Using
+the KM handler's hardware flow control is another option.
+
+NOTE:  This program toggles DTR to reset the modem thus this option
+must be enabled as part of the modem's default configuration.
+
+ The following examples have been taken from actual daily use with
+ this program to both dial in and out under TSX-Plus.  Note the S7
+ register (wait time to connect) is set to 255 when Kermit inits a
+ modem to dial out so Kermit's SET DIAL TIME-OUT takes precedence.
+
+
+Installation and Release Notes	KRT V03.63			Page Fourteen
+
+
+	Anchor Automation "Signalman Lightning 24" Model MK24:
+
+               CONFIGURATION
+
+  S00=002    S01=000    S02=128    S03=013  NOTE: S0=2 here because this
+  S04=010    S05=008    S06=002    S07=020  modem occasionally glitches
+  S08=002    S09=006    S10=005    S11=040  DCD when answering the first
+  S12=050    S13=000    S14=044    S15=000  ring, which TSX will catch &
+  S16=000    S17=000    S18=000    S19=000  then hang up on when it's not
+  S20=000    S21=016    S22=118    S23=054  there 0.5 sec later..
+  S24=000    S25=005    S26=000    S27=000
+  S28=000    S29=000    S30=000    S31=255
+  S32=001    S33=000    S34=000    S35=001
+
+  B=0  Y=0  &M=0   &D=2   &C=1  &J=0  &T=0
+  X=4  M=1   F=1    E=0    Q=1   V=1
+
+  DIAL=TONE    SPEED=2400     PARITY=NONE
+
+  The Anchor modem will save all of the above, including its "S" registers
+  in RAM (backed up with a lithium battery), via AT&W.  Then one need only
+  send ATZ to restore its auto-answer operation, which this Kermit will do
+  when exiting.  SET PHONE XMODE 4 for all result codes, and use the HAYES
+  modem type (SET MODEM HAYES).  Note that because this modem restores its
+  time-out (S7) when reset it is set to 20 secs for answering which allows
+  for a more timely response following a failed call.  If using MNP modems
+  on the same system, S7 should be set to 40 seconds.  If you have the MNP
+  model of this modem, stick with the HAYES definition as there is not any
+  provision for locking the DTE speed.
+
+  Configuration switches:
+
+  1 - as req'd, ON for RJ-12/13 busy support
+  2 - ON   DCD/DSR follow detected carrier signal
+  3 - ON   DTR from the computer controls modem (manual says OFF, in error..)
+  4 - OFF  remote digital loopback
+  5 - OFF  enables command recognition by modem
+  6 - OFF  no CTS support
+  7 - unused
+  8 - unused
+
+
+Installation and Release Notes	KRT V03.63			Page Fifteen
+
+
+		    Telebit T2500/T3000 Modems
+
+Three Telebit T2500 definitions are provided.  T2500 is intended for
+use without MNP or V.42 LAP-M error correction.  It uses the modem's
+connect messages to match the DTE speed to that of the data path and
+that requires using either the CL or KM handler.  Set up the T2500's
+default profile in the "enhanced" command mode as shown below:
+
+ E0 F1 M0 Q3 T V1 W1 X3 Y0 &P0 &T5     Version GF7.00-T2500SA
+ S00:001 S01=000 S02:128 S03=013 S04=010 S05=008 S06=002 S07=040 S08=002
+ S09=006
+ S10=007 S11:050 S12=050 S18=000 S25=005 S26=000 S38=000
+ S41=000 S45=000 S47=004 S48:001 S49=000
+ S50=000 S51=255 S52:002 S54:002 S55=000 S56=017 S57=019 S58=003 S59=000
+ S61=150 S62=003 S63=001 S64=000 S65=000 S66=000 S67=000 S68=255 S69=000
+ S90=000 S91=000 S92=000 S93=008 S94=001 S95=000 S96=001 S97=000 S98=003
+ S100=000 S101=000 S102=000 S104=000 S105=001 S106=000 S107=020
+ S110=255 S111=255 S112=001
+ S121=000 S130=002 S131:001
+ S150=000 S151=004 S152=001 S153=001 S154=000 S155=000 S157=000 S158=000
+ S160=010 S161=020 S162=002 S163=003 S164=007 S169=000 S255=000
+
+Then, when MNP operation is desired, set the DTE port (via SET SPEED
+if using TSX's CL handler) to 9600 or 19.2kb if your cpu can keep up
+with it, then SET MODEM T2500MNP.  This enables MNP only as attempts
+at a V.42 connection first with some MNP modems appear to leave them
+in a state where nothing following works.  When an MNP link can't be
+established operation falls back to the normal mode.
+
+V.42 and LAP-M facilities are enabled by setting the modem T2500V.42
+which operation is just like that of the MNP only above, except V.42
+is tried first, then MNP, and then normal operation if an error free
+path can not be established.  Negotiation of these protocols can add
+considerably to the time needed to connect.
+
+All of this should be done on the same  default  profile with which
+the modem will  automatically  answer  incoming calls to ensure the
+modem will be properly reset to  its auto-answer state when exiting
+Kermit-11 to the monitor.  The "enhanced" command mode is suggested
+because the "conventional" mode does not allow XOFF flow control in
+the command mode.  While this is not normally a problem with result
+messages it does make listing the modem's status impossible at high
+speeds.
+
+
+Installation and Release Notes	KRT V03.63			Page Sixteen
+
+
+Under RT-11 either the T2500MNP to T2500V.42 definitions may be used
+to work around XL/XC's inability to modify its speed as is necessary
+for the T2500.  Both will connect normally if error correction isn't
+supported by the remote system.  The KM handler may also be used.
+
+SET PHONE XMODE 3 to enable all possible result messages, or use 14
+if you prefer to force display of the carrier speed and protocol in
+all cases, even when an error correcting path is not established.
+
+If by accident the modem is sent something at an unwanted speed and
+becomes stuck there, toggle DTR (HANGUP or SET DTR) to reset it.
+
+If you are using PEP/MNP/V.42 Telebit's Kermit protocol spoofing is
+the fastest of all possible options even though it only uses normal
+94 byte packets between modems.  It is set in the above to run when
+requested by the other end.  To force it on first SHO LINE to check
+the DTE speed (if a fallback speed is shown then one must first SET
+SPEED 9600 or 19200 if using a mode where the DTE speed is locked),
+then CONNECT and issue the command ATS111=n, when "n" is one of:
+
+        0    No protocol supported
+        10   Kermit protocol with no parity
+        11   Kermit and odd parity
+        12   Kermit and even parity
+        13   Kermit and mark parity
+        14   Kermit and space parity
+        20   XMODEM/YMODEM protocol
+        255  Use protocol specified by other end
+
+Then, disable long packets (SET NOLONG will suffice), so the modems
+run most efficiently, and proceed with the transaction.
+
+
+			    Telebit T3000
+
+Three Telebit T3000 definitions are provided.  T3000 is for disabling
+MNP/V.42 error correction.  It checks the modem's connect messages to
+match the DTE speed to that of the carrier.  T3000V.42 enables V.42 &
+MNP modes and locks the speed.  Set up the T3000's defaults as listed
+below.  This definition  (T3000V.42)  is for use with hardware  (RTS)
+flow control.  This is ONLY available under the KM handler, where you
+have an option to SET FLOW-CONTROL RTS before setting the modem-type.
+
+WorldBlazer - SA - Version LA5.00W- Configuration A
+ B1  E0  L1  M0  Q1  T   V1  X12  Y0
+&C1 &D2 &G0 &J0 &L0 &Q0 &R3 &S0 &T5 &X0
+S000=0   S001=0   S002:0   S003=13  S004=10  S005=8   S006=2   S007:255
+S008=2   S009=6   S010=14  S011=70  S012=50  S018=0   S025=5   S026=1
+S038=0   S041=0   S045=0   S046=0   S047=4   S048:1   S050=0   S051=255
+S056=17  S057=19  S058:2   S059:15  S060=0   S061:0   S062=15  S063:1
+S064=0   S068=255 S069=0   S090=0   S092=0   S093=8   S094=1   S100=0
+S104=0   S105=1   S111=255 S112=1   S151=4   S155=0   S180=2   S181=1
+S183=25  S190=1   S191=7   S253=10
+
+
+Installation and Release Notes	KRT V03.63			Page Seventeen
+
+
+The T3000 does NOT do XOFF flow control in the command mode even when
+it's enabled and functioning for data between modems unless S48=0 and
+this of course kills an 8-bit data path.  A third modem definition is
+provided (T3000X.42) which enables XOFF rtesraint - Kermit quotes the
+8-bit counterparts of XOFF and XON so this will only be a problem for
+binary data transfers using the Xmodem protocol.  This defintion will
+force S48 to 0 and enable XOFF restraint when initializing the modem.
+
+
+                   US Robotics "Courier" 2400/2400e
+
+  C1  E0  F1  M1  Q1  V1  X6
+  BAUD=02400  PARITY=N  WORDLEN=8
+  DIAL=HUNT   ON HOOK  TIMER
+
+  &A1  &B0  &H0  &I0  &M0
+  &N0  &R1  &S0  &Y1
+
+  S00=001  S01=000  S02=043  S03=013
+  S04=010  S05=008  S06=002  S07=030
+  S08=002  S09=006  S10=007  S11=070
+  S12=050  S13=032  S14=252  S15=000
+  S16=000  S17=000  S18=000  S19=000
+  S20=000
+
+  Configuration switches:
+
+   1 - UP    DTR controls modem
+   2 - UP    verbal result messages
+   3 - UP    quiet mode, for auto-answer
+   4 - DOWN  don't echo local commands, for auto-answer
+   5 - UP    enable auto-answer, modem answers on the first ring
+   6 - UP    DCD on pin 8 follows action of received carrier
+   7 - as req'd, DOWN for RJ-12/13 busy support
+   8 - UP    to recognize "AT" command set
+   9 - UP    drop phone connection when escape code received
+  10 - UP    load power-on defaults from NVRAM
+  QUAD - as req'd for your system and modem cable..
+
+Use the Hayes modem type (SET MODEM HAYES).  Set the "&" registers per
+the above and save them with AT&W.  The "S" registers aren't preserved
+so ONTIM and TIMIN must = 60. (TSGEN.MAC)  if incoming calls are being
+accepted (auto-answer enabled) under TSX-Plus.  If wish to use the MNP
+version, lock the DTE speed as desired to at least 4800 (AT&B5&W) then
+SET MODEM Hayes-MNP.
+
+US Robotics modems such as the Courier 2400 or 2400e will occasionally
+glitch when answering the phone and start a TSX port at 19.2kb instead
+of 2400.  This is more likely to happen when the modem is not properly
+cooled.  Replacing its rubber feet with some that hold it higher above
+the surface on which it resides may help.  Setting the modem to answer
+after the first ring (that is, on the second) may also help.  Starting
+with TSX V6.5, 2400 is tried first, before 19200, which also may help.
+
+SET PHONE XMODE 6 enables all possible result messages from the modem.
+
+
+Installation and Release Notes	KRT V03.63			Page Eighteen
+
+
+		U S E R - D E F I N E D   M O D E M
+		-----------------------   ---------
+
+Kermit-11 contains operating parameters for several of the more common
+auto-dial modems.  To find out if your modem is directly supported use
+the SET MODEM ? command.  If it is not, you'll need to use SET DIAL to
+load the data used to control the modem and implement the various DIAL
+routines.  These involve formatting commands to the modem, and what to
+expect in the way of modem responses.  As an example the Vadic VA212PA
+modem is awakened from an idle state by the character sequence (octal)
+
+	005 015
+
+which is Ctrl-E followed by carriage return.  The modem responds with
+
+	HELLO: I'M READY
+	*
+
+Thus Kermit needs to know when it sends the wakeup sequence it should
+wait for the asterisk to be returned by the modem, after which it may
+presumed the modem is awaiting further commands, such as that to dial
+a phone number.
+
+Suppose we had to tell Kermit about the Racal Vadic VA212PA (though in
+reality Kermit already knows this modem).  Checking the owner's manual
+for it, we find that:
+
+     To wake the modem up, we type a Ctrl-E followed by a return.
+
+     To dial a number, we type the letter D  followed by a return.  At
+     this point, the modem prints a NUMBER? prompt and we then type in
+     the desired number.  The number  is  then reprinted and the modem
+     waits for a return from us to confirm it's correct.
+
+     When it completes dialing it will print "ON LINE" or "ONLINE" for
+     a successful call, otherwise it may return "BUSY", "FAILED CALL",
+     "NO DIAL",  "VOICE"  or  "TIME OUT".  While it is waiting for its
+     call to be answered it may print the line "RINGING" several times
+     to tell you it is working on the call.
+
+The Kermit commands required would be:
+
+	Kermit-11>SET DIAL WAKE-STRING \005\015
+	Kermit-11>SET DIAL ECHO
+	Kermit-11>SET DIAL WAKE-ACK *
+	Kermit-11>SET DIAL INITIATE D\015
+	Kermit-11>SET DIAL FORMAT %P%S\015
+	Kermit-11>SET DIAL DIAL-PAUSE 9K
+	Kermit-11>SET DIAL CONFIRM \015
+	Kermit-11>SET DIAL SUCCESS ONLINE
+	Kermit-11>SET DIAL SUCCESS ON LINE
+	Kermit-11>SET DIAL RINGING RINGING
+	Kermit-11>SET DIAL FAILURE BUSY
+	Kermit-11>SET DIAL FAILURE FAILED CALL
+	Kermit-11>SET DIAL FAILURE NO DIAL
+	Kermit-11>SET DIAL FAILURE TIME OUT
+	Kermit-11>SET DIAL FAILURE VOICE
+
+
+Installation and Release Notes	KRT V03.63			Page Nineteen
+
+
+The notation "\005\015" indicates a Ctrl-E followed by a return.  5 is
+octal for Ctrl-E,  15 is octal for return.   Octal numbers may also be
+specified by placing the value inside of  inequality  characters as in
+SET DIAL WAKE <005><015> though the former is preferred.  Octal values
+may be obtained from HELP ASCII.  If for any reason you need to pass a
+"\" or "<" to your modem, simply prefix the character with another "\"
+or "<" as in "\\" or "<<".
+
+"%P%S\015" indicates the phone number from the  DIAL  command is to be
+followed by a return.  "%S" is  a format effector for the phone number
+string itself,  which causes it to be inserted in the dial string sent
+to the modem.   "%P" inserts the dial pause string, as in this case we
+need to dial 9 and wait for a second dial tone.  The "K" is the  Racal
+Vadic  code to get the modem to pause.  If you are dialing on a direct
+line or your modem supports pausing via something embedded in the dial
+string itself, the DIAL-PAUSE command is unneeded.
+
+Many modems require only WAKEUP, WAKE-ACK, FORMAT and result strings.
+The Digital DF112 is a good example.  Its definition would look like:
+
+	Kermit-11>SET DIAL WAKEUP \002
+	Kermit-11>SET DIAL WAKE-ACK READY
+	Kermit-11>SET DIAL FORMAT %S#
+	Kermit-11>SET DIAL SUCCESS ATTACHED
+	Kermit-11>SET DIAL FAILURE BUSY
+	Kermit-11>SET DIAL FAILURE DISCONNECTED
+	Kermit-11>SET DIAL FAILURE ERROR
+	Kermit-11>SET DIAL FAILURE NO ANSWER
+
+Any undefined result string is considered informational only thus this
+class of response does not need to be expressly defined.
+
+If you are using a "Hayes" style modem, its extended response mode may
+be set by using the %X format effector in the WAKE-STRING.  The number
+desired is then specified by SET PHONE XMODE n, where n is 0 to 14, or
+"OFF" to disable it.  %X may also be used in the FORMAT (dial) string,
+allowing modification without re-initializing the modem.
+
+Here's a sample Hayes definition:
+
+	Kermit-11>SET PHONE TONE,XMODE 4
+	Kermit-11>SET DIAL COMMENT Generic Hayes Command Set
+	Kermit-11>SET DIAL TIME-OUT 45
+	Kermit-11>SET DIAL WAKE-ACK OK
+	Kermit-11>SET DIAL WAKE-STRING AT E1 Q0 V1 S0=0 S7=255 %X \015
+	Kermit-11>SET DIAL ECHO
+	Kermit-11>SET DIAL INIT-ONCE
+	Kermit-11>SET DIAL FORMAT AT %X %A D%M %S \015
+	Kermit-11>SET DIAL ABORT \015
+	Kermit-11>SET DIAL CON19200 CONNECT 19200
+	Kermit-11>SET DIAL CON19200 CONNECT 14400
+	Kermit-11>SET DIAL CON9600 CONNECT 9600    ; fallback only works with
+	Kermit-11>SET DIAL CON4800 CONNECT 4800    ; the CL or KM handlers..
+	Kermit-11>SET DIAL CON2400 CONNECT 2400
+	Kermit-11>SET DIAL CON1200 CONNECT 1200
+	Kermit-11>SET DIAL CON9600 CONNECT FAST
+	Kermit-11>SET DIAL CON300 CONNECT	   ; embedded, must be last!
+
+
+Installation and Release Notes	KRT V03.63			Page Twenty
+
+
+	Kermit-11>SET DIAL FAILURE BUSY
+	Kermit-11>SET DIAL FAILURE ERROR
+	Kermit-11>SET DIAL FAILURE NO ANSWER
+	Kermit-11>SET DIAL FAILURE NO CARRIER
+	Kermit-11>SET DIAL FAILURE NO DIALTONE
+	Kermit-11>SET DIAL FAILURE NO DIAL TONE
+	Kermit-11>SET DIAL FAILURE VOICE
+	Kermit-11>SET DIAL RINGING RING		; includes RINGING
+	Kermit-11>SET DIAL RINGING RRING	; Telebit style..
+	Kermit-11>SET DIAL PULSE P
+	Kermit-11>SET DIAL TONE T
+	Kermit-11>SET DIAL ANSWER S0=1
+	Kermit-11>SET DIAL NOANSWER S0=0
+	Kermit-11>SET DIAL IDLE AT Z \015
+
+Some modems are unable to accept data at the line speed, in which case
+one must employ SET DIAL WAKE-RATE and SET DIAL DIAL-RATE.   These two
+functions accept a delay time in clock ticks,  which  are 1/50 or 1/60
+second units depending on where in the world this program is running.
+
+If your modem has a settable timer it should be either disabled or set
+to the maximum possible (example: the Hayes wakeup string contains S7=
+255) to allow Kermit-11's internal TIME-OUT to prevail.
+
+If your modem hangs, see HELP SET DIAL SETTLE-TIME.  This and TIME-OUT
+are two special parameters here in that they are global, and used even
+with Kermit's internal modem definitions.  However, default values are
+loaded by SET MODEM, thus these must be altered AFTERWARDS, except for
+the USER-DEFINED modem where what is set BECOMES the default.  This is
+also the case for SET PHONE XMODE.
+
+NOTE:  This program toggles DTR to reset the modem thus the modem must
+have this option enabled in its default configuration.
+
+If the modem echoes command strings sent to it SET DIAL ECHO to enable
+display of anything output by it.
+
+Once all pertinent data have been entered, it is then necessary to SET
+Kermit's modem-type:
+
+	Kermit-11>SET MODEM USER-DEFINED
+
+If a line (and speed if necessary) has been previously set this causes
+Kermit to try initializing the modem, the result of which is reported.
+If successful, you may then use the DIAL command to call out.
+
+SET DIAL -- Additional information is available on:
+
+     ABORT             ANSWER            BINARY-RESPONSE   BLIND
+     COMMENT           CON300            CON1200           CON2400
+     CON4800           CON9600           CON19200          CON38400
+     CONFIRM           CONFIRM-ACKNOWLEDGE                 DIAL-ACKNOWLEDGE
+     DIAL-PAUSE        DIAL-RATE         ECHO              FAILURE
+     FORMAT            Format-effectors  IDLE              Important-Notes!
+     INITIATE          INITIATE-PROMPT   INIT-ONCE         NOANSWER
+     NOBINARY-RESPONSE NOECHO            NOINIT-ONCE       PULSE
+     RINGING           SETTLE-TIME       SUCCESS           TIME-OUT
+     TONE              WAKE-ACKNOWLEDGE  WAKE-RATE         WAKE-STRING
+
+
+Installation and Release Notes	KRT V03.63			Page TwentyOne
+
+
+SET DIAL ABORT
+
+Defines a string to force the modem to stop dialing.  This is passed
+to the modem by the strike-any-key abort function of Kermit-11 while
+waiting for a dialed  call  to complete.  Non-printing chars must be
+specified in octal notation.
+
+	Kermit-11>SET DIAL ABORT \003	; use ^C to stop modem
+
+SET DIAL ANSWER
+
+Defines a string the %A format effector will insert in the dial FORMAT
+string when it contains said %A effector and you have SET PHONE ANSWER
+to allow answering a call back from a security modem requiring it.
+
+	Kermit-11>SET DIAL ANSWER S0=1	; Hayes does it thusly
+
+SHOW MODEM to display its current setting and status.
+
+SET DIAL BINARY-RESPONSE
+
+If your modem responds with single character result messages (sans any
+terminator ala a return) set this so Kermit will as well.  The default
+may be restored with SET DIAL NOBINARY-RESPONSE, which enables testing
+of strings of more than one character.
+
+SET DIAL BLIND
+
+Defines a string to force the modem to dial regardless of its detecting
+a dial tone or recognizing tone dialing capability on the line.  Actual
+use of this string in dialing is enabled by SET PHONE BLIND.
+
+	Kermit-11>SET DIAL BLIND string
+
+SET DIAL COMMENT
+
+Specifies a brief description of the modem definition which is included
+in the SHOW MODEM display.  Embedded blanks are ok, but multiple spaces
+will be reduced to a single blank.
+
+	Kermit-11>SET DIAL COMMENT Hayes-MNP with DTE speed locked
+
+SET DIAL CON300
+
+Define a message from the modem which, as a result of a dialed call
+will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+KM handler) to 300 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON300 CONNECT  ; Hayes defaults to 300
+
+SET DIAL CON1200
+
+Define a message from the modem which, as a result of a dialed call
+will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+KM handler) to 1200 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON1200 CONNECT 1200
+
+
+Installation and Release Notes	KRT V03.63			Page TwentyTwo
+
+
+SET DIAL CON2400
+
+Define a message from the modem which, as a result of a dialed call
+will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+KM handler) to 2400 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON2400 CONNECT 2400
+
+SET DIAL CON4800
+
+Define a message from the modem which, as a result of a dialed call
+will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+KM handler) to 4800 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON4800 CONNECT 4800
+
+SET DIAL CON9600
+
+Define a message from the modem which, as a result of a dialed call
+will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+KM handler) to 9600 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON9600 CONNECT 9600	; Hayes
+	Kermit-11>SET DIAL CON9600 CONNECT FAST	; Telebit
+
+SET DIAL CON19200
+
+Define a message from the modem which, as a result of a dialed call
+will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+KM handler) to 19,200 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON19200 CONNECT 19200
+	Kermit-11>SET DIAL CON19200 CONNECT 14400
+
+SET DIAL CON38400
+
+Define a message from the modem which, as a result of a dialed call
+will cause Kermit-11 to set its DCE port (ONLY when using the CL or
+KM handler) to 38,400 baud and then CONNECT to it:
+
+	Kermit-11>SET DIAL CON38400 CONNECT 38400
+
+SET DIAL CONFIRM
+
+Some modems use a command syntax wherein the number to be dialed is
+echoed back to the user, after which the user must confirm it is ok
+by returning an appropriate string:
+
+	Kermit-11>SET DIAL CONFIRM \015   ; usually just a return
+
+SET DIAL CONFIRM-ACKNOWLEDGE
+
+If your modem issues some sort of confirmation to the DIAL CONFIRM
+sent to it, and there is  some  reason  to  test that in fact said
+confirmation has actually been received by Kermit, you may specify
+what to expect thusly:
+
+	Kermit-11>SET DIAL CONFIRM-ACK string
+
+
+Installation and Release Notes	KRT V03.63		      Page TwentyThree
+
+
+For example, older Vadic modems would say "DIALING" here.
+
+SET DIAL DIAL-ACKNOWLEDGE
+
+Specifies a string issued by the modem to acknowledge it is dialing.
+Use of this may be  required  for  error  detection  with some older
+modems, but it's normally not necessary.
+
+	Kermit-11>SET DIAL DIAL-ACK \015   ; usually just a return
+
+SET DIAL DIAL-PAUSE
+
+Defines the string for dial tone pause, which string is passed to the
+modem by placing the %P format effector in the actual dialing string,
+which in turn is defined with the SET DIAL FORMAT command.
+
+	Kermit-11>SET DIAL DIAL-PAUSE string
+
+If you are dialing on a direct line or your modem supports pausing via
+something embedded in the dial string itself the DIAL-PAUSE command is
+unnecessary.  As long as the first char is numeric, commas and similar
+tokens will be passed to the modem as part of the number from the DIAL
+command.
+
+SET DIAL DIAL-RATE
+
+Allows pacing of chars in the dial string sent to the modem.  There is
+an inherent wait of one clock tick (1/50 or 1/60 second, per your LTC)
+to ensure an echo is not missed.  If this remains too fast for a modem
+additional delay between each char may be specified in ticks:
+
+	Kermit-11>SET DIAL DIAL-RATE 3
+
+SET DIAL ECHO
+
+If the modem echoes command strings, SET DIAL ECHO causes the display
+during DIALing to be driven directly from the modem's output.  If the
+modem doesn't support this, SET DIAL NOECHO forces display of what is
+sent, regardless of what may be received from the modem.
+
+SET DIAL FAILURE
+
+Define a message from the modem which, as a result of a dialed call,
+indicates failure to complete the connection.  More than one message
+may be defined if necessary to include all possibilities.
+
+	Kermit-11>SET DIAL FAILURE BUSY
+	Kermit-11>SET DIAL FAILURE NO ANSWER
+
+SET DIAL FORMAT
+
+This defines the actual DIAL string sent to the modem.  In  addition
+to specifying the entire thing verbatim several format effectors are
+provided to make life easier.  Most notable of these is %S, which is
+the number to dial taken from the argument to the DIAL command.  See
+HELP SET DIAL Format-effectors for detailed info.
+
+	Kermit-11>SET DIAL FORMAT %P%S\015
+	Kermit-11>SET DIAL FORMAT AT %X D%M %S \015
+
+
+Installation and Release Notes	KRT V03.63		       Page TwentyFour
+
+
+Most modems will require %S be the last item in the list (other than
+the return as an input terminator), as otherwise a following command
+will be taken as a request to abort dialing.  If blanks are embedded
+they will be passed to the modem, although contiguous blanks will be
+reduced to a single space.
+
+SET DIAL Format-effectors
+
+FORMAT (dialing) string format effectors supported:
+
+	%A - SET PHONE [NO]ANSWER string
+	%B - Dial blind
+	%M - Mode, pulse or tone
+	%P - Insert pause string
+	%S - Phone number string, passed by DIAL command
+	%X - Insert Hayes xmode string, unless set off
+
+WAKE-STRING (initialization) string format effector supported:
+
+	%X - Insert Hayes xmode string, unless set off
+
+See  HELP SET DIAL ANSWER, NOANSWER PULSE, TONE  and  HELP SET PHONE *
+for info concerning exactly what each of these does.
+
+If you are using a "Hayes" style modem, its extended response mode may
+be set into the init string via SET PHONE XMODE n, where n is a number
+between 0 and 14, or the word "OFF".  The  format  effector  for XMODE
+is %X.  It may also be used in the dial string, allowing modifications
+without re-initializing the modem.
+
+Strings to be inserted will be displayed in SHOW MODEM when the format
+effectors (SET PH BLIND,PULSE,TONE,XMODE) for them are enabled, except
+for the phone number string, which is not built until DIALing.
+
+SET DIAL IDLE
+
+Defines the string used to return the modem to idle state, which is
+sent to the modem upon exiting Kermit-11 or dropping the connection
+(ala SET LINE) to it.  If the modem was preset to auto-answer, this
+restores it to that state.
+
+	Kermit-11>SET DIAL IDLE ATZ \015
+
+SET DIAL Important-Notes!
+
+The SUCCESS, CONnnnn, RINGING  and  FAILURE fields are built as linked
+lists thus you can have as many as necessary.  At least one SUCCESS or
+CONnnnn message must be defined or any call is going to fail!
+
+NOTE: Where a modem response string (SUCCESS, CONN, FAILURE) is a sub-
+string of another response string the substring MUST FOLLOW the string
+containing it as the comparison scheme used here ignores the return at
+the end of the result string from the modem.  Thus, when you are using
+CONNECT 1200 and CONNECT, "CONNECT 1200" MUST be defined first, BEFORE
+"CONNECT" on its own.  All tests are done without respect to case.
+
+Use of CONNECT messages to conform the speed of the DCE port (the one
+on the PDP-11) to that of the modem (DTE port) is only possible using
+the CL (TSX-Plus) or KM (RT-11/TSX-Plus) handlers.  These are for use
+
+
+Installation and Release Notes	KRT V03.63		       Page TwentyFive
+
+
+with modems which alter the speed of their data port to the connected
+(telephone port) speed.  The old speed will be restored when the next
+call is placed, unless SET otherwise first.  See HELP SET DIAL CONnn,
+where nn=300 ,1200 ,2400 ,4800 ,9600 ,19200 or 38400.
+
+Once you have  established  a  working set of parameters for your user
+defined modem,  you  may  include  them  in  KRT.INI, Kermit's startup
+initialization command file.  If memory runs out before everything you
+need can be entered, increase the value of ALSIZE in KRTMAC.MAC.  This
+same buffer is used to store phone numbers.  Also note malloc as it is
+here does not deallocate anything, thus while re-entering data updates
+pointers to them the superseded data's memory is NOT recovered.
+
+The following pseudo code was extracted from the dialer source module,
+with the hope of clarifying the functions of and relationships between
+the seemingly excessive number of parameters available here.  Anything
+that can modified by SET DIAL is shown in UPPER CASE.  Items listed as
+optional should only be used when really necessary, or performance may
+not remain as fast as it could be.
+
+format_dial_string		; build the modem's dial_command_string
+  using FORMAT string and
+    %B BLIND dial string	; if set phone blind has also been done
+    %M PULSE or TONE string	; set phone pulse,tone selects which
+    %P DIAL-PAUSE string	; used if defined
+    %S the_phone_number		; as passed by the dial command
+    %X XMODE			; depending on set phone xmode
+
+call tty_initialize		; open the link device
+call fix_speed			; restore set speed (b4speed) if need be
+
+test INIT-ONCE			; need to re-init modem?
+  if <>, goto do_dial
+	send WAKE-STRING	; ya, send it an init string
+	pace WAKE-RATE ticks	; pause between chars if <>
+	call check_abort	; check strike any key to abort loop
+	wait_for WAKE-PROMPT	; now wait 2 secs for an ack
+    on error, loop a maximum of three times then give up
+
+do_dial:			; try to dial a number
+	; these two are optional and only for modems which need them
+	send INITIATE		; dump the string to initiate dialing out
+	wait_for INITIATE-PROMPT; if defined, wait up to 4 secs for a response
+  send dial_command_string	; this is from FORMAT, et.al. above
+  pace DIAL-RATE ticks		; pause between chars if not zero
+  test DIAL-ECHO		; does it echo?  if not, Kermit will do it
+  call check_abort		; strike any key to abort loop
+	; these three are optional and only for modems which need them
+	wait_for DIAL-ACK	; wait up to 4 secs for numb to echo perhaps
+	send CONFIRM		; stuff a confirm
+	wait_for CONFIRM-ACK	; if defined, wait up to 5 secs for the string
+
+get_response:			; get the modem's response
+  wait_for SUCCESS ,RINGING ,FAILED ,CON300..CON19200
+  test BINARY-RESPONSE		; exit loop on a single character?
+  call check_abort		; strike any key to abort loop
+  wait_until TIME-OUT secs
+
+
+Installation and Release Notes	KRT V03.63			Page TwentySix
+
+
+call_fails_or_was_aborted:
+  send ABORT			; get the modem to STOP
+  wait SETTLE			; let modem recover from abort!
+
+call_succeeds:
+	; if under TSX-Plus with CL handler and a CONnnnn result message
+	call b4speed		; save speed before fallback..
+	call set_speed		; then set it to what modem wants it to be
+  jump c$connect		; and connect automatically..
+
+SET DIAL INITIATE
+
+Some modems use a command syntax wherein the number to be dialed must be
+preceded by a command to first initiate the dial mode itself.   Normally
+these modems will also require using a DIAL CONFIRM string after sending
+the number string.
+
+	Kermit-11>SET DIAL INITIATE D\015
+
+SET DIAL INITIATE-PROMPT
+
+If after use of the DIAL INITIATE option for some obscure reason you
+find it necessary to check for proper response to it from your modem
+the desired string may be specified thusly:
+
+	Kermit-11>SET DIAL INITIATE-PROMPT string
+
+SET DIAL INIT-ONCE
+
+If once initialized your modem remains in that state (some such as the
+Concord 224 will time out and return to an idle mode) you may skip any
+further unnecessary and time consuming inits by calling this function.
+This is tested when dialing, and will speed up the redial looping time
+if your modem allows its use.
+
+	Kermit-11>SET DIAL INIT-ONCE
+
+To restore Kermit-11's default operation where the modem is re-initted
+before trying anything and everything else SET DIAL NOINIT-ONCE.
+
+SET DIAL NOANSWER
+
+Defines a string the %A format effector will insert in the dial FORMAT
+string when it contains said %A effector and you've SET PHONE NOANSWER
+to disable the modem from answering an incomming call.
+
+	Kermit-11>SET DIAL NOANSWER S0=0  ; Hayes does it thusly
+
+SHOW MODEM to display its current setting and status.
+
+SET DIAL NOBINARY-RESPONSE
+
+Enables testing modem result messages consisting of strings greater than
+one character.  If your modem responds via single character result codes
+SET DIAL BINARY-RESPONSE so Kermit will as well.
+
+
+Installation and Release Notes	KRT V03.63		      Page TwentySeven
+
+
+SET DIAL NOECHO
+
+If the modem echoes command strings, SET DIAL ECHO causes the display
+during DIALing to be driven directly from the modem's output.  If the
+modem doesn't echo, SET DIAL NOECHO will force Kermit to display what
+is sent to the modem in place of what would be echoed back.
+
+SET DIAL NOINIT-ONCE
+
+If your modem, once initialized for dialing out, doesn't remain in such
+a state, particularly after a dial out call fails, SET DIAL NOINIT-ONCE
+will force Kermit-11 to re-initialize the modem before each dial/redial
+attempt.  This is the default operation.
+
+SET DIAL PULSE
+
+Defines a string to force the modem to use pulse dialing regardless of its
+recognizing tone dialing capability on the line.  This string is passed to
+the modem by the %M format effector (which must in the DIAL FORMAT string)
+when one has SET PHONE PULSE to enable it.
+
+	Kermit-11>SET DIAL PULSE P	; "Hayes" uses this
+
+SET DIAL RINGING
+
+Defines a ring response, as returned by the modem to report the status of
+a call in progress.  Kermit-11 maintains a count of received RINGS, after
+seven of which the call will be considered failed due to no reply.
+
+	Kermit-11>SET DIAL RINGING RING   ; "RING" includes "RINGING"
+
+Multiple messages may be defined as required to cover all possibilities.
+
+SET DIAL SETTLE-TIME
+
+Allows modifying the delay between sending a reset string to a modem and
+dumping the handler connected to it, which also drops DTR.  If the modem
+doesn't recover in time to resume its auto-answer mode, increase this to
+something beyond the 20 tick default by setting a new value as a decimal
+number of ticks.  One tick is 1/50 or 1/60 second (hardware dependent).
+
+	Kermit-11>SET DIAL SETTLE 30
+
+IMPORTANT NOTE:  This is a global function effective for ANY modem type,
+not just USER-DEFINED, but for KRT's built-in modem types this will only
+prevail when this is done AFTER setting the MODEM-TYPE.
+
+SET DIAL SUCCESS
+
+Define a message from the modem which, as a result of a dialed call,
+indicates successful completion and a data path has been established
+between modems, and which will force Kermit to CONNECT your terminal
+to it.  More than one message may be defined if necessary to include
+all possible responses.
+
+	Kermit-11>SET DIAL SUCCESS CONNECT
+
+ NOTE:  This particular function neither checks nor changes speed.
+ If this is something you need, see HELP SET DIAL Important-Notes.
+
+
+Installation and Release Notes	KRT V03.63		      Page TwentyEight
+
+
+SET DIAL TIME-OUT
+
+Defines the period in seconds after which if there is no conclusive
+response (excluding informational messages) from the modem the call
+will be considered to have failed.
+
+	Kermit-11>SET DIAL TIME-OUT 60	; for overseas calling..
+
+IMPORTANT NOTE:  This is a global function effective for ANY modem type,
+not just USER-DEFINED, but for KRT's built-in modem types this will only
+prevail when done AFTER setting the MODEM-TYPE, and the modem's internal
+time out is set to something greater than the desired time period here.
+
+SET DIAL TONE
+
+Defines a string to enable the modem to use tone dialing regardless of its
+recognizing tone dialing capability on the line.  This string is passed to
+the modem by the %M format effector (which must in the DIAL FORMAT string)
+when one has SET PHONE TONE to enable it.
+
+	Kermit-11>SET DIAL TONE T	; "Hayes" uses this
+
+SET DIAL WAKE-ACKNOWLEDGE
+
+Defines the expected response to the WAKE-STRING (initialization to dial
+out) sent to the modem.  This is tested three times over a period of six
+seconds, after which the init will be considered to have failed.
+
+	Kermit-11>SET DIAL WAKE-ACK OK
+
+SET DIAL WAKE-RATE
+
+Allows pacing of chars in the init string sent to the modem.  There is
+an inherent wait of one clock tick (1/50 or 1/60 second, per your LTC)
+to ensure an echo is not missed.  If this remains too fast for a modem
+additional delay between each char may be specified in ticks:
+
+	Kermit-11>SET DIAL WAKE-RATE 5
+
+SET DIAL WAKE-STRING
+
+Defines the wakeup (initialization) string sent to the modem to place
+it in the ready-to-dial-out state:
+
+	Kermit-11>SET DIAL WAKE-STRING \005\015
+	Kermit-11>SET DIAL WAKE-STRING AT E1 Q0 S0=0 S7=255 V1 %X \015
+
+
+Installation and Release Notes	KRT V03.63		       Page TwentyNine
+
+
+			R E S T R I C T I O N S
+			-----------------------
+
+A problem was found with versions of Kermit-11 prior to  3.49  regarding
+the  sending and processing of attribute packets.  Basically, two of the
+attribute types were improperly implemented.  The support for  attribute
+packets  was  added  back  in April 1984, at a time when testing against
+other implementations was not possible.  At this writing, in March 1986,
+some problems have been found.
+
+The corrected version of Kermit-11 is V3.49.  This version will  NOT  be
+able  to exchange attribute packets with previous versions.  In order to
+make an initial download of Kermit-11 V3.49 to a host running  an  older
+version, you must explicitly disable attribute support, as in:
+
+        Kermit-11>SET NOATTR
+
+and then force both ends to binary mode, as in:
+
+        Kermit-11>SET FILE TYPE BINARY
+
+The best way to accomplish the updating of remote sites is to use a pre-
+3.49 version of Kermit-11 at both sides,  transfer the image appropriate
+to your system, then replace the old executable image on the remote side
+and your own side and transfer the help text and other needed files.
+
+
+			   U p g r a d e s
+			   ---------------
+
+This special version of Kermit-11 (for RT-11 and TSX-Plus) may be from
+time to time updated/upgraded, or various bugs may be found and fixed.
+New versions may be obtained from kermit.columbia.edu by anonymous ftp
+(kermit/b/krt*.*) or by calling the system on which the work is done:
+
+    Host:             Billy's Place, Culver City, California, USA
+    Available:        24 hours, 3 lines, immediate access
+    Phone:            +1.310.837.0892
+    Logon (username): 1000
+    Password:         moving_target
+    Modem speeds:     9600 (V.32) and down, or PEP (modems are T-2500s)
+    Protocols:        Kermit, VTCOM/TRANSF, Xmodem
+
+Access is free other than whatever it costs to place the call.  Any bug
+found will be fixed, send mail to billy@MIX.COM detailing your problem.
+Also on-line here are the complete Kermit-11 T3.60 sources along with a
+massive amount of RT-11 SIG and other public domain/gratis software.  
+
+
+Installation and Release Notes	KRT V03.63			Page Thrity
+
+
+The following files comprise everything required for KRT/KRTTSX:
+
+KRT   .BWR	"Beware" file, known bugs and possible things to come..
+KRT   .COM	Links low memory overlays image, KRT.SAV
+KRT   .DOC	Installation and Release Notes
+KRT   .IND	Bob Schor's Kermit-11 init file manipulator, an IND process
+KRT   .INI	Sample initialization file
+KRT   .MAP	Link map of low memory overlays image, KRT.SAV
+KRT   .SAV	Low memory overlays image, for RT-11FB,SB,SJ and TSX+
+KRTAIL.MAC	Tailgating protection for TSX+ V6.31 and below
+KRTASM.COM	Assembles all source modules for an EIS CPU
+KRTASM.NON	Assemble all sources for a non-EIS CPU using macros in KRTNHD
+KRTATR.MAC	Attribute packet processing
+KRTCDF.MAC	Command macro definition .INCLUDE file
+KRTCMD.MAC	Main program loop, commands calling APR4
+KRTCM1.MAC	APR4 overlay for the rest of the commands
+KRTCOM.MAC	Main loop commands data table
+KRTCON.MAC	CONNECT terminal emulator
+KRTCVT.MAC	File name conversion routines
+KRTDAT.MAC	Global read/write data
+KRTDEB.MAC	EXAMINE command, display memory by symbol or address
+KRTDEF.MAC	Packet definition .INCLUDE file
+KRTDIA.MAC	DIAL command, also SET MODEM and SHOW DIAL
+KRTDIR.MAC	Directory operations
+KRTDSP.MAC	I/O dispatching to handler or terminal
+KRTEDI.MAC	SL command line editor
+KRTERM.MAC	I/O support for the controlling terminal line (TT)
+KRTERR.MAC	Error messages
+KRTHIS.DOC	Narrative in-depth edit history
+KRTHLP.HLP	HELP text file
+KRTHLP.MAC	HELP command processor
+KRTIDX.BAS	Builds KRTIDX.MAC from KRTHLP.HLP
+KRTIDX.MAC	HELP text file index for high speed lookups
+KRTINI.MAC	Initialization, packet logging
+KRTKM .MAC	"Kermit Modem" handler
+KRTLNK.COM	Links extended memory overlays image, KRTTSX.SAV
+KRTMAC.MAC	Macro definitions .INCLUDE file
+KRTMDM.MAC	Pre-defined modems database
+KRTNHD.MAC	MUL, DIV, SOB, ASH macros for non-EIS CPU
+KRTOID.COM	Link for RT-11 V5.6 separate I&D space, low memory overlays
+KRTOSI.MAC	One-shot initialization at program start
+KRTPAK.MAC	Low level packet processing
+KRTREC.MAC	Incoming file protocol processing
+KRTRMS.MAC	File access, RMS emulation
+KRTSEN.MAC	Outgoing file protocol processing
+KRTSER.MAC	Server support
+KRTSHO.MAC	SHOW, COPY, DELETE, PRINT, RENAME commands
+KRTSJ .CND	RT-11FB,SB,SJ conditional assembly file for KM handler
+KRTSJ .MAC	Root module for low memory overlays image
+KRTSTD.MAC	SET command data table
+KRTST0.MAC	SET command overlay 0
+KRTST1.MAC	SET command overlay 1
+
+
+Installation and Release Notes	KRT V03.63			Page ThrityOne
+
+
+KRTSUB.MAC	Misc common utility routines
+KRTSV4.COM	Build KM handler under RT-11 V4
+KRTSYS.COM	Build KM handler under RT-11 V5
+KRTTRA.MAC	TRANSMIT command
+KRTTSX.CND	TSX conditional assembly file for KM handler
+KRTTSX.MAP	Link map for extended memory overlays image, KRTTSX.SAV
+KRTTSX.SAV	Extended memory overlays image, for RT-11XB,XM,ZB,ZM and TSX+
+KRTUTL.MAC	Misc utility routines, mount for TSX+
+KRTVID.COM	Link for RT-11 V5.6 sep I&D space, extended memory overlays
+KRTXL .MAC	I/O support for CL, KM, XC and XL
+KRTXM .CND	XM conditional assembly file for KM handler
+KRTXM .MAC	Root module for extended memory overlays image
+KRTXMO.MAC	XMODEM, also SEND command processor
+
+Billy Y..
+27-Sep-1997
+-eof-

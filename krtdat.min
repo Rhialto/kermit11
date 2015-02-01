@@ -1,0 +1,127 @@
+	.title	KRTDAT.MIN  Global read/write data
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.psect	$rwdat	,rw,d,lcl,rel,con
+RWDATA	==	.
+$image:: .blkw	1
+argbuf:: .blkw	1
+argpnt:: .blkw	1
+at$len:: .blkw	1
+at$sys:: .blkw	1
+charin:: .blkw	2
+charou:: .blkw	2
+chksiz:: .blkw	1
+chktyp:: .blkw	1
+cmdadr:: .blkw	1
+cmdbuf:: .blkw	1
+cmdlun:: .blkw	1
+cmdnum:: .blkw	1
+conpar:: .blkb	20
+csi.fak::.blkw	1
+datauk:: .blkw	1
+do8bit:: .blkw	1
+doattr:: .blkw	1
+doauto:: .blkw	1
+dolong:: .blkw	1
+dorpt::	 .blkw	1
+dpnumb:: .blkw	2
+ebquot:: .blkw	1
+edilen:: .blkw	1
+edipos:: .blkw	1
+errtxt:: .blkb	erbfsiz+2
+exstal:: .blkw	1
+filein:: .blkw	2
+fileou:: .blkw	2
+filpro:: .blkw	1
+getcro:: .blkw	1
+image::	 .blkw	1
+incfile::.blkw	1
+index::	 .blkw	1
+infoms:: .blkw	1
+initry:: .blkw	1
+inopn::	 .blkw	1
+lastcmd::.blkw	1
+lastli:: .blkw	ln$cnt+1
+maxtry:: .blkw	1
+mcrcmd:: .blkw	1
+nakrec:: .blkw	1
+nextone::.blkw	1
+numtry:: .blkw	1
+outlun:: .blkw	1
+outopn:: .blkw	1
+paknum:: .blkw	1
+parity:: .blkw	1
+pauset:: .blkw	1
+pcnt.r:: .blkw	2*34
+pcnt.s:: .blkw	2*34
+pf2$ok:: .blkw	1
+prexon:: .blkw	1
+qu.ini:: .blkw	1
+recbit:: .blkw	1
+reclng:: .blkw	1
+recsop:: .blkw	1
+rectim:: .blkw	1
+restof:: .blkw	1
+rptcou:: .blkw	1
+rptini:: .blkw	1
+rptlas:: .blkw	1
+rptquo:: .blkw	1
+rptsav:: .blkw	1
+rtvol::	 .blkw	1
+senlen:: .blkw	1
+senlng:: .blkw	1
+sendly:: .blkw	1
+senpar:: .blkb	20
+sensop:: .blkw	1
+sentim:: .blkw	1
+sertim:: .blkw	1
+serwai:: .blkw	1
+set8bi:: .blkw	1
+setchk:: .blkw	1
+setrpt:: .blkw	1
+signon:: .blkw	1
+size::	 .blkw	1
+skipfil::.blkw	1
+skipfl:: .blkw	1
+sl.ked:: .blkw	1
+sl.on::	 .blkw	1
+snd8bi:: .blkw	1
+spare1:: .blkb	256.
+ sp1siz	 ==	<. - spare1>-1
+sparsz:: .blkw	1
+state::	 .blkw	1
+summary::.blkw	1
+sy.ini:: .blkw	1
+tgetad:: .blkw	1
+tk.err:: .blkw	1
+trace::	 .blkw	1
+ttpar2:: .blkw	1
+ttparm:: .blkw	1
+undchr:: .blkb	2
+undlin:: .blkb	ln$max+2
+vttype:: .blkw	1
+wasmore::.blkw	1
+wasnul:: .blkw	1
+xgottn:: .blkw	1
+xmode::	 .blkw	1
+RWSIZE	 ==	<. - rwdata>
+
+
+	.sbttl	Data to be preserved at start-up
+
+edicmd:: .word	-1
+edists:: .word	1
+xprint:: .word	0
+prompt:: .asciz	"KRTMIN>"
+	 .even
+	 .blkb	24.
+stklim:: .blkw	400+<$allsiz/2>
+stack::	 .word	0
+STKSIZ	 ==	<. - stklim>
+
+	.end

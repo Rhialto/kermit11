@@ -1,0 +1,39 @@
+!  27-Sep-97	assemble KRT V03.63 modules for an EIS CPU..
+ass dk in
+r macro
+krtatr=krtatr
+krtcmd=krtcmd
+krtcm1=krtcm1
+krtcom=krtcom
+krtcon=krtcon
+krtcvt=krtcvt
+krtdat=krtdat
+krtdeb=krtdeb
+krtdia=krtdia
+krtdir=krtdir
+krtdsp=krtdsp
+krtedi=krtedi
+krterm=krterm
+krterr=krterr
+krthlp=krthlp
+krtidx=krtidx
+krtini=krtini
+krtmdm=krtmdm
+krtosi=krtosi
+krtpak=krtpak
+krtrec=krtrec
+krtrms=krtrms
+krtsen=krtsen
+krtser=krtser
+krtsho=krtsho
+krtsj=krtsj
+krtstd=krtstd
+krtst0=krtst0
+krtst1=krtst1
+krtsub=krtsub
+krttra=krttra
+krtutl=krtutl
+krtxl=krtxl
+krtxm=krtxm
+krtxmo=krtxmo
+^C

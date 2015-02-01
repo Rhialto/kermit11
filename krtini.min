@@ -1,0 +1,359 @@
+	.title	KRTINI.MIN  Initialization and rarely used routines
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984 Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.macro	$chkb	val ,reg ,?a
+	tstb	@reg
+	bne	a
+	movb	val	,@reg
+a:	inc	reg
+	.endm	$chkb
+
+
+	.psect	$code
+	.sbttl	Initialize ourselves
+	.enabl	lsb
+
+kerini::mov	#rwdata	,r0
+	mov	#rwsize/2,r1
+1$:	clr	(r0)+
+	sob	r1	,1$
+
+	mov	sp	,doauto
+	mov	sp	,doattr
+	mov	sp	,setrpt
+	mov	sp	,dolong
+	mov	#myrtmo	,rectim
+	mov	#mystmo	,sentim
+	call	rparini
+	call	sparini
+	call	xinit
+	mov	#soh	,recsop
+	mov	#soh	,sensop
+	mov	#defchk	,chktyp
+	mov	#1	,chksiz
+	mov	#defchk	,setchkt
+	mov	#in$try	,initry
+	mov	#mx$try	,maxtry
+	mov	sp	,incfile
+	mov	#60.	,serwait
+	mov	#defdly	,sendly
+	mov	sp	,infomsg
+	mov	sp	,qu.ini
+	mov	sp	,rtvol
+
+	clrb	ininam
+	mov	#200$	,r3
+10$:	tst	@r3
+	beq	100$
+	calls	open	,<(r3)+,#lun.ta,#text>
+	tst	r0
+	bne	10$
+20$:	mov	#lun.ta	,cmdlun
+	mov	sp	,sy.ini
+	clr	infomsg
+	strcpy	#indnam	,-(r3)
+	strcpy	#ininam	,(r3)
+	message	<Reading >
+	wrtall	(r3)
+	message	< ..>
+	call	l$nolf
+100$:	return
+
+	.save
+	.psect	$pdata
+200$:	.word	210$ ,220$ ,0
+210$:	.asciz	"DK:KRTMIN.INI"
+220$:	.asciz	"SY:KRTMIN.INI"
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Setup defaults for our SINIT parameters
+
+sparini:mov	#senpar	,r1
+	movb	#maxpak	,(r1)+
+	mov	#maxpak	,senlen
+	movb	#mystmo	,(r1)+
+	movb	#mypad	,(r1)+
+	movb	#mypchar,(r1)+
+	movb	#myeol	,(r1)+
+	movb	#myquote,(r1)+
+	movb	#'Y&137	,(r1)+
+	movb	#mychkt	,(r1)+
+	movb	#space	,(r1)
+	tst	setrpt
+	beq	20$
+	movb	#myrept	,(r1)
+20$:	mov	#11	,sparsz
+	mov	doattr	,r0
+	bis	dolong	,r0
+	beq	100$
+	add	#4	,sparsz
+	inc	r1
+	tst	doattr
+	beq	30$
+	bisb	#capa.a	,(r1)
+30$:	tst	dolong
+	beq	100$
+	bisb	#capa.l	,(r1)+
+	inc	r1
+	mov	#maxlng	,r3
+	clr	r2
+	div	#95.	,r2
+	movb	r2	,(r1)+
+	movb	r3	,(r1)
+	mov	#maxlng	,senlen
+100$:	return
+
+
+	.sbttl	Setup defaults for other Kermit's SINIT parameters
+
+rparini:mov	#conpar	,r1
+	movb	#maxpak	,(r1)+
+	movb	#myrtmo	,(r1)+
+	movb	#mypad	,(r1)+
+	movb	#mypchar,(r1)+
+	movb	#myeol	,(r1)+
+	movb	#myquote,(r1)+
+	movb	#'Y&137	,(r1)+
+	movb	#mychkt	,(r1)+
+	movb	#space	,(r1)
+	return
+
+
+	.sbttl	Read other Kermit's SINIT parameters
+
+rpar::	save	<r0,r1,r2,r3,r4>
+	mov	#conpar	,r2
+	mov	#20	,r0
+1$:	clrb	(r2)+
+	sob	r0	,1$
+	mov	@r5	,r1
+	mov	2(r5)	,r0
+	mov	#conpar	,r2
+	clr	r3
+	movb	#'N&137	,p.qbin(r2)
+
+	unchar	(r1)+	,(r2)+
+	dec	r0
+	beq	4$
+	unchar	(r1)+	,(r2)+
+	dec	r0
+	beq	4$
+	unchar	(r1)+	,(r2)+
+	dec	r0
+	beq	4$
+	ctl	(r1)+	,(r2)+
+	dec	r0
+	beq	4$
+	unchar	(r1)+	,(r2)+
+	dec	r0
+	beq	4$
+	movb	(r1)+	,(r2)+
+	dec	r0
+	beq	4$
+	movb	(r1)+	,(r2)+
+	dec	r0
+	beq	4$
+	movb	(r1)+	,(r2)+
+	dec	r0
+	beq	4$
+	movb	(r1)+	,(r2)+
+	dec	r0
+	beq	4$
+	unchar	(r1)+	,(r2)+
+	dec	r0
+	beq	4$
+	unchar	(r1)+	,(r2)
+	TSTB	(r2)+
+	dec	r0
+	beq	4$
+	unchar	(r1)+	,r3
+	bicb	#200	,r3
+	movb	r3	,(r2)+
+	mul	#95.	,r3
+	dec	r0
+	beq	4$
+	unchar	(r1)+	,r4
+	bicb	#200	,r4
+	movb	r4	,(r2)+
+	add	r4	,r3
+4$:	clrb	(r2)
+
+	mov	#conpar	,r2
+	mov	#15	,r0
+5$:	bicb	#200	,(r2)+
+	sob	r0	,5$
+
+	mov	#conpar	,r0
+	$chkb	#maxpak	,r0
+	inc	r0
+	$chkb	#mypad	,r0
+	$chkb	#mypchar,r0
+	$chkb	#myeol	,r0
+	$chkb	#myquote,r0
+	$chkb	#'Y	,r0
+	$chkb	#defchk	,r0
+	$chkb	#space	,r0
+
+	mov	#senpar	,r0
+	mov	#conpar	,r1
+	movb	p.npad(r0),r2
+	beq	30$
+	movb	r2	,p.npad(r1)
+	movb	p.padc(r0),p.padc(r1)
+30$:	movb	p.chkt(r1),senpar+p.chkt
+	mov	snd8bit	,do8bit
+	clr	snd8bit
+	cmpb	p.qbin(r1),#'Y&137
+	bne	50$
+	movb	#myqbin	,ebquot
+	br	80$
+50$:	cmpb	p.qbin(r1),#'N&137
+	bne	60$
+	clr	do8bit
+	br	80$
+60$:	mov	sp	,do8bit
+	movb	p.qbin(r1),ebquot
+80$:	clr	senlng
+	tst	dolong
+	beq	100$
+	bitb	#capa.l	,p.capas(r1)
+	beq	100$
+	mov	r3	,senlng
+	bne	88$
+	mov	#maxpak	,senlng
+88$:	cmp	senlng	,#maxlng
+	ble	100$
+	mov	#maxlng	,senlng
+100$:	unsave	<r4,r3,r2,r1,r0>
+	return
+
+
+	.sbttl	Fill a buffer with my initialization parameters
+
+spar::	save	<r0,r1,r2>
+	mov	@r5	,r2
+	mov	#senpar	,r1
+	tochar	(r1)+	,(r2)+
+	tochar	(r1)+	,(r2)+
+	tochar	(r1)+	,(r2)+
+	ctl	(r1)+	,(r2)+
+	movb	(r1)	,conpar+p.eol
+	tochar	(r1)+	,(r2)+
+	movb	(r1)+	,(r2)+
+	clr	snd8bit
+	movb	#'Y&137	,(r1)
+	movb	conpar+p.qbin,r0
+	cmpb	r0	,#'N&137
+	bne	15$
+	clr	do8bit
+	br	30$
+15$:	cmpb	r0	,#'Y&137
+	bne	20$
+	tst	parity
+	beq	30$
+	movb	#myqbin	,r0
+20$:	mov	sp	,snd8bit
+	mov	sp	,do8bit
+	movb	r0	,ebquot
+	movb	r0	,(r1)
+30$:	movb	(r1)+	,(r2)+
+	movb	(r1)+	,(r2)+
+	movb	(r1)+	,(r2)+
+	mov	#11	,sparsz
+	mov	doattr	,r0
+	bis	dolong	,r0
+	beq	90$
+	add	#4	,sparsz
+	clrb	(r1)
+	tst	dolong
+	beq	35$
+	bisb	#capa.l	,@r1
+35$:	tst	doattr
+	beq	40$
+	bisb	#capa.a	,@r1
+40$:	tochar	(r1)+	,(r2)+
+	tochar	(r1)+	,(r2)+
+	tochar	(r1)+	,(r2)+
+	tochar	(r1)+	,(r2)+
+90$:	clrb	(r2)
+	unsave	<r2,r1,r0>
+	return
+
+
+	.sbttl	Restore set checksum type and init a few things
+
+fixchk::movb	setchkt	,senpar+p.chkt
+	clr	do8bit
+	movb	#'Y&137	,conpar+p.qbin
+	return
+
+
+	.sbttl	Init stats regs
+
+rechdr::
+senhdr::mov	#pcnt.r	,r1
+	mov	totp.r	,r2
+	mov	#34	,r0
+10$:	add	2(r1)	,2(r2)
+	adc	(r2)
+	add	(r1)	,(r2)+
+	tst	(r2)+
+	clr	(r1)+
+	clr	(r1)+
+	sob	r0	,10$
+	mov	#pcnt.s	,r1
+	mov	totp.s	,r2
+	mov	#34	,r0
+20$:	add	2(r1)	,2(r2)
+	adc	(r2)
+	add	(r1)	,(r2)+
+	tst	(r2)+
+	clr	(r1)+
+	clr	(r1)+
+	sob	r0	,20$
+	clr	filein+0
+	clr	filein+2
+	clr	fileout+0
+	clr	fileout+2
+	clr	charin+0
+	clr	charin+2
+	clr	charout+0
+	clr	charout+2
+	clr	nakrec
+	return
+
+
+	.sbttl	Initialize repeat count for sending packets
+
+inirepeat::save	<r0>
+	clr	dorpt
+	tst	setrpt
+	beq	100$
+	cmpb	#myrept	,#space
+	beq	100$
+	clr	rptcount
+	clr	rptlast
+	mov	#-1	,rptinit
+	movb	conpar+p.rept,r0
+	beq	100$
+	cmpb	r0	,#space
+	beq	100$
+	cmpb	r0	,senpar+p.rept
+	bne	100$
+	movb	r0	,rptquo
+	mov	sp	,dorpt
+100$:	unsave	<r0>
+	return
+
+	.end

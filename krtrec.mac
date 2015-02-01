@@ -1,0 +1,774 @@
+	.title	KRTREC	Receive file processing
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	support gets to LP
+;	display file size in "created file" messages
+;	fix unpopped stack on error exit from bufemp
+;	display file type in file create message
+;	display file name sent back by remote Kermit
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	dump FILLOG, as PRINTM now does this
+;	use log$packets for state logging
+;	provide for logfile errors
+;	modify to not NAK unknown packets (noise)
+;	display any possible contents of "X" packet, for Unix and C-Kermit
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	rfil.x: put "Remote server response:" here so it displays even
+;	when blo <>1.  also set image=binary here so typing 8-bit
+;	files doesn't die on checksum error when clrpar hoses hi bits
+;
+;	rfil.f: check asname here (instead of rfil.d), also fixed so
+;	VMS filespecs longer than 66. bytes don't write past end of the
+;	scratch buffer.  also namcvt strips VMS node::dev:[dir] here..
+;
+;	kill debug to TT if not running as a local Kermit
+;	add support for INCOMPLETE-FILE-DISPOSITION
+
+;	13-Oct-84  14:06:43  Brian Nelson
+;
+;	Copyright 1983,1984  Change Software, Inc.
+;
+;	This software is furnished under a license and may
+;	be  used  and  copied  only in accordance with the
+;	terms of such license and with  the  inclusion  of
+;	the  above copyright notice.  This software or any
+;	other copies thereof may not be provided or other-
+;	wise made available to any other person.  No title
+;	to and ownership of the software is hereby  trans-
+;	ferred.
+;
+;	The information in this  software  is  subject  to
+;	change  without notice and should not be construed
+;	as a commitment by the author.
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+	.include "IN:KRTDEF.MAC"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MAC failed>
+
+	.mcall	.PURGE			; /62/ hose dir search chan on error
+
+
+	.sbttl	Local data
+
+	.psect	$pdata			; /62/ consolidated this stuff here..
+fillst:	.word	10$	,20$	,30$	; /63/
+ 10$:	.asciz	"ASCII (7-bit text)"	; /63/
+ 20$:	.asciz	"BINARY (fixed 512)"	; /63/
+ 30$:	.asciz	"DEC-Multinational (8-bit text)" ; /63/
+dejavu:	.asciz	"Duplicate packet received" ; /63/
+dejatag:.asciz	", paknum: "
+get2lp:	.asciz	"KRTGET.OUT"		; /63/ need a name to output to LP
+nojavu:	.asciz	"Ignoring invalid response" ; /63/
+rec.01:	.asciz 	"Remote server response:"<cr><lf><cr><lf> ; /63/
+rec.02:	.asciz	<bell>"Receive completed"
+rec.03:	.asciz	<bell>"Receive failed"
+rec.04:	.byte	abt$cur	,0
+rec.05:	.byte	abt$all	,0
+rec.06:	.asciz	"Created "
+rec.07:	.asciz	" file - "		; /63/
+rec.08:	.asciz	"You have SET FILE PROTECT thus "
+rec.09:	.asciz	" can't be overwritten"
+rec.10:	.asciz	"Missing length attribute or "	; /63/
+rec.11:	.asciz	" is empty"			; /63/
+rec.12:	.asciz	"Received file name - "		; /63/
+rec.13:	.asciz	"Warning: "			; /63/
+rec.14:	.asciz	"REC.SW"
+rec.15:	.asciz	"Parity found in SOH byte"
+rec.16:	.asciz	" renamed to "
+	.even
+
+
+	.psect	$code
+	.sbttl	Receive file(s)		; /62/ moved this here..
+
+c$rec::	call	opentt			; initialize the link device
+	tst	r0			; /BBS/ did it work?
+	bne	20$			; /BBS/ no
+	tst	outopn			; is an output file already open?
+	beq	10$			; no
+	calls	close	,<#lun.ou>	; yes, close it up please
+10$:	mov	sp	,inprogress	; /BBS/ packets are being exchanged
+	calls	recsw	,<#sta.rin>	; get the file
+	tst	r0			; did it work?
+	bne	20$			; no
+	calls	printm	,<#1,#rec.02>	; /62/ yes, say so if we are local
+	br	30$
+20$:	calls	printm	,<#1,#rec.03>	; /62/ it failed, say so if local
+	inc	status			; /45/ flag for batch exit
+30$:	call	clostt			; release the terminal
+	jmp	clrcns			; /62/ flush TT input, clear r0
+
+
+	.sbttl	State controller for receive file processing
+	.enabl	lsb
+
+recsw::	clr	paknum			; packet_number := 0
+rec.sw::movb	@r5	,state		; load passed state
+	clr	cccnt			; no ^Cs typed yet
+	mov	$image	,image		; ensure correct default for mode
+	movb	#defchk	,chktyp		; reset checksum type to default
+	mov	#1	,chksiz		; size of default checksum
+	clr	numtry			; number_trys := 0
+	clr	outopn			; say nothing is open now
+	clr	logini			; /62/ force display stats header
+	call	inista			; /63/ init packet stats
+	movb	rectim	,senpar+p.time	; /62/ load RECEIVE time-out value
+
+10$:	call	recdeb			; perhaps debugging should be done
+	call	reclog			; /62/ update transfer stats display
+	cmp	incpar	,#1		; /56/ is it possible that parity
+	bne	20$			; /56/ is messed up?
+	calls	printm,<#2,#rec.13,#rec.15> ; /63/ warn, but only once
+	inc	incpar			; /BBS/ be sure it is only once!
+20$:	tst	remote			; /43/ running as a server?
+	bne	30$			; /43/ yep, ignore random noise
+	tst	cccnt			; /36/ ^C abort?
+	beq	30$			; /36/ no
+	movb	#sta.cca,state		; /36/ yes, enter abort state
+30$:	scan	state	,#50$		; now dispatch
+	asl	r0			; based on current
+	jsr	pc	,@60$(r0)	; state
+	bcc	10$			; continue whilst carry remains clear
+
+	movb	#defchk	,chktyp		; reset type of checksum to 1
+	mov	#1	,chksiz		; the above checksum uses 1 byte
+	save	<r0>			; save exit status
+	tst	outopn			; file open from a failure?
+	bpl	40$			; no
+	calls	close	,<#lun.ou>	; ensure that it's closed
+40$:	clr	outopn			; clear this flag to say it is..
+	.purge	#lun.sr			; /62/ close dir search channel
+	call	incsta			; /43/ init timer stats
+	unsave	<r0>			; pop exit status code please
+	return
+
+	.save
+	.psect	$pdata
+50$:	.byte	sta.abo	,sta.com,sta.dat,sta.fil,sta.rin,sta.cca
+	.byte	0
+	.even
+60$:	.word	recs.$
+	.word	recs$$	,recs.c	,recs.d	,recs.f	,recs.r	,ccabort ; /62/
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	State routines for RECSW
+	.enabl	lsb			; /62/
+
+ccabort:spack	#msg$err,paknum		; /36/ break out the sender
+recs$$:	tst	outopn			; /62/ is an output file open?
+	bge	10$			; /BBS/ no..
+	mov	incfile	,skipfile	; /BBS/ ya, disposition to file closer
+10$:	mov	sp	,r0		; abort
+	br	20$
+
+recs.$:	call	recx.$			; /62/ report invalid packet type
+	br	30$			; /62/ then go back and try it again
+
+recs.c:	clr	r0			; complete
+20$:	sec				; force exit from recsw loop
+	return
+
+recs.d:	call	rdata			; receive_data
+	br	30$			; /62/ pass state, keep recsw running
+
+recs.f:	call	rfile			; receive_file
+	br	30$			; /62/ pass state, keep recsw running
+
+recs.r:	call	rinit			; receive_init
+30$:	movb	r1	,state		; pass returned state
+	clc				; keep recsw running
+	return
+
+	.dsabl	lsb			; /62/
+
+
+	.sbttl	Received bad ACK/NAK and error handling
+	.enabl	lsb			; /62/ all new..
+
+recx.e:	calls	prerrp	,<#packet>	; received error packet, display it
+	br	rabort
+r$sync:	call	m$sync			; packets out of sync error
+	br	rabort
+r$retry:call	m$retry			; too many retries error
+rabort:	movb	#sta.abo,r1		; exit please
+	return
+
+recx$$:	spack	#msg$nak,paknum		; NAK a time-out or bad checksum
+	br	20$
+recx.$:	mov	#nojavu	,r3		; ignore an invalid packet type
+	br	10$
+deja$vu:spack	#msg$ack,r3		; ACK the last packet again
+deja$$:	mov	#dejavu	,r3		; dupe packet received
+10$:	mov	#pcnt.r	,r1		; packet number
+	mov	#spare1	,r0		; where to write ascii output
+	clr	r2			; kill leading zero and spaces
+	call	$cddmg			; convert 32-bit # to ascii
+	clrb	@r0			; make it .asciz
+	calls	printm	,<#3,r3,#dejatag,#spare1> ; say what's up
+20$:	movb	state	,r1		; stay in the same state, try again
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Receive debugging and logging	; /62/ major revision..
+
+recdeb:	mov	trace	,r0		; copy of debug status word
+	bic	#^c<log$pa!log$de>,r0	; need to do this?
+	beq	30$			; nope
+	save	<r1,r2>
+	sub	#100.	,sp		; allocate a small buffer
+	mov	sp	,r1		; point to it
+	mov	#rec.14	,r2		; /62/ point to "REC.SW"
+	call	paksta			; get elapsed time of last transaction
+	sub	sp	,r1		; get the record length
+	mov	sp	,r2		; and point back to the record
+	bit	#log$pa	,trace		; debugging for recsw?
+	beq	10$			; not on
+	calls	putrec	,<r2,r1,#lun.lo> ; it is on, dump it
+	tst	r0			; did it work?
+	beq	10$			; ya
+	call	logerr			; no, handle the error
+10$:	tst	remote			; running locally? /BBS/ moved here
+	bne	20$			; no
+	bit	#log$de	,trace		; ya, is terminal debugging on?
+	beq	20$			; no
+	wrtall	r2			; ya, print it
+	.newline
+20$:	add	#100.	,sp		; pop local buffer
+	unsave	<r2,r1>
+30$:	return
+
+
+	.sbttl	Receive file initialization
+	.enabl	lsb
+
+rinit:	inc	numtry			; check for retry count
+	cmp	numtry	,initry		; been here too often?
+	blos	10$			; no
+	 jmp	r$retry			; /62/ log/send the reason for abort
+
+10$:	rpack	r2 ,r3	,#packet,#maxlng ; /62/ get the next packet please
+	scan	r1	,#20$		; look for the packet type
+	asl	r0			; word indexing
+	jmp	@30$(r0)		; /62/ dispatch to it
+
+	.save
+	.psect	$pdata
+20$:	.byte	msg$err	,msg$snd,timout	,badchk
+	.byte	0
+	.even
+30$:	.word	recx.$				; /62/
+	.word	recx.e	,rini.s	,recx$$	,recx$$	; /62/
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Process response to RINIT
+
+rini.s:	calls	rpar	,<#packet,r2>	; send_init  get other side's init
+	calls	spar	,<#packet>	; parameters, then fill with ours
+	spack	#msg$ack,paknum,sparsz,#packet ; and ship that back to sender
+	clr	numtry			; retry_count := 0
+	incm64	paknum			; paknum := (paknum+1) mod 64
+	movb	#sta.fil,r1		; state := file_receive
+	jmp	inirepeat		; /62/ initialize repeat processing
+
+
+	.sbttl	Receive file header
+	.enabl	lsb
+
+rfile:	inc	numtry			; check for retry count
+	cmp	numtry	,maxtry		; been here too often?
+	blos	10$			; no
+	 jmp	r$retry			; /62/ log why we aborted please
+
+10$:	call	clratr			; ensure attribute stuff is cleared
+	movb	conpar+p.chkt,chktyp	; time to use new checksum
+	movb	chktyp	,chksiz		; compute the checksum size also
+	sub	#'0	,chksiz		; simple
+	mov	$image	,image		; ensure correct default for mode
+	tst	xgottn			; already get the "X" packet?
+	beq	20$			; no
+	movb	#sta.typ,r1		; yes, fake that we already got it
+	br	30$
+20$:	rpack	r2 ,r3	,#packet,#maxlng ; /62/ get the next packet please
+30$:	scan	r1	,#40$		; look for the packet type
+	asl	r0			; word indexing
+	jmp	@50$(r0)		; /62/ and dispatch to it
+
+	.save
+	.psect	$pdata
+40$:	.byte	msg$bre	,msg$err,msg$fil,msg$snd,msg$tex,msg$eof
+	.byte	timout	,badchk
+	.byte	0
+	.even
+50$:	.word	recx.$						; /62/
+	.word	rfil.b	,recx.e	,rfil.f	,rfil.s	,rfil.x	,rfil.z	; /62/
+	.word	recx$$	,recx$$					; /62/
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Process response to RFILE
+
+rfil.b:	cmp	r3	,paknum		; break_transmission (EOT)
+	beq	10$			; ensure break is for current packet
+	 jmp	r$sync			; /62/ it's not, we are out of sync
+
+10$:	spack	#msg$ack,paknum		; ACK the break
+	movb	#sta.com,r1		; and return state as complete
+	return
+
+
+	.sbttl	Receive file name	; 18-Apr-84 10:24:45  Brian Nelson
+
+;	Move the actual file create to RDATA so we can create
+;	the output file after all attribute packets have come.
+;	Thus, when we get the first DATA packet is when we go
+;	and create the file.
+
+rfil.f:	cmp	r3	,paknum		; file name
+	beq	10$			; ensure correct packet number
+	 jmp	r$sync			; /62/ log the reason for this abort
+
+10$:	calls	bufunp	,<#packet,#spare1> ; /BBS/ use buff that's long enough
+	calls	printm	,<#2,#rec.12,#spare1> ; /63/ display remote file name
+	calls	namcvt	,<#spare1,#packet> ; /BBS/ maybe strip node::dev:[dir]
+	calls	fixfil	,<#packet,#srcnam> ; fix invalid chars/trunc for RT-11
+	mov	#asname	,r1		; /62/ point to possible new name
+	tstb	(r1)			; /62/ renaming this time?
+	bne	20$			; /62/ ya, go say so..
+	mov	#srcnam	,r1		; /62/ no, point to old file name
+	tst	r0			; was the old file name ok?
+	beq	40$			; /62/ yes
+	br	30$			; /63/ no, display change/truncation
+
+20$:	upcase	r1			; /63/ leaves copy of ptr in r0
+	cmpb	#'L&137	,(r0)+		; /63/ is first byte an "L" ?
+	bne	30$			; /63/ nope..
+	cmpb	#'P&137	,(r0)+		; /63/ is second byte a "P" ?
+	bne	30$			; /63/ nope..
+	cmpb	#':	,(r0)+		; /63/ is "LP" followed by a colon?
+	bne	30$			; /63/ no
+	tstb	(r0)			; /63/ ya, but is it null terminated?
+	bne	30$			; /63/ no, user supplied a file name
+	strcat	#asname	,#get2lp	; /63/ ya, a name is required here
+30$:	calls	printm	,<#3,#packet,#rec.16,r1> ; /63/ no, display the change
+
+40$:	upcase	r1			; /BBS/ be sure it's ok for RT-11
+	calls	fparse	,<r1,#filnam>	; /BBS/ parse and fill in defaults
+	clrb	asname			; /BBS/ one shot for alternate name
+	tst	r0			; /42/ successful parse?
+	bne	60$			; /42/ no
+	tst	outopn			; output already open as if from
+	bpl	50$			; a NAK or something?
+	calls	close	,<#lun.ou>	; yes, close it please
+50$:	clr	outopn			; flag it's closed
+	spack	#msg$ack,paknum		; please ACK the file header packet
+	clr	numtry			; and init the current retry count
+	incm64	paknum			; paknum := (paknum+1) mod 64
+	movb	#sta.dat,r1		; return data
+	return
+
+60$:	calls	syserr	,<r0,#errtxt>	; /42/ no, get the system error text
+	calls	error	,<#3,#errtxt,#aspace,r1> ; /BBS/ include bad name
+	jmp	rabort			; /62/ abort
+
+
+rfil.s:	inc	numtry			; send_init, must have lost ours
+	cmp	numtry	,maxtry		; tried this too many times?
+	blos	10$			; no
+	 jmp	r$retry			; /62/ log the reason for the abort
+
+10$:	mov	paknum	,r1		; does this packet=(paknum+63) mod 64?
+	dec	r1			; /62/ if this packet was the one sent
+	bge	20$			; /62/ the last time, we must reACK
+	mov	#63	,r1		; /62/ that packet and remain
+20$:	cmp	r3	,r1		; /62/ in the current state
+	bne	30$			; no
+	 calls	spar	,<#packet>	; ya, reload parameters and
+	 spack	#msg$ack,r3,sparsz,#packet ; resend our send_init stuff
+	 jmp	deja$$			; /62/ warn dupe packet occurred
+
+30$:	 jmp	r$sync			; /62/ log reason for this event
+
+
+rfil.x:	cmp	r3	,paknum		; "X" packets come here for processing
+	beq	10$			; ensure correct packet number
+	 jmp	rabort			; /62/ it wasn't, abort
+
+10$:	mov	sp	,xmode		; flag this is an extended reply
+	wrtall	#rec.01			; /63/ do here instead of rem.x
+	clr	outlun			; /63/ not real file, output is to TT
+	clr	outopn			; /63/ nothing is open for output
+	calls	open	,<#0,#lun.kb,#text> ; /63/ init TT output buffer
+	mov	#binary	,image		; /63/ force 8-bit for remote type..
+	tst	r2			; /62/ length of data in packet buffer
+	beq	20$			; /62/ nothing there
+	calls	bufemp	,<#packet,r2>	; /63/ unpack repeat encoded chars
+	mov	#cr	,r0		; /63/ add in a return
+	call	putcr0			; /63/
+	mov	#lf	,r0		; /63/ and a line feed
+	call	putcr0			; /63/
+	calls	close	,<#lun.kb>	; /63/ this and the next line are
+	calls	open	,<#0,#lun.kb,#text> ; /63/ for display pacing..
+20$:	spack	#msg$ack,paknum		; ACK the file name
+	clr	numtry			; and init the current retry count
+	incm64	paknum			; paknum := (paknum+1) mod 64
+	movb	#sta.dat,r1		; return data
+	return
+
+
+rfil.z:	inc	numtry			; end-of-file?
+	cmp	numtry	,maxtry		; tried this too many times?
+	blos	10$			; no
+	 jmp	r$retry			; /62/ log the reason for this event
+
+10$:	mov	paknum	,r1		; does this packet=(paknum+63) mod 64?
+	dec	r1			; /62/ if this packet was the one sent
+	bge	20$			; /62/ the last time, we must reACK
+	mov	#63	,r1		; /62/ that packet and remain
+20$:	cmp	r3	,r1		; /62/ in the current state
+	bne	30$			; not the last one after all
+	 jmp	deja$vu			; /62/ reACK, warn dupe pkt occurred
+
+30$:	 jmp	r$retry			; /62/ log the reason for this please
+
+
+	.sbttl	Receive file data
+	.enabl	lsb
+
+;	R D A T A
+;
+;	output:	paknum	= packet number
+;		packet	= data just received
+;		 r1	= returned state
+
+rdata:	inc	numtry			; abort of retry count is too large
+	cmp	numtry	,maxtry		; been here too many times?
+	blos	10$			; no
+	 jmp	r$retry			; /62/ log/send error message about it
+
+10$:	rpack	r2 ,r3  ,#packet,#maxlng ; /62/ get the next incoming packet
+	scan	r1	,#20$		; look for the packet type & dispatch
+	asl	r0			; to the correct routine, ie, a crude
+	jmp	@30$(r0)		; /62/ case statement
+
+	.save
+	.psect	$pdata
+20$:	.byte	msg$atr	,msg$dat,msg$err,msg$fil,msg$tex,msg$eof
+	.byte	timout	,badchk
+	.byte	0
+	.even
+30$:	.word	recx.$						; /62/
+	.word	rdat.a	,rdat.d	,recx.e	,rdat.f	,rdat.x	,rdat.z	; /62/
+	.word	recx$$	,recx$$					; /62/
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Process response to RDATA
+
+rdat.a:	cmp	r3	,paknum		; case "A"
+	beq	40$			; correct packet number?
+	inc	numtry			; no, see if retry limit expired
+	cmp	numtry	,maxtry		; if so, return abort
+	blos	10$			; no
+	 jmp	r$retry			; /62/ yes, log/send the reason
+
+10$:	mov	paknum	,r1		; does this packet=(paknum+63) mod 64?
+	dec	r1			; /62/ if this packet was the one sent
+	bge	20$			; /62/ the last time, we must reACK
+	mov	#63	,r1		; /62/ that packet and remain
+20$:	cmp	r3	,r1		; /62/ in the current state
+	bne	30$			; not the last packet
+	 jmp	deja$vu			; /62/ reACK, warn dupe pkt occurred
+
+30$:	 jmp	rabort			; /62/ abort, must be way out of sync
+
+40$:	calls	r$attr	,<#packet>	; process the received attributes
+	tst	r0			; was this successful?
+	bne	30$			; /62/ no, bail out
+	spack	#msg$ack,paknum		; ya, ACK it
+	clr	numtry			; numtry := 0
+	incm64	paknum			; increment packet number mod 64
+	tst	xmode			; /63/ doing file I/O?
+	bne	50$			; /63/ no
+	tst	at$len			; /63/ ya, is file possibly empty?
+	bne	50$			; /63/ no
+	calls	printm	,<#4,#rec.13,#rec.10,#filnam,#rec.11> ; /63/ yes
+50$:	movb	state	,r1		; retain current state
+	return
+
+
+rdat.d:	tst	xmode			; do we need to create the file
+	bne	20$			; no
+	tst	outopn			; did we already open the file?
+	bne	20$			; yes, please don't try again then
+	tst	filprot			; protect existing files?
+	beq	30$			; no
+	mov	#filnam	,r0		; /63/ pointer to what we'll open
+	cmpb	#'L&137	,(r0)+		; /63/ is first byte an "L" ?
+	bne	10$			; /63/ nope..
+	cmpb	#'P&137	,(r0)+		; /63/ is second byte a "P" ?
+	bne	10$			; /63/ nope..
+	cmpb	#':	,(r0)		; /63/ is "LP" followed by a colon?
+	beq	30$			; /63/ ya, a lookup to LP will hang..
+10$:	clr	index			; /62/ reset lookup's file counter
+	calls	lookup,<#filnam,#srcnam> ; /62/ does file exist already?
+	tst	r0			; /62/ well?
+	bne	30$			; /62/ no
+	.purge	#lun.sr			; /62/ ya, hose dir search channel
+	calls	printm	,<#3,#rec.08,#filnam,#rec.09> ; /62/ ya, say so..
+	spack	#msg$ack,paknum,#1,#rec.04 ; /62/ send an ACK with "X" in data
+	incm64	paknum			; increment packet number mod 64
+	clr	numtry			; /48/
+	mov	#1	,outopn		; never really opened it up
+	movb	#sta.dat,r1		; switch to data state
+	return
+
+20$:	br	50$			; 50$ is otherwise too far away..
+
+30$:	mov	#filnam	,r4		; /36/ setup address of file
+	calls	create	,<r4,#lun.ou,image> ; /36/ now create it
+	mov	#lun.ou	,outlun		; set a real lun for output
+	tst	r0			; did the file create work?
+	beq	40$			; yes
+	calls	syserr	,<r0,#errtxt>	; no, get the system error text
+	calls	error	,<#3,#errtxt,#aspace,r4> ; /BBS/ add space here
+	jmp	rabort			; /62/ abort
+
+40$:	movb	#'[	,errtxt		; /63/ a leading bracket
+	mov	#lun.ou	,r0		; /63/ the LUN in use here
+	asl	r0			; /63/ word indexing
+	mov	sizof(r0),r0		; /63/ recover the file size
+	mov	#errtxt+1,r1		; /63/ start writing size here
+	call	L10012			; /63/ convert size to ascii
+	movb	#']	,(r1)+		; /63/ a terminating bracket
+	clrb	(r1)			; /63/ terminate the size string
+	mov	image	,r1		; /63/ recover current file-type
+	asl	r1			; /63/ word indexing
+	mov	fillst(r1),r1		; /63/ point to its description
+	calls	printm	,<#5,#rec.06,r1,#rec.07,r4,#errtxt> ; /63/ log to term
+	mov	#-1	,outopn		; flag output as being open
+
+50$:	cmp	r3	,paknum		; case "D"
+	beq	90$			; correct packet number?
+	inc	numtry			; no, see if retry limit expired
+	cmp	numtry	,maxtry		; if so, return abort
+	blos	60$			; no
+	 jmp	r$retry			; /62/ log/send notice of error
+
+60$:	mov	paknum	,r1		; does this packet=(paknum+63) mod 64?
+	dec	r1			; /62/ if this packet was the one sent
+	bge	70$			; /62/ the last time, we must reACK
+	mov	#63	,r1		; /62/ that packet and remain
+70$:	cmp	r3	,r1		; /62/ in the current state
+	bne	80$			; not the last packet
+	 jmp	deja$vu			; /62/ reACK, warn dupe pkt occurred
+
+80$:	 jmp	r$sync			; /62/ log/send the reason for abort
+
+90$:	add	r2	,charin+2	; /43/ stats
+	adc	charin+0		; /43/ in 32. bits please
+	calls	bufemp	,<#packet,r2>	; correct packet, get the data out
+	tst	r0			; did bufemp return any errors?
+	beq	100$			; no
+	calls	syserr	,<r0,#errtxt>	; ya, lookup error msg text
+	calls	error	,<#1,#errtxt>	; send error packet or display err msg
+	jmp	180$			; /62/ take the abort exit please
+
+100$:	tst	xmode			; /62/ amidst an extended reply?
+	beq	110$			; /62/ no
+	mov	trace	,r1		; /62/ copy of debug status word
+	bic	#^c<log$de!log$rp>,r1	; /62/ hose all except TT options
+	beq	110$			; /62/ not now debugging to terminal
+	.newline			; /62/ using TT, put next in the clear
+110$:	tst	remote			; are we a local Kermit today?
+	bne	150$			; no, just ACK normally
+	tst	cccnt			; we are local. check for control
+	bne	170$			; c abort for this file please
+	call	chkabo			; check for abort via ^X and ^Z
+	cmpb	r0	,#abt$err&37	; ^E aborts NOW
+	beq	170$			; yes, abort please
+	cmpb	r0	,#abt$all&37	; did the user type a ^Z?
+	beq	130$			; yes
+	cmpb	r0	,#abt$cur&37	; no, what about a ^X then?
+	beq	120$			; /56/ yes
+	cmpb	r0	,#'A&37		; /56/ ^A stats?
+	bne	150$			; /56/ no
+	tst	xmode			; /BBS/ don't do this
+	bne	150$			; /BBS/ within an extended reply
+	call	cs$in			; /56/ yes, print stats
+	br	150$			; /56/ and exit
+
+120$:	spack	#msg$ack,paknum,#1,#rec.04 ; /62/ ^X typed, send "X" in data
+	br	140$
+130$:	spack	#msg$ack,paknum,#1,#rec.05 ; /62/ ^Z typed, ACK with "Z" data
+140$:	tst	xmode			; /BBS/ is an output file open?
+	bne	160$			; /BBS/ no..
+	mov	incfile	,skipfile	; /BBS/ pass desired incomplete file
+	br	160$			; /BBS/ disposition to file closer
+
+150$:	spack	#msg$ack,paknum		; ACK it
+160$:	clr	numtry			; numtry := 0
+	incm64	paknum			; increment packet number mod 64
+	movb	#sta.dat,r1		; switch to data state
+	return
+
+170$:	spack	#msg$err,paknum		; break the sender out please
+	clr	cccnt			; /36/ clear ^C flag
+180$:	mov	#sta.abo,r1		; abort for some reason
+	return
+
+
+rdat.f:					; "F", got a file header
+rdat.x:					; "X", also handle extended reply
+	inc	numtry			; see if retry limit expired
+	cmp	numtry	,maxtry		; if so, return abort
+	blos	10$			; no
+	 jmp	r$retry			; /62/ yes, log/send the reason
+
+10$:	mov	paknum	,r1		; does this packet=(paknum+63) mod 64?
+	dec	r1			; /62/ if this packet was the one sent
+	bge	20$			; /62/ the last time, we must reACK
+	mov	#63	,r1		; /62/ that packet and remain
+20$:	cmp	r3	,r1		; /62/ in the current state
+	bne	30$			; not the last packet
+	 jmp	deja$vu			; /62/ reACK, warn dupe pack occurred
+
+30$:	 jmp	r$sync			; /62/ log/send the reason for abort
+
+
+rdat.z:	cmp	paknum	,r3		; end-of-file
+	beq	10$			; if not correct packet return abort
+	 jmp	r$sync			; /62/ log/send the reason for abort
+
+10$:	mov	#lun.ou	,r2		; assume that we close a disk file
+	tst	outopn			; real output or to the terminal
+	beq	20$			; /BBS/ must be the terminal
+	bgt	40$			; open was aborted via fileprotection
+
+	cmpb	#eof$dis,packet		; /BBS/ real file, other side discard?
+	bne	30$			; /BBS/ no
+	mov	incfile	,skipfile	; /BBS/ ya, keep or dump it as is SET
+	br	30$
+
+20$:	clr	r2			; it's the console terminal
+30$:	calls	close	,<r2>		; do the close now
+40$:	call	clratr			; attributes no longer valid
+	clr	outopn			; flag it
+	spack	#msg$ack,r3		; ACK the EOF packet
+	clr	numtry			; /48/ then re-init retry counter
+	incm64	paknum			; paknum := (paknum+1) mod 64
+	movb	#sta.fil,r1		; back to receive file state
+	clr	xgottn			; don't have an X packet anymore
+	return
+
+
+	.sbttl	Dump a buffer out to disk	; /62/ moved this here..
+
+;	B U F E M P
+;
+;	input:	  (r5)	= buffer address
+;		 2(r5)	= length
+;	output:	   r0	= if <>, error code
+;
+; /63/	NOTE:  This routine can, as it now exists, can process all unprefixed
+;	control chars as C-Kermit 5A(189) might emit if given the command SET
+;	CONTROL UNPREFIX ALL.  The NULL char is used as the record terminator
+;	here and thus MUST be prefixed.  Kermit always prefixes nulls.
+
+bufemp:	mov	@r5	,r2		; input record address
+	mov	2(r5)	,r3		; string length
+	clr	r0			; ensure no error for a null packet
+
+10$:	tst	r3			; anything left in the record?
+	ble	100$			; no
+	clr	r0			; get the next character
+	bisb	(r2)+	,r0		; into a convenient place
+	dec	r3			; chcount--
+
+	mov	#1	,r4		; repeat_count = 1
+	tst	dorpt			; are we doing repeat count stuff?
+	beq	20$			; no
+	cmpb	r0	,rptquo		; yes, is it the agreed upon prefix?
+	bne	20$			; no
+	movb	(r2)+	,r4		; /63/ yes, get next character
+	dec	r3			; chcount--
+	bic	#^c<177>,r4		; hose possible parity and sxt bits
+	unchar	r4	,r4		; decode it into a number
+	clr	r0			; now prime with the next character
+	bisb	(r2)+	,r0		; so we can check for other types of
+	dec	r3			; quoting to be done
+	tst	r4			; ensure the count is legitimate
+	bgt	20$			; it's ok
+	mov	#1	,r4		; it's fubar, fix it (more or less..)
+
+20$:	clr	set8bit			; assume we don't have to set bit 7
+	tst	do8bit			; must we do 8-bit unprefixing?
+	beq	30$			; no
+	cmpb	r0	,ebquot		; yes, is this the 8-bit prefix?
+	bne	30$			; no
+	mov	sp	,set8bit	; yes, send a flag to set the bit
+	clr	r0			; and get the next character
+	bisb	(r2)+	,r0		; without sign extension
+	dec	r3			; one less character left in buffer
+
+30$:	cmpb	r0	,conpar+p.qctl	; is this a quoted control character?
+	bne	40$			; no
+	clr	r0			; yes, get the next character
+	bisb	(r2)+	,r0		; must be one you know
+	dec	r3			; chcount := pred(chcount)
+	mov	r0	,r1		; /63/ copy to check against quote ch
+	bic	#^c<177>,r1		; must avoid sxt here, drop bits 7..15
+	cmpb	r1	,conpar+p.qctl	; if ch <> myquote
+	beq	40$			;  then
+	cmpb	r1	,#77		;   if   (ch & 177) >= ctl(del)
+	blo	40$			;    and (ch & 177) <= ctl(del)+40
+	cmpb	r1	,#137		;	then
+	bhi	40$			;	  ch = ctl(ch)
+	ctl	r0	,r0
+
+40$:	tst	set8bit			; do we need to set the high bit?
+	beq	50$			; no
+	bisb	#200	,r0		; yes, set the bit on please
+50$:	mov	r0	,-(sp)		; save copy of char to output
+60$:	mov	#lun.ou	,r1		; channel_number := lun.out
+	tst	outopn			; is there really something open?
+	bne	70$			; yes, put the data to it
+	clr	r1			; no, direct the output to a terminal
+	tst	tsxsav			; running under TSX?
+	beq	70$			; no
+	cmpb	@sp	,m.tsxr		; ya, is it TSX lead-in char?
+	beq	80$			; ya, don't output to TT
+70$:	mov	@sp	,r0		; restore the character to write out
+	call	putcr0			; and do it
+	tst	r0			; /62/ did it work?
+	beq	80$			; /63/ yes
+	clr	r3			; /63/ no, fake end of string to force
+	br	90$			; /63/ exit and bail out of this loop
+80$:	add	#1	,filein+2	; stats /62/ r0 is clear in case end..
+	adc	filein+0		; 32. bits worth
+	sob	r4	,60$		; duplicate the character if need be
+90$:	tst	(sp)+			; pop the stack where we saved char
+	br	10$			; next character please
+
+100$:	return
+
+	.end

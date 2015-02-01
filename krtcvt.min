@@ -1,0 +1,344 @@
+	.title	KRTCVT.MIN  File name and misc data conversions
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984 Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.macro	chtype	ch,val
+	. = chtype+ch
+	.byte	val
+	.endm	chtype
+
+	.psect	chtype	,ro,d,lcl,rel,con
+	.sbttl	Generate character class table for file name state parsing
+
+chtype:	.rept	128.
+	.byte	0
+	.endr
+
+	chtype	 0	,1
+	chtype	lf	,1
+	chtype	cr	,1
+	chtype	space	,7
+	chtype	'(	,2
+	chtype	')	,3
+	chtype	comma	,6
+	chtype	'.	,5
+	chtype	'/	,4
+	$ch = '0
+	.rept	10.
+	chtype	$ch	,7
+	$ch = $ch+1
+	.endr
+	chtype	'<	,2
+	chtype	':	,4
+	chtype	73	,1
+	chtype	'>	,3
+	$ch = 'A&137
+	.rept	32
+	chtype	$ch	,7
+	$ch = $ch+1
+	.endr
+	chtype	'[	,2
+	chtype	'\	,4
+	chtype	']	,3
+	$ch = 'a!40
+	.rept	32
+	chtype	$ch	,7
+	$ch = $ch+1
+	.endr
+
+
+	.psect	$pdata
+	.sbttl	NAMCVT state transition table
+
+ptable:
+.byte	1	,30.	,2	,-1	,11.	,21.	,-1	,21.
+.byte	2	,30.	,-1	,3	,-1	,2	,2	,2
+.byte	3	,30.	,-1	,-1	,14.	,23.	,3	,23.
+.byte	4	,30.	,30.	,-1	,-1	,24.	,-1	,24.
+.even
+
+paction:.word	null	,init	,copy	,fin
+
+	.psect	$code
+	.sbttl	Parse file_specification to get only filename.type
+
+namcvt::save	<r1,r2,r3,r4>
+	mov	@r5	,r2
+	mov	2(r5)	,r4
+	clrb	@r4
+	mov	#1	,r1
+
+10$:	tst	r1
+	beq	80$
+	clr	r3
+	bisb	(r2)+	,r3
+	bic	#^c177	,r3
+	dec	r1
+	mul	#10	,r1
+	movb	chtype(r3),r0
+	add	r0	,r1
+	movb	ptable(r1),r1
+	beq	80$
+	bmi	90$
+	clr	r0
+	div	#10.	,r0
+	asl	r0
+	jsr	pc	,@paction(r0)
+	br	10$
+
+80$:	clr	r0
+	clrb	@r4
+	br	100$
+
+90$:	mov	#-1	,r0
+100$:	unsave	<r4,r3,r2,r1>
+	return
+
+	.sbttl	Action routines for the file name parser
+
+null:	return
+
+init:	mov	2(r5)	,r4
+	clrb	@r4
+	return
+
+copy:	movb	r3	,(r4)+
+	clrb	@r4
+	return
+
+fin:	save	<r0,r3>
+	mov	2(r5)	,r0
+	tstb	@r0
+	beq	30$
+10$:	tstb	@r0
+	beq	20$
+	cmpb	@r0	,#'.
+	beq	30$
+	inc	r0
+	br	10$
+20$:	movb	#'.	,r3
+	call	copy
+30$:	unsave	<r3,r0>
+	return
+
+
+	.sbttl	Check file extent to determine its type
+
+chkext::save	<r1,r2,r3,r4>
+	mov	@r5	,r1
+	strlen	r1
+	tst	r0
+	beq	290$
+	add	r0	,r1
+210$:	cmpb	-(r1)	,#'.
+	beq	220$
+	sob	r0	,210$
+	br	290$
+220$:	copyz	r1	,#chkbuf,#5
+	mov	#chkbuf	,r1
+	strlen	r1
+
+223$:	mov	#4	,r3
+	sub	r0	,r3
+	beq	225$
+	blt	290$
+	mov	r1	,r2
+	add	r0	,r2
+224$:	movb	#space	,(r2)+
+	sob	r3	,224$
+	clrb	@r2
+
+225$:	mov	bintyp	,r2
+230$:	mov	r2	,r3
+	tstb	@r3
+	beq	290$
+	mov	r1	,r4
+	call	310$
+	cmpb	r0	,(r3)+
+	bne	240$
+	call	310$
+	cmpb	r0	,(r3)+
+	bne	240$
+	call	310$
+	cmpb	r0	,(r3)+
+	bne	240$
+	call	310$
+	cmpb	r0	,(r3)+
+	beq	280$
+240$:	add	#4	,r2
+	br	230$
+
+280$:	mov	#1	,r0
+	br	300$
+290$:	clr	r0
+300$:	unsave	<r4,r3,r2,r1>
+	return
+
+310$:	movb	(r4)+	,r0
+	cmpb	r0	,#'A!40
+	blo	320$
+	cmpb	r0	,#'Z!40
+	bhi	320$
+	bicb	#40	,r0
+320$:	return
+
+	.save
+	.psect	$rwdata	,rw,d,lcl,rel,con
+chkbuf:	.byte	0 ,0 ,0 ,0 ,0 ,0
+	.restore
+
+
+	.sbttl	File extents that are likely to be binary
+
+binini::strcpy	bintyp	,#binl
+	return
+
+	.save
+	.psect	$pdata
+	.dsabl	lc
+binl:	.ascii	".BAC"
+	.ascii	".BAX"
+	.ascii	".BIN"
+	.ascii	".BOT"
+	.ascii	".BUP"
+	.ascii	".CAL"
+	.ascii	".CRF"
+	.ascii	".DEV"
+	.ascii	".DSK"
+	.ascii	".EXE"
+	.ascii	".LDA"
+	.ascii	".MLB"
+	.ascii	".OBJ"
+	.ascii	".REL"
+	.ascii	".RTS"
+	.ascii	".SAV"
+	.ascii	".SML"
+	.ascii	".STB"
+	.ascii	".SYS"
+	.ascii	".TSX"
+	.byte	0
+	.even
+	.enabl	lc
+	.restore
+
+
+	.sbttl	Convert invalid characters to something reasonable
+
+	.save
+	.psect	$pdata
+defchr::.byte	'X&137
+	.even
+	.restore
+
+fixfil::save	<r1,r2,r3>
+	mov	@r5	,r1
+	mov	2(r5)	,r2
+	clr	r3
+10$:	tstb	@r1
+	beq	35$
+	scan	@r1	,#okchr
+	tst	r0
+	bne	20$
+	mov	#er$fnm	,r3
+	movb	defchr	,@r2
+	br	30$
+20$:	movb	@r1	,@r2
+30$:	inc	r1
+	inc	r2
+	br	10$
+
+35$:	clrb	@r2
+	sub	#256.	,sp
+	mov	sp	,r1
+	mov	2(r5)	,r2
+	copyz	r2	,r1  ,#255.
+
+	scan	#':	,r1
+	tst	r0
+	beq	37$
+36$:	movb	(r1)+	,(r2)+
+	sob	r0,	36$
+
+37$:	mov	#6	,r0
+
+40$:	cmpb	(r1)	,#'.
+	beq	70$
+	movb	(r1)+	,(r2)+
+	beq	90$
+50$:	sob	r0	,40$
+
+60$:	tstb	(r1)
+	beq	90$
+	cmpb	(r1)	,#'.
+	beq	70$
+	mov	#er$fnm	,r3
+	inc	r1
+	br	60$
+
+70$:	mov	#4	,r0
+80$:	movb	(r1)+	,(r2)+
+	beq	90$
+	sob	r0	,80$
+	tstb	(r1)
+	beq	90$
+	mov	#er$fnm	,r3
+
+90$:	clrb	(r2)
+	add	#256.	,sp
+
+100$:	mov	r3	,r0
+	unsave	<r3,r2,r1>
+	return
+
+	.save
+	.psect	$pdata
+okchr:	.ascii	"0123456789.:"
+	.ascii	"abcdefghijklmnopqrstuvwxyz"
+	.ascii	"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	.byte	0
+	.even
+	.restore
+
+
+	.sbttl	Unformat a string
+
+	.save
+	.psect	$rwdata	,rw,d,lcl,rel,con
+ubuf:	.blkb	80.
+	.restore
+
+unfmts::save	<r1,r2,r3,r4,r5>
+	mov	r0	,r5
+	mov	#ubuf	,r4
+10$:	movb	(r5)+	,r1
+	beq	100$
+	cmpb	r1	,#space
+	blo	20$
+	movb	r1	,(r4)+
+	br	40$
+20$:	movb	#'\	,(r4)+
+	clr	r0
+	div	#10	,r0
+	movb	r1	,r2
+	mov	r0	,r1
+	clr	r0
+	div	#10	,r0
+	add	#'0	,r0
+	add	#'0	,r1
+	add	#'0	,r2
+	movb	r0	,(r4)+
+	movb	r1	,(r4)+
+	movb	r2	,(r4)+
+40$:	br	10$
+100$:	clrb	@r4
+	mov	#ubuf	,r0
+	unsave	<r5,r4,r3,r2,r1>
+	return
+
+	.end

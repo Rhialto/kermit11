@@ -1,0 +1,464 @@
+	.title	KRTST0.MIN  SET command overlay zero
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984  Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTCDF.MIN"
+	.iif ndf  KRTCDF  .error 	<; .include for IN:KRTCDF.MIN failed>
+
+	.mcall	.PURGE
+
+	$CMGLOB	= 0
+	CVTARG	= C.CRLF ! C.LSPA ! C.SSPA ! C.LCUC ! C.TSPA
+
+	.sbttl	Local data
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+savpnt:	.word	0
+
+	.psect	$pdata
+logext:	.asciz	".LOG"
+prefix:	.asciz	"Logfile "
+closit:	.asciz	" is open - Close it? "
+ovrwrt:	.asciz	" exists - Overwrite? "
+M1$:	.asciz	" opened, "
+M2$:	.asciz	" block"
+M3$:	.asciz	"BINARY_MODE (fixed 512, no carriage control) enabled"<cr><lf>
+	.even
+
+
+	.psect	$code
+	.sbttl	LOGFILE, SET LOGFILE
+	.enabl	lsb
+
+c$logf::call	set$log
+	tst	r0
+	beq	999$
+	direrr	r0
+	call	incsts
+999$:	return
+
+set$lo::tstb	@argbuf
+	bne	7777$
+	bit	#log$op	,trace
+	bne	7770$
+	message	<No LOGFILE is open>,cr
+	clr	r0
+	br	7771$
+7770$:	call	sd$off
+7771$:	return
+
+7777$:	bit	#log$op	,trace
+	beq	201$
+
+	wrtall	#prefix
+	wrtall	#logfil
+	wrtall	#closit
+	calls	kbread	,<#spare1>
+	tst	r0
+	beq	189$
+	.newline
+	br	190$
+189$:	calls	cvt$$	,<#spare1,r1,#cvtarg>
+	tst	r0
+	beq	199$
+	cmpb	spare1	,#'Y&137
+	beq	200$
+190$:	clr	r0
+199$:	return
+
+200$:	call	sd$off
+
+201$:	clr	savpnt
+	mov	argbuf	,r0
+777$:	tstb	(r0)
+	beq	888$
+	cmpb	(r0)+	,#space
+	bne	777$
+	clrb	-1(r0)
+	mov	r0	,savpnt
+
+888$:	call	L1$
+	bcs	299$
+	mov	savpnt	,argpnt
+	beq	390$
+	call	set$debug
+	tst	r0
+	beq	390$
+	message	<?SET$DEBUG-W-Bad option>,cr
+	call	incsts
+390$:	clr	savpnt
+	bit	#log$op	,trace
+	bne	290$
+	message	<You must SET DEBUG as desired to write to this file>,cr
+290$:	clr	r0
+299$:	return
+
+L1$:	bic	#log$al!log$io,trace
+	upcase	argpnt
+	calls	fparse	,<argpnt,#errtxt>
+	tst	r0
+	bne	9999$
+
+5$:	calls	fixfil	,<#errtxt,#spare1>
+	tst	r0
+	bne	9999$
+
+7$:	mov	#spare1	,r2
+	cmpb	#'L&137	,(r2)+
+	bne	9$
+	cmpb	#'P&137	,(r2)+
+	bne	9$
+
+	cmpb	#':	,(r2)+
+	bne	9$
+	tstb	(r2)
+	beq	3$
+
+9$:	scan	#'.	,#spare1
+	tst	r0
+	bne	2$
+	strcat	#spare1	,#logext
+
+2$:	calls	iswild	,<#spare1>
+	tst	r0
+	bne	9999$
+	clr	index
+	calls	lookup,<#spare1,#errtxt>
+	tst	r0
+	bne	3$
+	.purge	#lun.sr
+	wrtall	#spare1
+	wrtall	#ovrwrt
+	calls	kbread	,<argbuf>
+	tst	r0
+	beq	23$
+	.newline
+	bne	9998$
+23$:	calls	cvt$$	,<argbuf,r1,#cvtarg>
+	tst	r0
+	beq	9999$
+	cmpb	@argbuf	,#'Y&137
+	beq	3$
+9998$:	clr	r0
+9999$:	sec
+	return
+
+3$:	calls	create	,<#spare1,#lun.lo,#text>
+	tst	r0
+	bne	9999$
+	bis	#log$op	,trace
+	copyz	#spare1	,#logfil ,#30
+	tst	infomsg
+	beq	90$
+	wrtall	#prefix
+	wrtall	#logfil
+	wrtall	#M1$
+	mov	#lun.lo	,r0
+	asl	r0
+	mov	sizof(r0),r0
+	mov	r0	,r1
+	call	L10266
+	wrtall	#M2$
+	dec	r1
+	beq	1888$
+	mov	#'s!40	,r0
+	call	writ1char
+1888$:	.newline
+90$:	clr	r0
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET DEBUG
+
+set$de::upcase	argpnt
+	calls	getcm0	,<argpnt,#dbglst>
+	tst	r0
+	bmi	110$
+	tst	wasnul
+	bne	110$
+	jsr	pc	,@r1
+110$:	return
+
+	command	dbglst	,NONE	,3	,sd$none
+	command	dbglst	,OFF	,2	,sd$off
+	command	dbglst	,ON	,2	,sd$on
+	command	dbglst	,PACKET	,1	,sd$pak
+	command	dbglst	,RAW	,2	,sd$raw
+	command	dbglst
+
+sd$none:call	sd$off
+	clr	trace
+	clr	r0
+	return
+
+	.enabl	lsb
+
+sd$off::bit	#log$op	,trace
+	beq	20$
+	calls	close	,<#lun.lo>
+	bic	#log$op	,trace
+	tst	infomsg
+	beq	20$
+	wrtall	#prefix
+	wrtall	#logfil
+	message	< closed>,cr
+20$:	bic	#log$al!log$io,trace
+	clr	r0
+	return
+
+	.dsabl	lsb
+
+sd$on:	call	rawchk
+	bcs	100$
+	call	sdopen
+	bcs	100$
+	bis	#log$al	,trace
+100$:	return
+
+sd$pak:	call	sdopen
+	bcs	100$
+	call	rawchk
+	bcs	100$
+	bic	#log$al	,trace
+	bis	#log$pa	,trace
+100$:	return
+
+rawchk:	bit	#log$io	,trace
+	beq	200$
+	mov	#er$rax	,r0
+	sec
+	return
+200$:	clr	r0
+	return
+
+	.enabl	lsb
+
+sdopen:	bit	#log$op	,trace
+	beq	1$
+	tst	savpnt
+	bne	13$
+	wrtall	#prefix
+	wrtall	#logfil
+	message	< is already open>,cr
+13$:	clr	r0
+	return
+1$:	mov	argbuf	,r0
+20$:	tstb	@r0
+	beq	90$
+	cmpb	(r0)+	,#space
+	bne	20$
+	mov	r0	,argpnt
+	call	L1$
+	bcc	99$
+90$:	mov	#er$lgf	,r0
+	sec
+99$:	return
+
+sd$raw:	call	sdopen
+	bcs	100$
+	mov	trace	,r0
+	bic	#log$op	,r0
+	beq	10$
+	mov	#er$raw	,r0
+	br	100$
+10$:	bis	#log$io	,trace
+	mov	#lun.lo	,r0
+	asl	r0
+	mov	sp	,filtyp(r0)
+	tst	infomsg
+	beq	80$
+	wrtall	#prefix
+	wrtall	#M3$
+80$:	clr	r0
+100$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	SET PARITY
+	.enabl	lsb
+
+set$pa::upcase	argbuf
+	calls	getcm0	,<argbuf,#parlst>
+	tst	r0
+	bmi	110$
+	tst	wasnul
+	bne	100$
+	jsr	pc	,@r1
+	mov	r0	,parity
+	beq	100$
+	tst	infomsg
+	beq	100$
+	message	<Caution: Binary files will require 8-bit prefixing>,cr
+100$:	clr	r0
+110$:	return
+
+	.dsabl	lsb
+
+	command	parlst	,EVEN	,1	,spa$ev
+	command	parlst	,MARK	,1	,spa$ma
+	command	parlst	,NONE	,1	,spa$no
+	command	parlst	,ODD	,1	,spa$od
+	command	parlst	,SPACE	,1	,spa$sp
+	command	parlst
+
+spa$ev:	mov	#par$ev	,r0
+	return
+
+spa$od:	mov	#par$od	,r0
+	return
+
+spa$ma:	mov	#par$ma	,r0
+	return
+
+spa$sp:	mov	#par$sp	,r0
+	return
+
+spa$no:	clr	r0
+	return
+
+
+	.sbttl	SET RETRY
+
+set$re::upcase	argbuf
+	calls	getcm0	,<argbuf,#trylst>
+	tst	r0
+	bmi	10$
+	tst	wasnul
+	bne	10$
+	jsr	pc	,@r1
+10$:	return
+
+stry$i:	call	stry$$
+	tst	r0
+	bne	90$
+	mov	r1	,initry
+90$:	return
+
+stry$p:	call	stry$$
+	tst	r0
+	bne	99$
+	mov	r1	,maxtry
+99$:	return
+
+	command	trylst	,INITIAL_CONNECTION,1	,stry$i	,<Number: >
+	command	trylst	,PACKET		   ,1	,stry$p	,<Number: >
+	command	trylst
+
+stry$$:	call	nextarg
+	tstb	@r1
+	beq	29$
+	calls	l$val	,<r1>
+	tst	r0
+	bne	29$
+	cmp	r1	,#3.
+	blo	29$
+	cmp	r1	,#30.
+	blos	30$
+29$:	mov	#er$try	,r0
+30$:	return
+
+
+	.sbttl	SET SERVER
+
+set$sv::upcase	argbuf
+	calls	getcm0	,<argbuf,#svlst>
+	tst	r0
+	bmi	110$
+	tst	wasnul
+	bne	110$
+	calls	getcm1	,<argbuf,#svlst,r0>
+	tst	r0
+	bmi	110$
+	jsr	pc	,@r1
+110$:	return
+
+srv$ti:	calls	l$val	,<argbuf>
+	tst	r0
+	bne	90$
+	mov	r1	,serwait
+	br	100$
+90$:	mov	#er$bad	,r0
+100$:	return
+
+srv$nt:	mov	#60.*120.,serwait
+	clr	r0
+	return
+
+	command svlst	,NOTIME_OUT	,1	,srv$nt
+	command svlst	,TIME_OUT	,1	,srv$ti	,<Seconds: >
+	command svlst
+
+
+	.sbttl	SET INCOMPLETE_FILE_DISPOSITION
+
+set$in::upcase	argbuf
+	calls	getcm0	,<argbuf,#inclist>
+	tst	r0
+	bmi	110$
+	tst	wasnul
+	bne	110$
+	jsr	pc	,@r1
+	clr	r0
+110$:	return
+
+	command	inclist	,DISCARD,1	,sin$ds
+	command	inclist	,KEEP	,1	,sin$kp
+	command	inclist
+
+sin$kp:	clr	incfile
+	return
+
+sin$ds:	mov	sp	,incfile
+	return
+
+
+	.sbttl	SET SL
+
+set$sl::upcase	argbuf
+	calls	getcm0	,<argbuf,#sl.lst>
+	tst	r0
+	bmi	100$
+	tst	wasnul
+	bne	100$
+	call	kp.clr
+	jsr	pc	,@r1
+	clr	r0
+100$:	return
+
+	command sl.lst	,KED	,1	,ssl$ke
+	command sl.lst	,NOKED	,1	,ssl$no
+	command sl.lst	,OFF	,2	,ssl$of
+	command sl.lst	,ON	,2	,ssl$on
+	command sl.lst
+
+ssl$ke:	mov	sp	,sl.ked
+	return
+
+ssl$no:	clr	sl.ked
+	return
+
+ssl$of:	clr	sl.on
+	return
+
+ssl$on:	mov	sp	,sl.on
+	return
+
+
+	.sbttl	Get the next argument
+
+nextarg:mov	argbuf	,r1
+10$:	tstb	@r1
+	beq	100$
+	cmpb	(r1)+	,#space
+	bne	10$
+100$:	return
+
+	.end

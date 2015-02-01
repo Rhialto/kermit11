@@ -1,0 +1,353 @@
+	.title	KRTERR	Error code to message text translation
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	strip trailing blank from prompt string when making error message
+;	add er$wpe, er$dna
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	add error message for logfile problems
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	moved error message prefix routine here from KRTPAK
+;	moved all system error messages here, from various modules
+
+;	Brian Nelson  10-Aug-84  09:24:56
+;
+;	Copyright 1984 Change Software, Inc.
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+
+	.psect	$pdata
+	.sbttl	Error codes defined
+
+	; Kermit's main loop handles these five errors
+	cmd$ab	==	-1		; ^C abort
+	cmd$ex	==	-2		; ^Z exit
+	cmd$nx	==	-3		; ^Z but don't exit to monitor
+	cmd$bad	==	-4		; unrecognizable
+	cmd$un	==	-5		; ambiguous
+
+	er$ful	==	-6		; not enough room
+	er$nmf	==	-7		; no more files
+	er$iop	==	-10		; invalid I/O request
+	er$sys	==	-11		; system error
+	er$lby	==	-12		; lun open
+	er$rer	==	-13		; read error
+	er$wer	==	-14		; write error
+	er$prv	==	-15		; protection error
+	er$rtb	==	-16		; record too big
+	er$que	==	-17		; no free que element
+	er$nin	==	-20		; no data available
+	er$spx	==	-21		; speed not settable
+	er$pls	==	-22		; please set line first
+	er$lgf	==	-23		; please open a logfile first
+	er$raw	==	-24		; can't log raw I/O with other opts
+	er$rax	==	-25		; can't do this with raw logging
+	er$mal	==	-26		; malloc can't get enough memory
+	er$spe	==	-27		; unknown speed
+	er$sy1	==	-30		; .close system error
+	er$sy2	==	-31		; .csispc system error
+	er$sy3	==	-32		; .enter system error
+	er$sy4	==	-33		; .fetch system error
+	er$vol	==	-34		; not an RT-11 disk volume
+	er$nop	==	-35		; I/O channel not open
+	er$wld	==	-36		; no wildcard support
+	er$xco	==	-37		; could not access XC/XL
+	er$bnl	==	-40		; binary types list is full
+	er$one	==	-41		; illegal file type
+	er$fet	==	-42		; no room to load handler
+	er$ukn	==	-43		; illegal serial line device name
+	fa$imp	==	-44		; /51/ .serr fatal errors
+	fa$nhd	==	-45		; /51/ no device handler
+	fa$dio	==	-46		; /51/ error in directory I/O
+	fa$fet	==	-47		; /51/ fetch error
+	fa$ovr	==	-50		; /51/ overlay error
+	fa$dfl	==	-51		; /51/ directory full
+	fa$adr	==	-52		; /51/ bad address
+	fa$lun	==	-53		; /51/ bad lun
+	fa$idr	==	-54		; TSX+ access restricted
+	er$fgf	==	-55		; /51/ can't fetch in FG
+	er$try	==	-56		; retries must be 3 to 30 only
+	er$ld1	==	-57		; invalid LD unit #
+	er$ld5	==	-60		; LD nesting error
+	er$tim	==	-61		; set time-out error
+	ld$bsy	==	-62		; chan(s) open to a logical disk
+	er$txp	==	-63		; /62/ packet min len is 20 bytes
+	er$bad	==	-64		; bad option or value
+	er$sam	==	-65		; ambiguous set command
+	er$sun	==	-66		; unrecognizable set command
+	er$tt	==	-67		; can't connect TT to TT
+	er$ass	==	-70		; assign error
+	er$ram	==	-71		; ambiguous REMOTE command
+	er$run	==	-72		; unrecognizable REMOTE command
+	er$unr	==	-73		; unrecognizable command
+	er$amb	==	-74		; ambiguous command
+	er$snd	==	-75		; send syntax error
+	er$get	==	-76		; get syntax error
+	er$not	==	-77		; not a local Kermit..
+	er$dk	==	-100		; only supported assign is DK
+	er$tam	==	-101		; ambiguous SHOW command
+	er$tun	==	-102		; unrecognizable SHOW command
+	er$ser	==	-103		; no server subcommands
+	er$abt	==	-104		; process aborted
+	er$dcd	==	-105		; can't dial whilst DCD is asserted
+	er$inr	==	-106		; invalid number of retries
+	er$npn	==	-107		; no previous number dialed
+	er$mdm	==	-110		; please set modem first
+	er$ndf	==	-111		; no dial formatting string
+	er$idl	==	-112		; can't release modem
+	er$unm	==	-113		; unknown modem type
+	er$nnf	==	-114		; no number found for name
+	er$abk	==	-115		; aborted from keyboard
+	er$wke	==	-116		; can't get wake string from modem
+	er$tsx	==	-117		; only supported under TSX
+	er$120	==	-120		; already allocated or in use
+	er$121	==	-121		; invalid unit number
+	er$122	==	-122		; TSX allocation table is full
+	er$123	==	-123		; ALLOCATE privilege required
+	er$124	==	-124		; TERMINAL privilege required
+	er$125	==	-125		; invalid TSX line number
+	er$126	==	-126		; already assigned to a CL unit
+	er$127	==	-127		; in use by a time-sharing user
+	er$oct	==	-130		; must be octal 1 to 36 only
+	er$dev	==	-131		; device not responding
+	er$eof	==	-132		; end of file
+	er$fnf	==	-133		; file not found
+	er$iln	==	-134		; illegal logical name
+	er$aop	==	-135		; ambiguous option or value
+	er$own	==	-136		; CL unit not owned by this job
+	er$137	==	-137		; you are already using this device
+	er$140	==	-140		; must drop current assign first
+	er$141	==	-141		; no ports and/or units supplied
+	er$142	==	-142		; none of specified CL units is free
+	er$143	==	-143		; none of specified TSX lines is free
+	er$144	==	-144		; bad delimiter in PORTS string
+	er$145	==	-145		; SET SPEED from PORTS string failed
+	er$146	==	-146		; SET MODEM from PORTS string failed
+	er$147	==	-147		; bad XMODE value in PORTS string
+	er$150	==	-150		; can't .close XL once it's opened
+	er$pri	==	-151		; TSX priority bump bad value error
+	er$v62	==	-152		; TSX V6.2 or above needed to do this
+	er$v63	==	-153		; ditto re TSX V6.3 or above
+	er$wks	==	-154		; wake string is undefined
+	er$lwe	==	-155		; logfile write error
+	er$fnm	==	-156		; bad file name
+	er$km	==	-157		; KM handler only
+	er$ttx	==	-160		; /63/ TT not supported here
+	er$wpe	==	-161		; /63/ attempt to write past eof
+	er$dna	==	-162		; /63/ bad device name
+
+	maxerr	=	 162		; must be abs(maxerr)
+
+
+	.sbttl	Error messages mapped
+
+errmap:	.word	baderr		; come here when error doesn't map
+	.word	10$,20$,30$,40$,50$,60$,70$,100$,110$,120$
+	.word	130$,140$,150$,160$,170$,200$,210$,220$,230$,240$,250$
+	.word	260$,270$,300$,310$,320$,330$,340$,350$,360$,370$,400$
+	.word	410$,420$,430$,440$,450$,460$,470$,500$,510$,520$,530$
+	.word	540$,550$,560$,570$,600$,610$,620$,630$,640$,650$,660$
+	.word	670$,700$,710$,720$,730$,740$,750$,760$,770$,1000$
+	.word	1010$,1020$,1030$,1040$,1050$,1060$,1070$,1100$,1110$
+	.word	1120$,1130$,1140$,1150$,1160$,1170$,1200$,1210$,1220$
+	.word	1230$,1240$,1250$,1260$,1270$,1300$,1310$,1320$,1330$
+	.word	1340$,1350$,1360$,1370$,1400$,1410$,1420$,1430$,1440$
+	.word	1450$,1460$,1470$,1500$,1510$,1520$,1530$,1540$,1550$
+	.word	1560$,1570$,1600$,1610$,1620$	; /63/
+
+; /62/	These first five errors are always handled by Kermit's main loop
+10$:	;	cmd$ab	==	-1		; ^C abort
+20$:	;	cmd$ex	==	-2		; ^Z exit
+30$:	;	cmd$nx	==	-3		; ^Z but don't exit to monitor
+40$:	;	cmd$bad	==	-4		; unrecognizable
+50$:	;	cmd$un	==	-5		; ambiguous
+	.asciz	"Error handling failed!"	; just in case
+
+60$:	.asciz	"Not enough room"
+70$:	.asciz	"No more files"
+100$:	.asciz	"Invalid I/O request"
+110$:	.asciz	"System error"
+120$:	.asciz	"Logical unit already open"
+130$:	.asciz	"Device read error"
+140$:	.asciz	"Device write error"
+150$:	.asciz	"File is protected"
+160$:	.asciz	"Record too long for GETREC buffer"
+170$:	.asciz	"No queue element free"
+200$:	.asciz	"No data available"
+210$:	.asciz	"Speed not settable"
+220$:	.asciz	"Please SET LINE first"
+230$:	.asciz	"Please open a LOGFILE first"
+240$:	.asciz	"Can't log RAW I/O with another disk-based DEBUG option set"
+250$:	.asciz	"Can't do this with RAW I/O logging on"
+260$:	.asciz	"Insufficient free memory remaining"
+270$:	.asciz	"Unknown speed"
+300$:	.asciz	".CLOSE system error"
+310$:	.asciz	".CSISPC system error"
+320$:	.asciz	".ENTER system error"
+330$:	.asciz	".FETCH system error"
+340$:	.asciz	"Disk home block not RT-11 format, see HELP SET FILE NOVOL"
+350$:	.asciz	"I/O channel not open"
+360$:	.asciz	"Multiple files or wildcarding not supported here"
+370$:	.asciz	"Can't open the communications port"
+400$:	.asciz	"Maximum of 31 entries in the BINARY-TYPE list"
+410$:	.asciz	"Illegal file type string"
+420$:	.asciz	"Insufficient lowcore memory to load handler"
+430$:	.asciz	"Illegal serial line device name"
+440$:	.asciz	"Unknown .SERR error"			; /62/
+450$:	.asciz	"No device handler or device not responding" ; /62/
+460$:	.asciz	"Directory I/O error"			; /51/
+470$:	.asciz	".FETCH error, please LOAD handler"	; /51/
+500$:	.asciz	"Overlay read error"			; /51/
+510$:	.asciz	"Directory is full"			; /51/
+520$:	.asciz	"Invalid address"			; /51/
+530$:	.asciz	"Invalid channel"			; /51/
+540$:	.asciz	"Device or file is access restricted"	; /BBS/ TSX+ uses this
+550$:	.asciz	"Can't .FETCH in Foreground, please LOAD handler" ; /51/
+560$:	.asciz	"Retries must be between 3 and 30"
+570$:	.asciz	"Invalid logical device, LD0 to LD7 only"
+600$:	.asciz	"Logical disks must be nested in increasing unit number order"
+610$:	.asciz	"Time-out must be between 0 and 94"	; /62/
+620$:	.asciz	"Channel open to a logical disk"
+630$:	.asciz	"Minimum packet length is 20"		; /62/
+640$:	.asciz	"Bad option or value"
+650$:	.asciz	"Ambiguous SET command"
+660$:	.asciz	"Unrecognizable SET command"
+670$:	.asciz	"Can't connect TT to TT"
+700$:	.asciz	"Syntax is ASS dev DK, only DK is supported"
+710$:	.asciz	"Ambiguous REMOTE command"
+720$:	.asciz	"Unrecognizable REMOTE command"
+730$:	.asciz	"Unrecognizable command"
+740$:	.asciz	"Ambiguous command"
+750$:	.asciz	"Syntax is SEND file.typ [dev:][asfile.new]"
+760$:	.asciz	"Syntax is GET file.typ [dev:][asfile.new]"
+770$:	.asciz	"Not running as a LOCAL Kermit"
+1000$:	.asciz	"The only supported logical assign is DK"
+1010$:	.asciz	"Ambiguous SHOW command"
+1020$:	.asciz	"Unrecognizable SHOW command"
+1030$:	.asciz	"Server sub-commands are not supported"
+1040$:	.asciz	"Process aborted"
+1050$:	.asciz	"Can't DIAL whilst DCD is asserted, use HANGUP first"
+1060$:	.asciz	"Invalid number of retries"
+1070$:	.asciz	"No previous number dialed"
+1100$:	.asciz	"Please SET MODEM first"
+1110$:	.asciz	"FORMAT string undefined"
+1120$:	.asciz	"Modem not restored to its idle state"
+1130$:	.asciz	"Unknown modem type"
+1140$:	.asciz	"No number found for specified name"
+1150$:	.asciz	"Aborted from keyboard"
+1160$:	.asciz	"Can't get wake$prompt from modem"
+1170$:	.asciz	"Available under TSX-Plus only"
+1200$:	.asciz	"CL unit allocated or in use by another job"
+1210$:	.asciz	"Invalid CL unit number"
+1220$:	.asciz	"TSX allocation table full"
+1230$:	.asciz	"ALLOCATE privilege required"
+1240$:	.asciz	"TERMINAL privilege required"
+1250$:	.asciz	"Invalid TSX line number"
+1260$:	.asciz	"Line already assigned to a CL unit"
+1270$:	.asciz	"Line in use by a time-sharing user"
+1300$:	.asciz	"Range is 1 to 36 octal"
+1310$:	.asciz	"Device not responding"	; /BBS/ distinguish from no access
+1320$:	.asciz	"End of file"
+1330$:	.asciz	"File not found"
+1340$:	.asciz	"Illegal logical name"
+1350$:	.asciz	"Ambiguous option or value"
+1360$:	.asciz	"Specified CL unit is not the current link device"
+1370$:	.asciz	"You are already using this device on another job"
+1400$:	.asciz	"Current device must be dropped (SET LINE TT) first"
+1410$:	.asciz	"Bad or missing data in PORTS or UNITS string"
+1420$:	.asciz	"No specified CL unit is free"
+1430$:	.asciz	"No specified TSX line is free"
+1440$:	.asciz	"Bad parameter delimiter in PORTS string"
+1450$:	.asciz	"SET SPEED from value in PORTS string failed"
+1460$:	.asciz	"SET MODEM from type in PORTS string failed"
+1470$:	.asciz	"SET PHO XMODE from value in PORTS string failed"
+1500$:	.asciz	"Current device can only be released by exiting Kermit"
+1510$:	.asciz	"Priority range is 1 to 127"
+1520$:	.asciz	"TSX V6.2 or above required"
+1530$:	.asciz	"TSX V6.3 or above required"
+1540$:	.asciz	"WAKE-STRING undefined"
+1550$:	.asciz	"Logfile write error"
+1560$:	.asciz	"Bad file name"
+1570$:	.asciz	"KM handler required"
+1600$:	.asciz	"TT is not supported here"	; /63/
+1610$:	.asciz	"Attempt to write past EOF, possible FILE-TYPE mis-match"
+1620$:	.asciz	"Bad device name"		; /63/
+baderr:	.asciz	"Unknown error  r0 = "
+	.even
+
+
+	.psect	$code
+	.sbttl	Error message generator	; /BBS/ somewhat changed..
+
+;	S Y S E R R
+;
+;	input:	  (r5)	= error number
+;	output:	 2(r5)	= buffer for error message text
+
+;	.save
+;	.psect	$pdata
+;prefix:.asciz	"?KRTBBS-E-"		; error message header for the bbs
+;	.even
+;	.restore
+
+syserr::save	<r0,r1,r2>
+	mov	#baderr	,r1		; preset bad error text
+	mov	2(r5)	,r2		; pointer for err msg out buff
+
+	movb	#'?	,(r2)+		; insert RT-11 err msg ident
+	mov	#prompt	,r0		; point to prompt
+10$:	movb	(r0)+	,(r2)+		; copy the prompt into err msg
+	beq	20$			; that's it..
+	cmpb	-1(r2)	,#'z!40		; try against a lower case "z"
+	bhi	10$			; it's higher..
+	cmpb	-1(r2)	,#'a!40		; try against a lower case "a"
+	blo	10$			; it's lower..
+	 bicb	#40	,-1(r2)		; char is in range, translate
+	br	10$			; next one..
+20$:	dec	r2			; back up over null
+30$:	cmpb	-1(r2)	,#space		; /63/ trailing blank?
+	beq	40$			; /63/ ya, hose it
+	cmpb	-1(r2)	,#'>		; trailing ">" ?
+	bne	50$			; no
+40$:	tstb	-(r2)			; back up over unwanted char
+	br	30$			; /63/ and look for another..
+
+50$:	movb	#'-	,(r2)+		; and append
+	movb	#'E	,(r2)+		; severity code
+	movb	#'-	,(r2)+		; "Kermit-11-E-"
+
+; /BBS/	this is only for the bbs..
+;	mov	#prefix	,r0		; slug as from this err handler
+;10$:	movb	(r0)+	,(r2)+		; copy the prompt into err msg
+;	bne	10$			; until a null is copied
+;	dec	r2			; back up over null
+
+	mov	(r5)	,r0		; the error number
+	bge	60$			; if =>0 it's ok
+	neg	r0			; else change sign
+60$:	cmp	r0	,#maxerr	; is this a valid call today?
+	bhi	70$			; no
+	asl	r0			; ya, get error number into word
+	mov	errmap(r0),r1		; offset and get the text address
+70$:	mov	r1	,-(sp)		; save pointer to actual err msg
+80$:	movb	(r1)+	,(r2)+		; then copy it until a null byte
+	bne	80$			; next please
+	cmp	(sp)+	,#baderr	; is it "unknown error call" ?
+	bne	90$			; no
+	movb	#'<	,-1(r2)		; yes, put "<" where null wuz
+	calls	l$otoa	,<r2,2(r5)>	; convert octal number to ascii
+	add	#6	,r2		; skip past the converted number
+	movb	#'>	,(r2)+		; terminate the string
+	clrb	(r2)			; finally, .asciz please
+90$:	unsave	<r2,r1,r0>
+	return
+
+	.end

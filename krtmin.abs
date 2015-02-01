@@ -1,0 +1,28 @@
+
+KRTMIN for floppy-based RT-11, V03.62-5_min, 31-May-93      ABSTRACT for DECUS
+------ --- ------------ ------ ------------- ---------      ------------------
+
+
+KRTMIN is a special edit of the KRT Kermit-11 package to accommodate small
+floppy disk (RX-0*) based systems, and is distinguished by these features:
+
+  o Extremely small size
+  o Needs no system (Line Time) clock
+  o Overlays rearranged to minimize thrashing of the floppy disk
+  o Runs under RT-11 SJ and FB from V4 and up, and probably V3B
+  o Non-EIS CPUs are supported
+
+Communication is ONLY VIA THE CONSOLE PORT.  No comm handler support exists
+in this version, however the server remains fully functional, including the
+ability to do up to 1920 byte packets (best confined to outbound transfers).
+
+In other words, this package is meant to provide a means of extracting files
+from hardware where there is no other way to communicate with it besides the
+console terminal line.
+
+        Billy Youdelman                 youdelman@eisner.decus.org
+        PO Box 1207                     billy@mix.com
+        Culver City, California 90232
+        USA
+
+-eof-

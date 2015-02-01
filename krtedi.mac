@@ -1,0 +1,817 @@
+	.title	KRTEDI	SL editor
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	fixed all possible sign extension problems now the LN$MAX > 127.
+;	but keep it under 255. or you'll have to fix some other stuff!!
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	add bells: up arrow when nothing saved yet, down arrow at end
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	up/dn arrow command scrolling fixed
+;	command dispatch table patched for VT-100 keypad (KED equivs)
+;	dup cmds now not saved even when < max cmds are currently stored
+;	extended keypad for adv, bkup, word, char, line, delete, undelete
+;	added check for SS3 for VT-220 keypad
+;	cleaned up various odds and ends..
+;	WARNING:  If LN$MAX is made greater than 127., fix sxt stuff here
+
+;	18-Jul-86  12:00:29  Brian Nelson
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+	; bits used in edists (the editor status word)
+	IN$MODE	=	1	; if <> insert mode is on (default)
+	UP$MODE	=	2	; down arrow wuz last, going up the list
+	DN$MODE	=	4	; up arrow wuz last, going down the list
+	UP$END	=	10	; up arrow has just dumped edicmd #0
+	FW$MODE	=	20	; if <>, advance mode (default=backup=0)
+
+
+	.sbttl	Local data
+
+	.psect	$pdata
+$ceol:	.asciz	<esc>"[K"	; clear from cursor to end of line
+$cz:	.asciz	"^Z"<cr><lf>	; to echo ^Z
+$left:	.asciz	<esc>"[D"	; move cursor left one column
+$resto:	.asciz	<esc>"8"	; restore cursor to previously saved position
+$right:	.asciz	<esc>"[C"	; move cursor right one column
+$rubout:.byte	bs ,space ,bs ,0 ; echo this for a rubout
+$save:	.asciz	<esc>"7"	; save current cursor position
+$setvt:	.byte	esc ,'= ,0	; enable VT-100 keypad
+delimit:.byte	40 ,54 ,56 ,57 ,72 ,75 ,133 ,0	; word delimiters (tab unused)
+edi.01:	.asciz	"?KRTEDI-W-Can't overlay HELP from here"<cr><lf> ; /63/
+edi.02:	.asciz	"SL F"		; /63/ display SL Function keys topic
+edi.03:	.asciz	"SL K"		; /63/ or do KED version if KED mode is on
+	.even
+
+
+	.psect	$code
+	.sbttl	SL editor main loop	; /BBS/ minor mods..
+
+;	 (r5)	= the prompt string
+;	2(r5)	= buffer in which to return input string
+;	  r1	= length of string returned in 2(r5)
+;	  r0	= if <>, the error code
+
+kbredi::save	<r2,r3,r4>
+	tst	sl.on			; is SL on?
+	bne	10$			; ya
+	wrtall	@r5			; no, prompt and
+	calls	kbread	,<2(r5)>	; do hardcopy ttin
+	br	70$			; done
+
+10$:	call	l$nolf			; just a return
+	wrtall	@r5			; print the prompt
+	tst	sl.ked			; KED mode on?
+	beq	20$			; no
+	wrtall	#$setvt			; ya, force keypad to application mode
+20$:	clr	edipos			; cursor is at start of the line
+	clr	edilen			; length=0
+	mov	2(r5)	,r4		; buffer address
+	clrb	@r4			; ensure starting with .asciz
+30$:	call	read1ch			; get one char from the keyboard
+	mov	r0	,r3		; save a copy
+	beq	60$			; nothing there, treat as a ^Z
+
+	tst	sl.ked			; KED mode on?
+	bne	40$			; ya, dispatch accordingly
+	scan	r3	,#scanlst	; no, look for a match
+	asl	r0			; word indexing
+	jsr	pc	,@scandsp(r0)	; dispatch
+	br	50$			; skip past KED code
+40$:	scan	r3	,#kedlst	; look for a match
+	asl	r0			; word indexing
+	jsr	pc	,@keddsp(r0)	; dispatch
+50$:	bcs	30$			; not done yet
+	br	70$			; done
+
+60$:	mov	#er$eof	,r0		; error, return end-of-file
+	clr	r1			; length=0
+70$:	unsave	<r4,r3,r2>
+	return
+
+	.save
+	.psect	$pdata
+scanlst:.byte	'A&37	,'B&37	,'C&37	,'D&37	,'E&37	,'F&37	,lf
+	.byte	cr	,'R&37	,'U&37	,'V&37	,'W&37	,'Z&37	,33
+	.byte	177	,217	,233
+	.byte	0
+	.even
+scandsp:.word	insch
+	.word	toggle	,prev	,ctrlc	,left	,prev	,right	,lfproc
+	.word	done	,retype	,ctrlu	,next	,retype	,eof	,doesc
+	.word	dorub	,do220	,do220
+
+kedlst:	.byte	'C&37	,'H&37	,'I&37	,lf	,cr	,'R&37
+	.byte	'U&37	,'Z&37	,33	,177	,217	,233
+	.byte	0
+	.even
+keddsp:	.word	insch
+	.word	ctrlc	,dorub	,toggle	,lfproc	,done	,retype
+	.word	ctrlu	,eof	,doesc	,dorub	,do220	,do220
+	.restore
+
+
+	.sbttl	Process escape sequence	; /BBS/ minor mods..
+
+doesc:	call	read1ch			; get next char in escape sequence
+	cmpb	r0	,#'[		; CSI?
+	beq	do220			; ya
+	cmpb	r0	,#'O&137	; from the keypad?
+	bne	beep			; struck out..
+
+do220:	call	read1ch			; get next char in escape sequence
+	tst	sl.ked			; is SL on?
+	bne	10$			; ya
+	scan	r0	,#esclst	; no, index to process
+	asl	r0			; word indexing
+	jmp	@escdsp(r0)		; /62/ do it
+10$:	scan	r0	,#k.lst		; index to process
+	asl	r0			; word indexing
+	jmp	@k.dsp(r0)		; /62/ do it
+
+	.save
+	.psect	$pdata
+esclst:	.byte	'A&137	,'B&137	,'C&137	,'D&137	,'S&137	,'P&137	,'Q&137
+	.byte	0
+	.even
+escdsp:	.word	beep
+	.word	prev	,next	,right	,left	,pf$4	,pf$1	,pf$2
+
+k.lst:	.byte	'A&137	,'B&137	,'C&137	,'D&137	,'p!40	,'r!40	,'M&137
+	.byte	'q!40	,'s!40	,'t!40	,'u!40	,'S&137	,'m!40	,'l!40
+	.byte	'P&137	,'Q&137
+	.byte	0
+	.even
+k.dsp:	.word	beep
+	.word	prev	,next	,right	,left	,sol	,eol	,done
+	.word	kp$1	,kp$3	,kp$4	,kp$5	,pf$4	,kp$min	,kp$com
+	.word	pf$1	,pf$2
+	.restore
+
+
+	.sbttl	Ring the bell		; /BBS/ replaces noop
+
+beep:	mov	#bell	,r0		; load a bell
+	call	writ1char		; ship it to the terminal
+	sec				; not done yet
+	return
+
+
+	.sbttl	PF2, Help		; /BBS/ added..
+
+pf$2:	tst	pf2$ok			; could doing this destroy an overlay?
+	beq	10$			; no
+	call	l$nolf			; possibly..  goto column 1
+	wrtall	#$ceol			; hose the line
+	wrtall	#edi.01			; /63/ "Can't overlay HELP from here"
+	br	30$			; and retype the command line
+
+10$:	mov	#edi.02	,r0		; preset normal mode
+	tst	sl.ked			; KED mode on?
+	beq	20$			; no
+	mov	#edi.03	,r0		; ya, use this help text
+20$:	strcpy	argbuf	,r0		; /62/ pass desired topic to HELP
+	.newline			; format display
+	save	<r5,r4>			; preserve pointers
+	call	c$help			; dump the help text to the terminal
+	unsave	<r4,r5>			; recover pointers
+30$:	call	retype			; then re-display the command line
+	sec				; not done yet
+	return
+
+
+	.sbttl	Post-PF1 processor	; /BBS/ all new
+
+pf$1:	call	read1ch			; get next char
+	tst	sl.ked			; KED mode on?
+	bne	10$			; ya
+	scan	r0	,#pf1lst	; look for a match
+	asl	r0			; word indexing
+	jmp	@pf1dsp(r0)		; /62/ dispatch
+10$:	scan	r0	,#k1.lst	; look for a match
+	asl	r0			; word indexing
+	jmp	@k1.dsp(r0)		; /62/ dispatch
+
+	.save
+	.psect	$pdata
+pf1lst:	.byte	'C&37	,lf	,'U&37	,'Z&37
+	.byte	33	,177	,217	,233
+	.byte	0
+	.even
+pf1dsp:	.word	beep
+	.word	ctrlc	,.lfproc,.ctrlu	,eof
+	.word	.doesc	,.dorub	,.do220	,.do220
+
+k1.lst:	.byte	'C&37	,'H&37	,lf	,'U&37	,'Z&37
+	.byte	33	,177	,217	,233
+	.byte	0
+	.even
+k1.dsp:	.word	beep
+	.word	ctrlc	,.dorub	,.lfproc,.ctrlu	,eof
+	.word	.doesc	,.dorub	,.do220	,.do220
+	.restore
+
+.doesc:	call	read1ch			; get next in esc seq
+	cmpb	r0	,#'[		; CSI?
+	beq	.do220			; ya
+	cmpb	r0	,#'O&137	; from the keypad?
+	beq	.do220			; ya
+	jmp	beep			; struck out..
+
+.do220:	call	read1ch			; get next in esc seq
+	tst	sl.ked			; SL on?
+	bne	20$			; ya
+	scan	r0	,#pfxlst	; index to its process
+	asl	r0			; word offset
+	jmp	@pfxdsp(r0)		; /62/ dispatch
+20$:	scan	r0	,#kx.lst	; index to its process
+	asl	r0			; word offset
+	jmp	@kx.dsp(r0)		; /62/ dispatch
+
+	.save
+	.psect	$pdata
+pfxlst:	.byte	'S&137	,'P&137
+	.byte	0
+	.even
+pfxdsp:	.word	beep
+	.word	.pf$4	,pf$1
+
+kx.lst:	.byte	'S&137	,'m!40	,'l!40	,'P&137
+	.byte	0
+	.even
+kx.dsp:	.word	beep
+	.word	.pf$4	,.kp$min,.kp$com,pf$1
+	.restore
+
+
+	.sbttl	Two ways to undel a char  ; /BBS/ all new
+
+.kp$com:call	.dorub			; undelete the char
+	tst	r0			; did it work?  beep loads r0 if not..
+	bne	10$			; no, leave cursor alone
+	call	left			; ya, fix the cursor position
+10$:	sec				; not done yet
+	return
+
+.dorub:	clr	r3			; /63/ avoid possible sign extension
+	bisb	undchr	,r3		; /63/ recover char to undelete
+	bne	insch			; /63/ there is a char
+	jmp	beep			; nothing has been saved
+
+
+	.sbttl	Insert a char		; /BBS/ cleaned up
+
+insch:	cmpb	r3	,#space		; control characters that get
+	blo	10$			; /63/ this far should be ignored..
+	cmp	edilen	,#ln$max	; too many chars?
+	blo	20$			; no
+10$:	jmp	beep			; ring bell if line is full
+
+20$:	mov	edipos	,r1		; get the offset into line
+	add	r4	,r1		; where to stuff the data
+	tstb	(r1)			; already at end of line?
+	bne	30$			; no
+	movb	r3	,(r1)+		; ya, add current char to it
+	clrb	(r1)			; reterminate
+	dec	r1			; back up
+	wrtall	r1			; echo
+	inc	edilen			; line is now one char longer
+	inc	edipos			; cursor is now here
+	br	60$			; that's it..
+
+30$:	bit	#in$mode,edists		; insert or overstrike?
+	bne	40$			; insert
+	movb	r3	,(r1)+		; overstrike
+	br	50$			; finish up
+
+40$:	sub	#ln$max+2,sp		; a temp buffer
+	mov	sp	,r2		; pointer to it
+	strcpy	r2	,r1		; save from cursor to EOL
+	movb	r3	,(r1)+		; insert the new character
+	strcpy	r1	,r2		; put the trailing data back in
+	add	#ln$max+2,sp		; pop buffer
+	inc	edilen			; line is now one char longer
+50$:	wrtall	#$save			; save cursor position
+	dec	r1			; back to to the new character
+	wrtall	r1			; dump the data
+	wrtall	#$restore		; put the cursor back now
+	call	right			; move over on the display
+60$:	clr	r0			; no error
+	sec				; not done yet
+	return
+
+
+	.sbttl	Move to start of line (Keypad 0)
+
+sol:	tst	edipos			; stop at position 0
+	ble	10$			; /BBS/ done
+	call	left			; /BBS/ move one column
+	br	sol			; and check position
+10$:	sec				; not done yet
+	return
+
+
+	.sbttl	Move to end of line (Keypad 2)
+
+eol:	cmp	edipos	,edilen		; /BBS/ end yet?
+	bhis	10$			; yes
+	call	right			; /BBS/ no, move one column
+	br	eol			; and check position
+10$:	sec				; not done yet
+	return
+
+
+	.sbttl	Move cursor one word	; /BBS/ all new
+
+kp$1:	mov	edists	,r2		; so kp$3 can flip direction at ends
+loop:	mov	edipos	,r1		; copy of current cursor position
+	bit	#fw$mode,r2		; check direction
+	bne	10$			; it's advance
+	tst	r1			; backup, any room left?
+	ble	30$			; nope
+	br	20$			; ya
+10$:	cmp	r1	,edilen		; advance, any room left?
+	bhis	30$			; no
+20$:	call	kp$3			; ya, move one char
+	mov	edipos	,r1		; refresh pointer
+	add	r4	,r1		; point to byte at hand
+	scan	(r1)	,#delimit	; check for a word delimiter
+	tst	r0			; well?
+	bne	loop			; found one, keep looking
+	scan	-1(r1)	,#delimit	; a char, does a delimiter precede it?
+	tst	r0			; well?
+	beq	loop			; no
+30$:	sec				; ya, but not done yet
+	return
+
+
+	.sbttl	Move cursor one char	; /BBS/ added
+
+kp$3:	bit	#fw$mode,edists		; check current direction
+	beq	left			; it's to the left
+	.br	right			; /63/ or to the right..
+
+
+	.sbttl	Move right one char
+
+right:	cmp	edipos	,edilen		; EOL?
+	bhis	10$			; /63/ yes
+	wrtall	#$right			; no, move cursor
+	inc	edipos			; cursor is now here
+	cmp	edipos	,edilen		; /BBS/ EOL now?
+	blo	10$			; /63/ no
+	bic	#fw$mode,edists		; /BBS/ ya, flip direction
+10$:	sec				; not done yet
+	return
+
+
+	.sbttl	Move left one char
+
+left:	tst	edipos			; SOL?
+	ble	10$			; no
+	wrtall	#$left			; ya, backup a bit
+	dec	edipos			; cursor is now here
+	bne	10$			; /BBS/ when hitting SOL..
+	bis	#fw$mode,edists		; /BBS/ ..flip direction
+10$:	sec				; not done yet
+	return
+
+
+	.sbttl	Set advance mode	; /BBS/ added
+
+kp$4:	bis	#fw$mode,edists		; go forward
+	sec				; not done yet
+	return
+
+
+	.sbttl	Set backup mode		; /BBS/ added
+
+kp$5:	bic	#fw$mode,edists		; go backward
+	sec				; not done yet
+	return
+
+
+	.sbttl	Process ^C, ^Z		; /BBS/ fixed up..
+
+ctrlc:	call	sol			; move to start of line, clear edipos
+	wrtall	#$ceol			; erase to EOL
+	clr	edilen			; init length
+	clrb	@r4			; no data left over
+	tst	edicmd			; anything saved yet?
+	blt	10$			; nope..
+	mov	#ln$cnt	,edicmd		; reset cmd recall ptr
+	dec	edicmd			; offset so prev/next work ok
+10$:	mov	#cmd$ab	,r0		; it's a ^C abort (NOT ^Z)
+	br	cz.fin			; /63/ common exit code
+
+eof:	call	eol			; do this first
+	wrtall	#$cz			; echo ^Z
+	mov	#cmd$ex	,r0		; flag ^Z exit
+cz.fin:	bic	#<up$mode!dn$mode!up$end!fw$mode>,edists  ; clear flags
+	clr	r1			; byte_count=0, also clears carry
+	return
+
+
+	.sbttl	Process CR, store command line	; /BBS/ fixed up..
+
+done:	emt	340			; eat possible LF after CR
+	.newline			; kickoff the command..
+	tst	edilen			; anything to do?
+	beq	110$			; no
+
+	clr	r2			; ya, init index
+	mov	#ln$cnt	,r3		; number of lines to do
+10$:	mov	lastli(r2),r0		; look for a free spot
+	tstb	@r0			; empty?
+	bne	20$			; nope..
+	tst	r2			; iz it the very first one?
+	beq	90$			; ya, thus nothing to scroll
+	mov	r2	,r3		; no, put pointer in right spot
+	asr	r3			; only scroll this many lines
+	br	30$			; instead of them all
+20$:	add	#2	,r2		; bump to next line and..
+	sob	r3	,10$		; ..keep looking, until..
+	clr	r2			; ..all lines are in use
+	mov	#ln$cnt	,r3		; so do them all..
+
+30$:	mov	r4	,-(sp)		; save pointer to top of buffer
+	dec	r3			; bump to line to test
+	asl	r3			; word indexing
+	mov	lastli(r3),r1		; this is its current address
+	mov	edilen	,r0		; length of string just typed in
+	cmpb	(r1)+	,r0		; is it same as stored string?
+	bne	50$			; no
+40$:	cmpb	(r4)+	,(r1)+		; ya, check for string equality
+	bne	50$			; not the same
+	sob	r0	,40$		; same, check next byte
+50$:	mov	(sp)+	,r4		; restore pointer to top of buffer
+	asr	r3			; restore index
+	tst	r0			; did strings match?
+	bne	60$			; no
+	mov	r3	,edicmd		; yes, save index
+	br	110$			; that's it
+
+60$:	tst	r2			; are all buffers in use?
+	bne	90$			; nope..
+					; ya, scroll back previous lines
+70$:	mov	lastli(r2),r0		; address where string will be written
+	mov	lastli+2(r2),r1		; address of string to be moved
+80$:	movb	(r1)+	,(r0)+		; copy the string now
+	bne	80$			; until hitting the null terminator
+	add	#2	,r2		; bump pointer to next line
+	sob	r3	,70$		; next please
+
+90$:	mov	lastli(r2),r1		; at last, copy the new line
+	movb	edilen	,(r1)+		; save the line length
+100$:	movb	(r4)+	,(r1)+		; copy the data now
+	bne	100$			; including null terminator
+	asr	r2			; recover index to current command
+	mov	r2	,edicmd		; save it
+
+110$:	mov	edilen	,r1		; return line length
+	bic	#<up$mode!dn$mode!up$end!fw$mode>,edists  ; clear flags
+	clr	r0			; no error, also clears carry
+	return
+
+
+	.sbttl	Recall a command	; /BBS/ some changes..
+
+next:	mov	#edicmd	,r2		; point to command number buffer
+	tst	@r2			; anything been saved?
+	bge	10$			; /62/ ya
+	call	beep			; /62/ not yet, so there's
+	br	60$			; /62/ nothing to recall
+
+10$:	cmp	@r2	,#ln$cnt-1	; /62/ can we move up?
+	blo	30$			; /63/ ya
+20$:	call	beep			; /62/ no, beep
+	br	50$			; /62/ and cleanup anyway
+
+30$:	inc	@r2			; yes, move up
+
+	bit	#dn$mode,edists		; if down arrow was used last time
+	beq	40$			; loop in one more bump up to fix pos
+	bic	#dn$mode,edists		; when going back up, but only do this
+	br	10$			; once when coming back here
+
+40$:	mov	@r2	,r2		; recover command number
+	asl	r2			; word addressing
+	mov	lastli(r2),r2		; at last
+	tstb	@r2			; anything to copy?
+	beq	20$			; /62/ no, ring bell and cleanup
+
+	call	recover			; ya, get the line
+	bis	#up$mode,edists		; set mode flag
+	cmp	edicmd	,#ln$cnt	; poised at the last command?
+	blo	60$			; /63/ no
+	dec	edicmd			; ya, fix so prev works correctly
+	bic	#up$mode,edists		; ditto
+	br	60$
+
+50$:	bic	#up$mode,edists		; at the end, no extra bump please
+	call	l$nolf			; /62/ goto start of line
+	wrtall	#$ceol			; /62/ clear line on screen
+	wrtall	@r5			; /62/ print prompt
+	clrb	@r4			; no data left over
+	clr	edilen			; length=0
+	clr	edipos			; /62/ cursor is at beginning of line
+
+60$:	bic	#up$end,edists		; no longer at the end of list
+	sec				; not done yet
+	return
+
+
+	.sbttl	Up-arrow key		; /BBS/ some changes..
+
+prev:	bit	#up$end,edists		; already at the firewall?
+	beq	10$			; no
+	call	beep			; ya, ring the bell
+
+10$:	mov	edicmd	,r2		; current command number
+	bge	20$			; /62/ something has been saved
+	call	beep			; /62/ never been here
+	br	60$			; /62/ so nothing to recall yet
+
+20$:	bit	#up$mode,edists		; down arrow been used?
+	bne	30$			; ya, so bump edicmd to correct
+
+	asl	r2			; word indexing
+	mov	lastli(r2),r2		; address of buffer
+	tstb	@r2			; anything to copy?
+	bne	40$			; yes
+
+30$:	bic	#up$mode,edists		; only do this first time thru here
+	dec	edicmd			; no, back up
+	br	10$			; and try again..
+
+40$:	call	recover			; ya, get the line
+
+	tst	edicmd			; check for underflow
+	bgt	50$			; nope
+	clr	edicmd			; just in case..
+	bic	#dn$mode,edists		; no help needed coming off end
+	bis	#up$end,edists		; no more stuff, edicmd=0
+	br	60$
+
+50$:	dec	edicmd			; backup now and
+	bis	#dn$mode,edists		; apply appropriate compensation
+
+60$:	sec				; not done yet
+	return
+
+
+	.sbttl	Recover a command line	; /BBS/ made this a subroutine
+
+recover:call	l$nolf			; goto start of line
+	wrtall	#$ceol			; clear line on screen
+	wrtall	@r5			; print prompt
+	clrb	(r4)			; init buffer
+	clr	r3			; /63/ avoid possible sign extension
+	bisb	(r2)+	,r3		; /63/ get length
+	beq	20$			; nothing there
+	mov	r4	,r1		; copy of the destination address
+10$:	movb	(r2)+	,(r1)+		; copy string
+	bne	10$			; including null terminator
+	wrtall	r4			; echo the string just copied
+20$:	mov	r3	,edilen		; save length
+	mov	r3	,edipos		; cursor is now at EOL
+	bic	#fw$mode,edists		; can only backup from here
+	return
+
+
+	.sbttl	Process ^U		; /BBS/ all new
+
+ctrlu:	mov	edipos	,r1		; get the offset into line
+	ble	30$			; nothing to do
+	call	SOL			; move to start of line, clear edipos
+	wrtall	#$ceol			; erase to EOL
+	clr	edilen			; init length
+	clr	r0			; start at the top
+	call	undwrt			; write deleted data into a buffer
+	mov	r4	,r2		; work copy of output pointer
+10$:	movb	(r0)+	,(r2)+		; copy rest of line back into buffer
+	beq	20$			; until null
+	inc	edilen			; string is now one char longer
+	inc	edipos			; cursor will be here
+	br	10$			; next char
+20$:	wrtall	r4			; dump result to term
+	call	sol			; go back to start of the line
+30$:	sec				; not done yet
+	return
+
+
+	.sbttl	Keypad minus		; /BBS/ all new..
+
+kp$min:	cmp	edipos	,edilen		; at end of the line?
+	bhis	10$			; /63/ ya, can't do this
+	mov	edipos	,r3		; save current cursor position
+	call	savclr			; save cursor position, erase to EOL
+	mov	edists	,-(sp)		; save current mode
+	bis	#fw$mode,edists		; set advance mode
+	call	kp$1			; bump to next word
+	mov	(sp)+	,edists		; restore old mode
+	mov	edipos	,r1		; end of the deleted data
+	sub	r3	,r1		; length of same
+	sub	r1	,edilen		; length of what remains in line
+	mov	r3	,r0		; begin copy from here
+	call	undwrt			; copy deleted stuff into buffer
+	wrtall	#$restore		; put cursor back
+	mov	r3	,edipos		; cursor is now here
+	call	outwrt			; pull up trailing part of line
+10$:	sec				; not done yet
+	return
+
+
+	.sbttl	Line feed		; /BBS/ all new
+
+lfproc:	tst	edipos			; at top of the line?
+	ble	10$			; ya, can't do this
+	mov	edipos	,r3		; save current cursor position
+	mov	edists	,-(sp)		; save current mode
+	bic	#fw$mode,edists		; set backup mode
+	call	kp$1			; bump to next word
+	mov	(sp)+	,edists		; restore old mode
+	mov	r3	,r1		; end of deleted data
+	sub	edipos	,r1		; length of deleted part of line
+	sub	r1	,edilen		; new length of what's left in line
+	mov	edipos	,r0		; start from here
+	call	undwrt			; write the undelete buffer
+	call	savclr			; save cursor position, erase to EOL
+	call	outwrt			; pull up trailing part of line
+10$:	sec				; not done yet
+	return
+
+
+	.sbttl	Write buffers		; /BBS/ for the above two routines
+
+undwrt:	mov	#undlin	,r2		; pointer to undelete line buffer
+	movb	r1	,(r2)+		; stash copy of the length
+	add	r4	,r0		; start from here
+10$:	movb	(r0)+	,(r2)+		; stash the deleted
+	sob	r1	,10$		; part of the line
+	clrb	(r2)			; null terminate it
+	return
+
+outwrt:	wrtall	r0			; restore undeleted part of line
+	wrtall	#$restore		; put cursor back
+	mov	r4	,r2		; work copy of input pointer
+	add	edipos	,r2		; where old line left off
+20$:	movb	(r0)+	,(r2)+		; pull up the rest of it
+	bne	20$			; until hitting the null terminator
+	return
+
+
+	.sbttl	Un-do PF4, keypad comma	; /BBS/ all new
+
+.kp$min:				; UNDEL WORD and LINE are same funct
+.pf$4:	call	.ctrlu			; use this, then fix cursor
+	tst	r0			; did it work?   beep sets r0 if not..
+	bne	20$			; no   /63/ or r0 clear for bisb below
+	bisb	undlin	,r0		; /63/ recover length of insert
+10$:	call	left			; back cursor up to
+	sob	r0	,10$		; where it was
+20$:	sec				; not done yet
+	return
+
+
+	.sbttl	Un-do ^U, line feed	; /BBS/ all new
+
+.lfproc:				; UNDO LF and UNDO ^U are same funct
+.ctrlu:	tstb	undlin			; anything to undelete?
+	beq	10$			; no
+	mov	#ln$max	,r0		; max possible line length
+	sub	edilen	,r0		; minus what is already in use
+	ble	10$			; no room left
+	cmpb	undlin	,r0		; will new stuff fit?
+	blos	20$			; /63/ ya
+10$:	jmp	beep			; it can't happen
+
+20$:	sub	#ln$max+2,sp		; it can happen, get a temp buffer
+	mov	sp	,r2		; and a pointer to it
+
+	mov	edipos	,r1		; get the offset into line
+	add	r4	,r1		; where to stuff the data
+
+	mov	#undlin	,r3		; pointer to string to insert
+	clr	r0			; /63/ avoid possible sign extension
+	bisb	(r3)+	,r0		; /63/ recover length
+	add	r0	,edilen		; add length of insert to total
+	add	r0	,edipos		; cursor will be here when done
+
+	strcpy	r2	,r1		; save from cursor to EOL
+30$:	movb	(r3)+	,(r1)+		; recover the insert data
+	bne	30$			; copy up to null terminator
+	dec	r1			; bump pointer back onto it
+	strcpy	r1	,r2		; put the trailing data back in
+	wrtall	#undlin+1		; echo insert moving cursor to its end
+	wrtall	#$save			; save cursor pos
+	wrtall	r2			; restore trailing part of old line
+	wrtall	#$restore		; put the cursor back now
+	add	#ln$max+2,sp		; pop buffer
+	clr	r0			; flag no error
+	sec				; but not done yet
+	return
+
+
+	.sbttl	Process PF4		; /BBS/ all new
+
+pf$4:	mov	edilen	,r1		; length of the whole banana
+	sub	edipos	,r1		; length of deleted part of line
+	ble	20$			; nothing to do
+	mov	#undlin	,r2		; pointer to undelete line buffer
+	movb	r1	,(r2)+		; stash copy of the length
+	mov	r4	,r0		; work copy of input pointer
+	add	edipos	,r0		; start from here
+	mov	r0	,r1		; save to terminate after copying..
+10$:	movb	(r0)+	,(r2)+		; ..the deleted part of line..
+	bne	10$			; ..and its null term
+	clrb	(r1)			; now terminate the new string
+	wrtall	#$ceol			; erase to the end of the line
+	mov	edipos	,edilen		; this is new length
+20$:	sec				; not done yet
+	return
+
+
+	.sbttl	Erase char under cursor	; /BBS/ all new
+
+kp$com:	cmp	edipos	,edilen		; at end of the line?
+	bhis	do.end			; /63/ ya, nothing to do
+	mov	r4	,r2		; copy pointer to top of buffer
+	add	edipos	,r2		; now it's pointing to cursor position
+	tstb	(r2)			; don't load a null into undchr!
+	beq	do.end			; it's at EOL, nothing to do
+	br	do.com			; fall thru to common code..
+
+
+	.sbttl	Erase char to left of cursor  ; /BBS/ fixed up..
+
+dorub:	tst	edipos			; at SOL?
+	ble	do.end			; ya
+	mov	r4	,r2		; copy pointer to top of buffer
+	add	edipos	,r2		; now it's pointing to cursor position
+	tstb	(r2)			; at EOL?
+	bne	10$			; no
+	movb	-(r2)	,undchr		; ya, copy for undel_char
+	clrb	(r2)			; then zap char
+	dec	edilen			; new length
+	wrtall	#$rubout		; fix display
+	dec	edipos			; cursor is now here
+	br	do.end
+
+10$:	call	left			; move back one char for a rubout
+	dec	r2			; fix pointer
+
+do.com:	movb	(r2)	,undchr		; /63/ stash copy for possible undel
+	mov	r2	,r1		; copy pointer for input
+	mov	r2	,r3		; copy pointer for output
+	inc	r1			; bump past char that is hosed
+20$:	movb	(r1)+	,(r3)+		; slide everything left down a byte
+	bne	20$			; until null terminated
+	dec	edilen			; line is now one less char long
+	call	savclr			; save cursor position, erase to EOL
+	wrtall	r2			; dump buffer
+	wrtall	#$restore		; restore cursor position
+do.end:	sec				; /63/ not done yet
+	return
+
+
+	.sbttl	Process ^R		; /BBS/ minor clean up
+
+retype:	call	l$nolf			; start of line
+	wrtall	#$ceol			; clear to end of line
+	wrtall	@r5			; print the prompt
+	tst	sl.ked			; KED mode on?
+	beq	10$			; no
+	wrtall	#$setvt			; ya, force keypad to application mode
+10$:	wrtall	r4			; dump the buffer
+	call	l$nolf			; back to column 1
+	strlen	@r5			; prompt is this long
+	add	edipos	,r0		; add expected cursor position
+20$:	wrtall	#$right			; go to it
+	sob	r0	,20$		; one column at a time until there
+	sec				; not done yet
+	return
+
+
+	.sbttl	Toggle insert/overstrike mode
+
+toggle:	mov	#in$mode,r0		; copy of insert mode bit
+	xor	r0	,edists		; toggle it
+	sec				; not done yet
+	return
+
+	.sbttl	Save cursor then clear to EOL	; /BBS/ added
+
+savclr:	wrtall	#$save			; save cursor position
+	wrtall	#$ceol			; erase to EOL
+	return
+
+	.end

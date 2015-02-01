@@ -1,0 +1,120 @@
+	.title	KRTSTD	SET command list overlay
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	consolidate local data..
+;	add SET WILDCARDS
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	move BREAK to SET CONSOLE, CREATE-SIZE and VOLUME to SET FILE
+;	move SETTLE-TIME to SET DIAL ..
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+
+;	23-Oct-85  09:44:20  BDN  Creation, removed from KRTCOM
+;
+;	Copyright 1985 Change Software, Inc.
+;
+;	Call LOASET to get the overlay loaded and
+;	return the command list address in r0
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+	.include "IN:KRTCDF.MAC"
+	.iif ndf  KRTCDF  .error	<; .include for IN:KRTCDF.MAC failed>
+
+
+	.psect	$pdata
+	.sbttl	Local data		; /63/ consolidate data here..
+
+std.01:	.asciz	"On, Off? "
+std.02:	.asciz	"Value: "
+std.03:	.asciz	"File type: "
+std.04:	.asciz	"1, 2 or 3? "
+std.05:	.asciz	"Line, Ports or Units? "
+std.06:	.asciz	"Option: "
+std.07:	.asciz	"Unprefix or Prefix? "
+std.08:	.asciz	"Mode: "
+std.09:	.asciz	"Directory: "
+std.10:	.asciz	"Seconds: "
+std.11:	.asciz	"Half or Full? "
+std.12:	.asciz	"Octal 1-36: "
+std.13:	.asciz	"Exit, Noexit? "
+std.14:	.asciz	"ASCII, Auto or Binary? "
+std.15:	.asciz	"RTS/CTS or XOFF? "
+std.16:	.asciz	"Type? "
+std.17:	.asciz	"Keep or Discard? "
+std.18:	.asciz	"Device name: "
+std.19:	.asciz	"Modem name: "
+std.20:	.asciz	"Odd, Even, Mark, Space or None? "
+std.21:	.asciz	"New prompt: "
+std.22:	.asciz	"Initial or Packet? "
+std.23:	.asciz	"Random-number seed: "
+std.24:	.asciz	"On or Off, KED or NOKED? "
+std.25:	.asciz	"Interval: "
+std.26:	.asciz	"Local or Remote? "
+	.even
+
+
+	.psect	$code
+	.sbttl	Define the SET commands
+
+loaset::mov	#setcmd	,r0		; calling this also loads this overlay
+	return
+
+	command	setcmd	,ATTRIBUTES	,1	,set$at	,std.01
+	command setcmd	,BAUD		,2	,set$sp	,std.02
+	command	setcmd	,BINARY-TYPE	,2	,set$bi	,std.03
+	command	setcmd	,BLOCK-CHECK-TYPE,2	,set$bl	,std.04
+	command setcmd	,CL:		,2	,set$cl	,std.05
+	command setcmd	,CONSOLE	,2	,set$co	,std.06
+	command setcmd	,CONTROL-CHARACTER,4	,set$ct	,std.07
+	command setcmd	,DEBUG		,3	,set$de	,std.08
+	command setcmd	,DEFAULT	,3	,c$cwd	,std.09
+	command	setcmd	,DELAY		,3	,set$dl	,std.10
+	command setcmd	,DIAL		,2	,set$di	,std.06
+	command setcmd	,DTR		,2	,set$dt
+	command setcmd	,DUPLEX		,2	,set$du	,std.11
+	command	setcmd	,END-OF-LINE	,2	,set$eo	,std.12
+	command setcmd	,EOF		,2	,set$ef	,std.13
+	command setcmd	,ESCAPE		,2	,set$es	,std.12
+	command	setcmd	,FILE-TYPE	,2	,set$fi	,std.14
+	command setcmd	,FLOW-CONTROL	,2	,set$km	,std.15
+	command setcmd	,HANDSHAKE	,2	,set$ha	,std.16
+	command setcmd	,HOME		,2	,set$ho	,std.09
+	command setcmd	,INCOMPLETE-FILE-DISPOSITION ,1	,set$in	,std.17
+	command setcmd	,LD:		,2	,set$ld	,std.06
+	command setcmd	,LINE		,2	,set$li	,std.18
+	command setcmd	,LOCAL-ECHO	,3	,set$lc	,std.01
+	command setcmd	,LOGFILE	,3	,set$lo
+	command setcmd	,LONG-PACKETS	,3	,set$lp	,std.01
+	command setcmd	,MODEM-TYPE	,1	,set$mo	,std.19
+	command	setcmd	,NOATTRIBUTES	,3	,st$nat
+	command setcmd	,NODEBUG	,3	,sd$off
+	command	setcmd	,NOLONG-PACKETS	,3	,st$nlp
+	command setcmd	,NOREPEAT-QUOTING,3	,rep$of
+	command setcmd	,NOUPDATE	,3	,set$nu
+	command	setcmd	,PARITY		,3	,set$pa	,std.20
+	command	setcmd	,PAUSE		,3	,set$ps	,std.10
+	command setcmd	,PHONE		,2	,set$ph	,std.06
+	command setcmd	,PROMPT		,2	,set$pr	,std.21
+	command setcmd	,RANDOM		,2	,set$ra	,std.01
+	command setcmd	,RECEIVE	,3	,set$rc	,std.06
+	command setcmd	,REPEAT-QUOTING	,3	,set$rp	,std.01
+	command	setcmd	,RETRY		,3	,set$re	,std.22
+	command setcmd	,SEED		,3	,set$se	,std.23
+	command	setcmd	,SEND		,3	,set$sn	,std.06
+	command setcmd	,SERVER		,3	,set$sv	,std.06
+	command setcmd	,SL		,2	,set$sl	,std.24
+	command setcmd	,SPEED		,2	,set$sp	,std.02
+	command	setcmd	,START-OF-PACKET,2	,set$so	,std.12
+	command setcmd	,TERMINAL	,2	,set$tt	,std.16
+	command setcmd	,TT:		,2	,set$tt	,std.16
+	command setcmd	,UPDATE		,1	,set$up	,std.25
+	command	setcmd	,VLSWCH		,1	,set$vl	,std.26
+	command	setcmd
+
+	.end

@@ -1,0 +1,558 @@
+	.title	KRTSER.MIN  The server
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTDEF.MIN"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MIN failed>
+
+	.mcall	.PURGE
+
+	.macro	dispat	val,dsp,baseval,basedsp,default
+	.list me
+	.save
+	.nlist me
+	.if nb <baseval>
+	.list me
+	.psect	genval	,ro,d,lcl,rel,con
+baseval:
+	.psect	gendsp	,ro,d,lcl,rel,con
+basedsp:
+	.word	default
+	.nlist me
+	.iff
+	.list me
+	.psect	genval	,ro,d,lcl,rel,con
+	.nlist me
+	  .if b  <val>
+	  .byte	 0
+	  .even
+	  .iff
+	  .byte	 val
+	  .list	 me
+	  .psect gendsp	,ro,d,lcl,rel,con
+	  .nlist me
+	  .word	 dsp
+	  .endc
+	.endc
+	.list me
+	.restore
+	.nlist me
+	.endm
+
+
+	.sbttl	Local data
+
+	.psect	$pdata
+C20$:	.asciz	" block(s) copied to "
+C110$:	.asciz	"DK  --> "
+delmsg:	.asciz	" deleted"
+exitxt:	.asciz	<cr><lf>"%KRTSER-I-Server stopped"<cr><lf>
+htxt:  .ascii "The following commands are available on this Kermit-11"<cr><lf>
+       .ascii "server.  To avoid ambiguity with local Kermit commands"<cr><lf>
+       .ascii "most of these server commands must be prefixed by the"<cr><lf>
+       .ascii "REMOTE keyword."<cr><lf><lf>
+	.ascii	"REMOTE COPY	Copy a file to another"<cr><lf>
+	.ascii	"REMOTE CWD	Changes server default"<cr><lf>
+	.ascii	"REMOTE DELETE	Erases specified  file"<cr><lf>
+	.ascii	"REMOTE DIR	Displays  a  directory"<cr><lf>
+	.ascii	"FINISH		Exit server, reconnect"<cr><lf>
+	.ascii	"GET		Send file(s) to remote"<cr><lf>
+	.ascii	"REMOTE HELP	Prints this  help text"<cr><lf>
+	.ascii	"REMOTE RENAME	Rename old file to new"<cr><lf>
+	.ascii	"SEND		Send file(s) to server"<cr><lf>
+	.ascii	"REMOTE SPACE	Shows blocks used/free"<cr><lf>
+	.ascii	"REMOTE TYPE	Types a specified file"<cr><lf>
+	.byte	0
+invarg:	.asciz	"?KRTSER-E-Invalid arguments for remote server command"
+notimp:	.asciz	"?KRTSER-W-Unimplemented server command"
+notgen:	.asciz	"?KRTSER-W-Unimplemented server generic command"
+R20$:	.asciz	"1 file renamed"
+serpre:	.asciz	"%KRTSER-I-Server starting"
+sertxt:	.ascii	".  Return to your local machine by typing"<cr><lf>
+	.ascii	"its escape sequence for closing the connection,"
+	.ascii	" then issue further"<cr><lf>
+	.ascii	"commands from there.  To shut down the server,"
+	.ascii	" use the BYE command"<cr><lf>
+	.asciz	"to logout, or the FINISH command and then reconnect."
+typdef:	.asciz	".LST"
+	.even
+
+
+	.psect	$code
+	.sbttl	Call the server
+
+c$serv::tstb	@argbuf
+	beq	1$
+	mov	#er$ser	,r0
+	br	90$
+
+1$:	wrtall	#serpre
+	tst	infomsg
+	beq	30$
+	wrtall	#sertxt
+
+30$:	.newline
+	call	seropn
+	tst	r0
+	bne	99$
+	call	server
+	wrtall	#exitxt
+	br	99$
+
+90$:	direrr	r0
+99$:	clr	r0
+	jmp	clostt
+
+
+	.sbttl	Server main_loop
+
+server::clr	paknum
+	textsrc
+	mov	#defchk	,chktyp
+	mov	#1	,chksiz
+	mov	$image	,image
+	clr	summary
+	clr	dirflg
+	call	fixchk
+	mov	serwai	,sertim
+	bit	#log$pa	,trace
+	beq	3$
+	calls	putrec	,<#0,#0,#lun.lo>
+	tst	r0
+	beq	3$
+	call	logerr
+3$:	rpack	r2 ,r3	,#packet,#maxlng
+	clr	sertim
+	movb	sentim	,senpar+p.time
+	scan	r1	,#sercom
+	asl	r0
+	jsr	pc	,@serdsp(r0)
+	tst	r0
+	beq	server
+
+100$:	calls	suspend	,<#1>
+	jmp	clrcns
+
+	dispat	basedsp=serdsp	,baseval=sercom	,default=serv.$
+
+	dispat	MSG$SND		,serv.s
+	dispat	MSG$RCV		,serv.r
+	dispat	MSG$GENERIC	,serv.g
+	dispat	MSG$SER		,serv.i
+	dispat	TIMOUT		,serv$$
+	dispat	BADCHK		,serchk
+	dispat	MSG$NAK		,serv$$
+	dispat	MSG$ACK		,serv$$
+	dispat	MSG$COMMAND	,serv.$
+	dispat	MSG$ERROR	,sernop
+	dispat
+
+
+	.sbttl	Server routines
+
+serv.$:	strlen	#notimp
+	spack	#msg$error,paknum,r0,#notimp
+	clr	r0
+	return
+
+serv$$:
+serchk:	mov	r3	,paknum
+	spack	#msg$nak,paknum
+sernop:	clr	r0
+	return
+
+serv.i:	mov	r3	,paknum
+	calls	rpar	,<#packet,r2>
+	calls	spar	,<#packet>
+	spack	#msg$ack,paknum,sparsz,#packet
+	clr	r0
+	jmp	inirepeat
+
+serv.s:	mov	r3	,paknum
+	calls	rpar	,<#packet,r2>
+	calls	spar	,<#packet>
+	spack	#msg$ack,paknum,sparsz,#packet
+	call	inirepeat
+	incm64	paknum
+	calls	rec.sw	,<#sta.fil>
+	clr	r0
+	return
+
+serv.r:	calls	bufunp	,<#packet,#spare1>
+	clrb	spare1(r1)
+	upcase	#spare1
+	calls	fparse,<#spare1,#srcnam>
+	tst	r0
+	bne	90$
+	calls	fixwild	,<#srcnam>
+	clr	index
+	call	getnxt
+	tst	r0
+	bne	100$
+	calls	sen.sw	,<#sta.sin>
+	br	100$
+
+90$:	call	generr
+100$:	clr	r0
+	return
+
+
+	.sbttl	Generic command processor
+
+serv.g:	clr	at$len
+	sub	#200	,sp
+	mov	sp	,r2
+	copyz	#packet	,r2	,#176
+	calls	bufunp	,<r2,#packet>
+	add	#200	,sp
+	movb	packet+0,r2
+	scan	r2	,#gencom
+	asl	r0
+	jmp	@gendsp(r0)
+
+	dispat	basedsp=gendsp	,baseval=gencom	,default=gen.$
+
+	dispat	GN$LOGIN	,gen.$
+	dispat	GN$EXIT		,gen.f
+	dispat	GN$CONNECT	,gen.c
+	dispat	GN$BYE		,gen.l
+	dispat	GN$DIRECTORY	,gen.d
+	dispat	GN$DISK		,gen.u
+	dispat	GN$DELETE	,gen.e
+	dispat	GN$SUBMIT	,gen.$
+	dispat	GN$WHO		,gen.$
+	dispat	GN$SEND		,gen.$
+	dispat	GN$HELP		,gen.h
+	dispat	GN$QUERY	,gen.$
+	dispat	GN$RENAME	,gen.r
+	dispat	GN$COPY		,gen.k
+	dispat	GN$PRINT	,gen.$
+	dispat	GN$PROGRAM	,gen.$
+	dispat	GN$JOURNAL	,gen.$
+	dispat	GN$VARIABLE	,gen.$
+	dispat	GN$TYPE		,gen.t
+	dispat
+
+
+	.sbttl	Kermit generic routines
+
+gen.$:	strlen	#notgen
+	spack	#msg$error,paknum,r0,#notgen
+	clr	r0
+	return
+
+gen.f:	spack	#msg$ack,paknum
+	mov	sp	,r0
+	jmp	clostt
+
+gen.l:	spack	#msg$ack,paknum
+	call	clostt
+	bit	#log$op	,trace
+	beq	20$
+	calls	close	,<#lun.lo>
+20$:	jmp	exit
+
+
+	.sbttl	Generic COPY
+
+gen.k:	call	get2ar
+	bcs	90$
+	upcase	r1
+	upcase	r2
+	calls	fparse	,<r1,#srcnam>
+	clr	index
+	calls   lookup  ,<#srcnam,#spare1>
+	.purge	#lun.sr
+	calls	copy	,<r1,r2>
+	tst	r0
+	bne	80$
+	sub	#50	,sp
+	mov	sp	,r3
+	deccvt	r1 ,r3	,#5
+	add	#5	,r3
+	strcpy	r3	,#C20$
+	strcat	r3	,#filnam
+	mov	sp	,r3
+	strlen	r3
+	spack	#msg$ack,paknum,r0,r3
+	add	#50	,sp
+	br	100$
+
+80$:	call	generr
+	br	100$
+
+90$:	calls	error	,<#1,#invarg>
+100$:	clr	r0
+	return
+
+
+	.sbttl	Generic CWD
+
+gen.c:	mov	#packet+1,r1
+	unchar	(r1)+	,r2
+	bne	31$
+	strcpy	#defdir	,#dkname
+	br	55$
+
+31$:	add	r1	,r2
+	dec	r2
+	cmpb	(r2)+	,#':
+	beq	32$
+	movb	#':	,(r2)+
+
+32$:	clrb	@r2
+	upcase	r1
+	calls	fparse,<r1,#spare1>
+	tst	r0
+	bne	70$
+	strcpy	#defdir	,#spare1
+
+55$:	sub	#40	,sp
+	mov	sp	,r2
+	strcpy	r2	,#C110$
+	strcat	r2	,#defdir
+	strlen	r2
+	spack	#msg$ack,paknum,r0,r2
+	add	#40	,sp
+	br	100$
+
+70$:	call	generr
+100$:	clr	r0
+	return
+
+
+	.sbttl	Generic DELETE
+
+gen.e:	mov	#packet+1,r1
+	unchar	(r1)+	,r2
+	bne	10$
+	clrb	@r1
+10$:	upcase	r1
+	calls	delete	,<r1,#lun.ou>
+	tst	r0
+	beq	80$
+	call	generr
+	br	100$
+
+80$:	strcpy	#errtxt	,#srcnam
+	strcat	#errtxt	,#delmsg
+	strlen	#errtxt
+	spack	#msg$ack,paknum,r0,#errtxt
+
+100$:	clr	r0
+	return
+
+
+	.sbttl	Generic DIRECTORY and SPACE
+
+gen.u:	mov	sp	,summary
+gen.d:	mov	#packet+1,r1
+	unchar	(r1)+	,r2
+	add	r1	,r2
+	clrb	@r2
+	upcase	r1
+	calls	fixwild	,<r1>
+	calls	sdirini	,<r1>
+	tst	r0
+	bne	99$
+10$:	mov	#sdodir	,getcroutine
+	mov	#null	,r0
+	call	xreply
+	tst	r0
+	beq	100$
+
+99$:	call	generr
+100$:	clr	r0
+	return
+
+
+	.sbttl	Generic HELP
+
+gen.h:	textsrc	#htxt
+	mov	#null	,r0
+	call	xreply
+	clr	r0
+	return
+
+
+	.sbttl	Generic RENAME
+
+gen.r:	call	get2ar
+	bcs	90$
+	upcase	r1
+	upcase	r2
+	calls	rename	,<r1,r2,#-1>
+	tst	r0
+	bne	80$
+	strlen	#R20$
+	spack	#msg$ack,paknum,r0,#R20$
+	br	100$
+
+80$:	call	generr
+	br	100$
+
+90$:	calls	error	,<#1,#invarg>
+100$:	clr	r0
+	return
+
+
+	.sbttl	Generic TYPE
+
+gen.t:	mov	#packet+1,r1
+	unchar	(r1)+	,r2
+	beq	12$
+	add	r1	,r2
+	clrb	@r2
+	upcase	r1
+
+	scan	#'.	,r1
+	tst	r0
+	bne	10$
+	strcat	r1	,#typdef
+
+10$:	calls	iswild	,<r1>
+	tst	r0
+	bne	20$
+
+	calls	fparse,<r1,#spare1>
+	tst	r0
+	beq	30$
+
+	mov	#er$dev	,r0
+	br	20$
+12$:	mov	#er$fnm	,r0
+20$:	call	generr
+	br	100$
+
+30$:	mov	#spare1	,r0
+	call	xreply
+100$:	clr	r0
+	return
+
+
+	.sbttl	Generic command error handler
+
+generr:	calls	syserr	,<r0,#errtxt>
+	calls	error	,<#1,#errtxt>
+	clr	r0
+	return
+
+
+	.sbttl	Get pointers for a two argument server command
+
+get2ar:	save	<r3,r4>
+	mov	#packet+1,r3
+	tstb	@r3
+	beq	90$
+	unchar	(r3)+	,r4
+	beq	90$
+	mov	r3	,r1
+	add	r4	,r3
+	tstb	@r3
+	beq	90$
+	unchar	(r3)+	,r4
+	beq	90$
+	mov	r3	,r2
+	clrb	-(r3)
+	clc
+	br	100$
+90$:	sec
+100$:	unsave	<r4,r3>
+	return
+
+
+	.sbttl	Buffil but get data from a buffer
+
+bufpak::mov	2(r5)	,r4
+	mov	@r5	,r5
+	clr	r3
+
+10$:	clr	r1
+	bisb	(r5)+	,r1
+	beq	90$
+	clr	r2
+	bisb	r1	,r2
+	bic	#^c177	,r2
+	cmpb	r2	,#space
+	blo	20$
+	cmpb	r2	,#del
+	beq	20$
+	cmpb	r2	,senpar+p.qctl
+	bne	40$
+
+20$:	movb	senpar+p.qctl,(r4)+
+	inc	r3
+	cmpb	r2	,senpar+p.qctl
+	beq	30$
+	ctl	r1	,r1
+	ctl	r2	,r2
+30$:
+40$:	tst	image
+	beq	50$
+	movb	r1	,(r4)+
+	br	60$
+50$:	movb	r2	,(r4)+
+60$:	inc	r3
+
+70$:	clr	-(sp)
+	bisb	conpar+p.spsiz,@sp
+	bne	80$
+	 mov	#maxpak	,@sp
+80$:	sub	#10	,@sp
+	cmp	r3	,(sp)+
+	blo	10$
+
+90$:	mov	r3	,r1
+	return
+
+
+	.sbttl	Initialize for an extended reply to a generic command
+
+xreply:	strcpy	#srcnam	,r0
+	clrb	filnam
+	tstb	srcnam
+	beq	20$
+	clr	index
+	call	getnxt
+	tst	r0
+	bne	30$
+20$:	mov	sp	,xmode
+	calls	sen.sw	,<#sta.fil>
+30$:	clr	xmode
+	clr	xgottn
+	clr	r0
+100$:	textsrc
+	return
+
+
+	.sbttl	Open link and flush NAKs
+
+seropn:	save	<r1>
+	call	opentt
+	tst	r0
+	bne	11$
+	call	cantyp
+11$:	unsave	<r1>
+	return
+
+
+	.sbttl	Server init
+
+sinfo:	save
+	bit	#log$pa	,trace
+	beq	3$
+	calls	putrec	,<#0,#0,#lun.lo>
+	tst	r0
+	beq	3$
+	call	logerr
+3$:	clr	numtry
+	clr	paknum
+	movb	#msg$ser,-(sp)
+	call	.sinit
+	unsave
+	return
+
+	.end

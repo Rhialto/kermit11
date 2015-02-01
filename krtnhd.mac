@@ -1,0 +1,84 @@
+	.sbttl	KRTNHD	EIS macros for a non-EIS CPU
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	Assemble Kermit-11 modules with this for use on a
+;	non-EIS CPU.  This calls p$mul and p$div, assembly
+;	of which into KRTSUB depends on defining "NONEIS".
+;	KRTASM.NON assembles everything for non-EIS use.
+
+;	10-Apr-84  09:37:15  Brian Nelson
+
+	NONEIS	=	1		; force p$mul,p$div into KRTSUB.MAC
+
+	.macro	mul	src,reg		; single precision
+	.ntype	$$	,reg		; save number of input register
+	mov	src	,-(sp)		; pass multiplier to p$mul
+	mov	reg	,-(sp)		; pass multiplicand too
+	call	p$mul			; multiply, returns a 16-bit product
+	.iif eq <$$-1>	mov	(sp)+	,r1	; ..if input register was r1
+	.iif eq <$$-3>	mov	(sp)+	,r3	; ditto if r3
+	.iif eq <$$-5>	mov	(sp)+	,r5	; ditto if r5
+	.iif ne <<$$+1>&1> .error      <; bad dst reg for MUL macro>
+	.endm	mul
+
+	.macro	div	src,reg		; /BBS/ made this double precision
+	.ntype	$$	,reg		; # of register with dividend hi word
+	mov	src	,-(sp)		; divisor
+	.if eq $$			; hi word is in r0
+	mov	r1	,-(sp)		; dividend low word
+	mov	r0	,-(sp)		; dividend high word
+	.endc
+	.if eq $$-2			; hi word is in r2
+	mov	r3	,-(sp)
+	mov	r2	,-(sp)
+	.endc
+	.if eq $$-4			; hi word is in r4
+	mov	r5	,-(sp)
+	mov	r4	,-(sp)
+	.endc
+	call	p$div			; divide
+	.if eq $$			; using r0..
+	mov	(sp)+	,r1		; remainder
+	mov	(sp)+	,r0		; this only returns a 16-bit quotient
+	.endc
+	.if eq $$-2			; using r2..
+	mov	(sp)+	,r3
+	mov	(sp)+	,r2
+	.endc
+	.if eq $$-4			; using r4..
+	mov	(sp)+	,r5
+	mov	(sp)+	,r4
+	.endc
+	.endm	div
+
+	.macro	sob	reg,dst		; subtract one and branch if not zero
+	dec	reg
+	bne	dst
+	.endm	sob
+
+	.macro	ash	amount,reg	; arithmetic shift
+	.ntype	$$$0	,amount
+	.iif ne <27-$$$0> .error       <; must be auto pc for ASH macro>
+	$$type	= 1			; assume left shift
+	$$size	= 0			; how many ASLs or ASRs to generate
+	  .irpc	$a ,<amount>		; parse the first argument
+	  $c	= ''$a			; get the character as a literal
+	  .iif eq <$c - '-> $$type = -1	; if a minus sign then assume right
+	  .iif eq <$c - '.> .error     <; only use octal in ASH macro please>
+	  .iif eq <$c - '^> .error     <; only use octal in ASH macro please>
+	  $c	= $c - '0		; check for a digit now
+	    .if ge $c			; perhaps a digit
+	      .if le $c-7		; got a digit
+	      $$size = <$$size*10>+$c	; add into accumulator
+	      .endc
+	    .endc
+	  .endr
+	.rept	$$size
+	.iif gt <$$type>  asl	reg
+	.iif lt <$$type>  asr	reg
+	.endr
+	.endm

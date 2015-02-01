@@ -1,0 +1,39 @@
+!  27-Sep-97	assemble KRT V03.63 modules for a NON-EIS CPU..
+ass dk in
+r macro
+krtatr=krtnhd,krtatr
+krtcmd=krtnhd,krtcmd
+krtcm1=krtnhd,krtcm1
+krtcom=krtnhd,krtcom
+krtcon=krtnhd,krtcon
+krtcvt=krtnhd,krtcvt
+krtdat=krtnhd,krtdat
+krtdeb=krtnhd,krtdeb
+krtdia=krtnhd,krtdia
+krtdir=krtnhd,krtdir
+krtdsp=krtnhd,krtdsp
+krtedi=krtnhd,krtedi
+krterm=krtnhd,krterm
+krterr=krtnhd,krterr
+krthlp=krtnhd,krthlp
+krtidx=krtnhd,krtidx
+krtini=krtnhd,krtini
+krtmdm=krtnhd,krtmdm
+krtosi=krtnhd,krtosi
+krtpak=krtnhd,krtpak
+krtrec=krtnhd,krtrec
+krtrms=krtnhd,krtrms
+krtsen=krtnhd,krtsen
+krtser=krtnhd,krtser
+krtsho=krtnhd,krtsho
+krtsj=krtnhd,krtsj
+krtstd=krtnhd,krtstd
+krtst0=krtnhd,krtst0
+krtst1=krtnhd,krtst1
+krtsub=krtnhd,krtsub
+krttra=krtnhd,krttra
+krtutl=krtnhd,krtutl
+krtxl=krtnhd,krtxl
+krtxm=krtnhd,krtxm
+krtxmo=krtnhd,krtxmo
+^C

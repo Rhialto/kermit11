@@ -1,0 +1,43 @@
+	.sbttl	KRTSJ	Build KM for RT-11FB,SB,SJ
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+
+	mmg$t	= 0	; if <> support extended memory
+	tsx$p	= 0	; if <> support TSX-Plus
+	tim$it	= 0	; these two MUST match the monitor as it is or
+	erl$g	= 0	; RT-11 V5.5 or above will not load this handler!
+
+;	If you are unsure of whether erl$g and tim$it are in the RT-11
+;	monitor(s) to be used, boot each in question and use RESORC to
+;	check:
+;
+;	.RESORC/O
+;
+;	If you see:			Then:
+;	Device I/O timeout support	you must make tim$it = 1
+;	Error logging support		you must make erl$g = 1
+;
+;	If the interface supports programmable speed selection,
+;	enable it by making its type = 1 here.  Otherwise, make
+;	the following three = 0.  These are mutually exclusive,
+;	up to one and only one may be used at a time:
+
+	km$dve	= 0	; if <> DL(V)-11/E interface
+	km$pro	= 0	; if <> PRO-series modem interface
+	km$sbc	= 0	; if <> Falcon interface
+
+	km$csr = 176500	; if not PRO-series, desired CSR
+	km$vec = 300	; and interrupt vector (PRO defaults are in KRTKM.MAC)
+
+	km$pdt	= 0	; if <> display flow control status on PDT-11 LEDs
+			; LED #1 = XOFF sent, LED #2 = received an XOFF
+
+;	Speed default, select one of the following:
+
+;	km$spd = 300.
+;	km$spd = 1200.
+; 	km$spd = 2400.
+;	km$spd = 4800.
+	km$spd = 9600.		; <default>
+;	km$spd = 19200.
+;	km$spd = 38400.		; Falcon ONLY

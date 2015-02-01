@@ -1,0 +1,75 @@
+	.sbttl	KRTDEF.MIN  Packet types (edited from VMS Kermit)
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+	.sbttl	Protocol V1.0 message types
+
+MSG$ACK		=: 'Y&137
+MSG$BREAK	=: 'B&137
+MSG$DATA	=: 'D&137
+MSG$EOF		=: 'Z&137
+MSG$ERROR	=: 'E&137
+MSG$FILE	=: 'F&137
+MSG$NAK		=: 'N&137
+MSG$SND		=: 'S&137
+
+	.sbttl	Protocol V2.0 message types
+
+MSG$COMMAND	=: 'C&137
+MSG$GENERIC	=: 'G&137
+MSG$KERMIT	=: 'K&137
+MSG$RCV		=: 'R&137
+
+	.sbttl	Protocol V4.0 message types
+
+MSG$ATR		=: 'A&137
+MSG$SER		=: 'I&137
+MSG$TEXT	=: 'X&137
+
+	.sbttl	Generic Kermit commands
+
+GN$BYE		=: 'L&137
+GN$CONNECT	=: 'C&137
+GN$COPY		=: 'K&137
+GN$DELETE	=: 'E&137
+GN$DIRECTORY	=: 'D&137
+GN$DISK		=: 'U&137
+GN$EXIT		=: 'F&137
+GN$HELP		=: 'H&137
+GN$JOURNAL	=: 'J&137
+GN$LOGIN	=: 'I&137
+GN$PRINT	=: 'P&137
+GN$PROGRAM	=: 'P&137
+GN$QUERY	=: 'Q&137
+GN$RENAME	=: 'R&137
+GN$SEND		=: 'M&137
+GN$SUBMIT	=: 'S&137
+GN$TYPE		=: 'T&137
+GN$VARIABLE	=: 'V&137
+GN$WHO		=: 'W&137
+
+	.sbttl	Acknowledgment modifiers (V4.0)
+
+ABT$ALL		=: 'Z&137
+ABT$CUR		=: 'X&137
+ABT$ERROR	=: 'E&137
+
+	.sbttl	End of file packet modifier
+
+EOF$DISCARD	=: 'D&137
+
+	.sbttl	Send/receive states
+
+STA.CCA		=:  100
+STA.ABO		=: 'A&137
+STA.ATR		=: 'H&137
+STA.BRK		=: 'B&137
+STA.COM		=: 'C&137
+STA.DAT		=: 'D&137
+STA.EOF		=: 'Z&137
+STA.FIL		=: 'F&137
+STA.INI		=: 'I&137
+STA.RIN		=: 'R&137
+STA.SIN		=: 'S&137
+STA.TYP		=: 'X&137

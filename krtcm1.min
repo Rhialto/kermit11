@@ -1,0 +1,361 @@
+	.title	KRTCM1.MIN  Misc commands overlay
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1983,1984 Change Software, Inc.
+;
+;	This software is furnished under a license and may
+;	be  used  and  copied  only in accordance with the
+;	terms of such license and with  the  inclusion  of
+;	the  above copyright notice.  This software or any
+;	other copies thereof may not be provided or other-
+;	wise made available to any other person.  No title
+;	to and ownership of the software is hereby  trans-
+;	ferred.
+;
+;	The information in this  software  is  subject  to
+;	change  without notice and should not be construed
+;	as a commitment by the author.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.mcall	.PURGE
+
+
+	.psect	$code
+	.sbttl	The SET command
+
+c$set::	upone	argbuf
+	call	loaset
+	calls	getcm0	,<argbuf,r0>
+	mov	r0	,r2
+	bmi	79$
+	tst	wasnul
+	bne	100$
+	call	loaset
+	calls	getcm1	,<argbuf,r0,r2>
+	tst	r0
+	bmi	79$
+
+7$:	scan	#comma	,argbuf
+	mov	r0	,restof
+	beq	17$
+	add	argbuf	,restof
+	mov	restof	,r0
+	clrb	-(r0)
+	mov	r1	,lastcmd
+
+17$:	jsr	pc	,@r1
+	tst	r0
+	bne	29$
+	mov	restof	,r0
+	beq	100$
+173$:	cmpb	(r0)+	,#space
+	beq	173$
+	dec	r0
+177$:	copyz	r0  ,argbuf  ,#ln$max
+	mov	lastcmd	,r1
+	br	7$
+
+29$:	cmp	r0	,#cmd$un
+	blt	89$
+	bgt	37$
+	mov	#er$aop	,r0
+	br	89$
+37$:	cmp	r0	,#cmd$bad
+	bne	79$
+	mov	#er$bad	,r0
+	br	89$
+
+79$:	cmp	r0	,#cmd$ab
+	beq	99$
+	cmp	r0	,#cmd$nx
+	beq	99$
+	cmp	r0	,#cmd$ex
+	beq	99$
+	cmp	r0	,#cmd$un
+	bne	81$
+	mov	#er$sam	,r0
+	br	89$
+81$:	cmp	r0	,#cmd$bad
+	bne	89$
+	mov	#er$sun	,r0
+89$:	direrr	r0
+99$:	call	incsts
+100$:	return
+
+skipit::tst	restof
+	beq	23$
+	strlen	argbuf
+	add	argbuf	,r0
+	movb	#comma	,(r0)+
+	copyz	restof	,r0  ,#ln$max
+	clr	restof
+23$:	return
+
+
+	.sbttl	The TAKE command
+	.enabl	lsb
+
+c$take::tst	cmdlun
+	beq	9$
+	tst	sy.ini
+	beq	5$
+	call	defterm
+	br	7$
+
+5$:	tst	infomsg
+	beq	7$
+6$:	wrtall	#indnam
+	message	< closed>,cr
+7$:	calls	close	,<#lun.ta>
+	clr	cmdlun
+
+9$:	clr	r4
+	upcase	argbuf
+
+	scan	#'.	,argbuf
+	tst	r0
+	bne	10$
+	strcat	argbuf	,#takdef
+
+10$:	scan	#':	,argbuf
+	tst	r0
+	beq	11$
+	copyz	argbuf	,#indnam,#16+1
+	br	12$
+
+11$:	mov	#202$	,r3
+	mov	sp	,r4
+210$:	tst	@r3
+	beq	220$
+	copyz	argbuf	,(r3)+	,#11.
+	br	210$
+
+220$:	mov	#201$	,r3
+225$:	tst	@r3
+	bne	227$
+	mov	#er$fnf	,r0
+	br	95$
+
+227$:	copyz	(r3)+	,#indnam,#16+1
+
+12$:	calls	fparse	,<#indnam,#srcnam>
+	tst	r0
+	bne	95$
+
+13$:	calls	iswild	,<#srcnam>
+	tst	r0
+	bne	95$
+
+17$:	calls	open,<#srcnam,#lun.ta,#text>
+	tst	r0
+	bne	90$
+20$:	mov	#lun.ta	,cmdlun
+	copyz	#srcnam	,#indnam ,#16+1
+	tst	infomsg
+	beq	29$
+	wrtall	#indnam
+	message	< opened>,cr
+29$:	clr	exstal
+	br	100$
+
+90$:	tst	r4
+	bne	225$
+95$:	direrr	r0
+	call	incsts
+	clrb	indnam
+100$:	return
+
+	.save
+	.psect	$rwdata	,rw,d,lcl,rel,con
+201$:	.word	500$ ,600$ ,0
+202$:	.word	501$ ,601$ ,0
+500$:	.ascii	"DK:"
+501$:	.asciz	"            "
+600$:	.ascii	"SY:"
+601$:	.asciz	"            "
+	.even
+
+	.psect	$pdata
+takdef::.asciz	".COM"
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Local DIRECTORY and SPACE commands
+
+c$spac::mov	sp	,summary
+c$dir::	upcase	argbuf
+	calls	fixwild	,<argbuf>
+	calls	dodir	,<argbuf>
+	tst	r0
+	beq	100$
+	direrr	r0
+100$:	return
+
+
+	.sbttl	The local TYPE command
+	.enabl	lsb
+
+c$type::upcase	argbuf
+	calls	fparse	,<argbuf,#srcnam>
+	tst	r0
+	beq	1$
+	jmp	90$
+
+1$:	clr	index
+	scan	#'.	,#srcnam
+	tst	r0
+	bne	2$
+	strcat	#srcnam	,#typdef
+
+2$:	calls	iswild	,<#srcnam>
+	mov	r0	,r4
+
+3$:	calls	lookup	,<#srcnam,#filnam>
+	tst	r0
+	beq	4$
+	clr	r1
+	cmp	r0	,#er$nmf
+	beq	20$
+	cmp	r0	,#er$fnf
+	bne	993$
+20$:	tst	index
+	beq	21$
+	jmp	95$
+21$:	mov	#er$fnf	,r0
+993$:	jmp	93$
+
+4$:	mov	#more	,r3
+	clr	r1
+	calls	chkext	,<#filnam>
+	tst	r0
+	beq	5$
+	mov	#less	,r3
+	inc	r1
+
+5$:	clr	r2
+	calls	open,<#filnam,#lun.in,r1>
+	tst	r0
+	bne	90$
+	com	r2
+	tst	r4
+	beq	7$
+	cmp	index	,#1
+	bne	7$
+	message	< Files copied:>,cr
+7$:	tst	r1
+	beq	8$
+	message	<?TYPE-W-Binary file filter enabled>,cr
+8$:	tst	r4
+	beq	9$
+	wrtall	#filnam
+	message	< to TT:>,cr
+9$:	calls	open,<#0,#lun.kb,r1>
+
+10$:	mov	#lun.in	,r0
+	call	getcr0
+	tst	r0
+	bne	90$
+	cmp	vttype	,#vt200
+	bge	22$
+	bicb	#200	,r1
+22$:	cmpb	r1	,#space
+	bge	33$
+23$:	scan	r1	,r3
+	tst	r0
+	beq	10$
+
+33$:	asr	crflag
+	bcc	37$
+	cmpb	r1	,#lf
+	beq	37$
+	calls	putc	,<#lf,#lun.kb>
+37$:	cmpb	r1	,#cr
+	bne	39$
+	inc	crflag
+39$:	calls	putc	,<r1,#lun.kb>
+	br	10$
+
+90$:	mov	r0	,r1
+	cmp	r0	,#er$eof
+	beq	95$
+93$:	direrr	r0
+	clr	r1
+95$:	calls	close	,<#lun.kb>
+97$:	tst	r2
+	beq	100$
+	calls	close	,<#lun.in>
+100$:	cmp	r1	,#er$eof
+	bne	101$
+	.newline
+	jmp	3$
+101$:	.purge	#lun.sr
+	clr	r0
+	return
+
+	.save
+	.psect	$pdata
+less:	.asciz	<cr><lf>
+more:	.asciz	<bell><bs><tab><cr><ff><lf><ctrl$n><ctrl$o><esc>
+typdef:	.asciz	".LST"
+	.even
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+crflag:	.word	0
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	SHOW LINE
+	.enabl	lsb
+
+defterm::tst	infomsg
+	beq	1$
+	wrtall	#indnam
+	message	< closed>,cr
+1$:	tst	signon
+	bne	3$
+	call	sho$line
+3$:	mov	qu.ini	,infomsg
+	clr	sy.ini
+	return
+
+sho$li::message	<Link device is TT:   S/W Parity: >
+	mov	parity	,r0
+	asl	r0
+	wrtall	parlst(r0)
+	.newline
+	mov	sp	,signon
+	clr	r0
+	return
+
+	.save
+	.psect	$pdata
+parlst:	.word	5$ ,10$ ,20$ ,30$ ,40$
+5$:	.asciz	"NONE"
+10$:	.asciz	"ODD"
+20$:	.asciz	"EVEN"
+30$:	.asciz	"MARK"
+40$:	.asciz	"SPACE"
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Cleanup before exiting to monitor
+
+c$exit::call	sd$off
+	tst	outopn
+	beq	30$
+	calls	close	,<#lun.ou>
+30$:	jmp	exit
+
+	.end

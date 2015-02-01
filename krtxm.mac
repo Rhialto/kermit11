@@ -1,0 +1,28 @@
+	.title	KRTXM	Kermit-11 root module for RT-11XB,XM,ZB,ZM or TSX-Plus
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	for EXTENDED MEMORY OVERLAYS
+
+;	19-May-86  Brian Nelson
+
+	.ASECT
+. = 44					  ; job status word
+	.word	2000			  ; set the virtual image bit
+. = 56					  ; TSX-Plus set size location
+	.word	40			  ; SETSIZ KRTTSX/T:64.
+
+	.psect	$RTQUE	,rw,d,gbl,rel,con ; MUST be in root
+	.psect	HNBUFF	,rw,d,lcl,rel,con ; MUST be in root
+xmflow::.word	0			  ; use LINK's /E:nnnn to expand
+	.psect	HNBEND	,rw,d,lcl,rel,con ; MUST be in root
+xmftop::.word	0			  ; end of the line for XM fetching..
+	.psect	IMGTYPE	,ro,d,lcl,rel,con
+imgtyp::.word	1			  ; /62/ flag it's the XM image
+$limit::.limit				  ; /62/ in root for separate I&D assy
+	.psect	USERMD	,rw,d,gbl,rel,con
+	.psect	XMSTART	,ro,i,lcl,rel,con
+xmstart::jmp	kermit			  ; force transfer address here
+
+	.end	xmstart

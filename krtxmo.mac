@@ -1,0 +1,452 @@
+	.title	KRTXMO	XMODEM, SEND command interface
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	disallow sends from TT (not supported, makes Kermit hang)..
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	move command interface here from KRTCM1
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+; This module uses xmodem written by Chuck Sadoian, Dinuba, CA
+
+; Xmodem here supports either checksum or CRC error detection, however it
+; only does so one file at a time, using 128 byte blocks, under TSX-Plus.
+; Transmission is presently only on the controlling terminal (this Kermit
+; must be the remote system) and is also SEND-only from here to the other
+; system, because the TSX-Plus terminal handler does not pass nulls (zero
+; bytes) to a running program.
+;
+; The Xmodem protocol requires an 8-bit path.  If this isn't the system's
+; default, you must from KMON issue the command SET TT 8BIT,BITS=8 before
+; running Kermit.  "BITS=8" is a hardware parameter and must be done on a
+; primary line only.  Setting it on a subprocess may write garbage in the
+; line_parameters word, rendering the line useless.
+;
+; Xmodem doesn't work under RT-11 because RT strips all terminal I/O data
+; of the high order (parity) bit, thus preventing an 8-bit data path from
+; being used.
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+	.include "IN:KRTDEF.MAC"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MAC failed>
+
+	.mcall	.CMKT	,.MRKT	,.PURGE	,.SCCA
+	.mcall	.READW	,.TTINR	,.TTYOUT,.TWAIT
+
+
+	.macro	beep2
+	wrtall	#$beep2			; make the terminal beep twice
+	.endm	beep2
+
+
+	.sbttl	Local data
+
+	ACK	= 6			; acknowledge packet (ok)
+	CAN	= 30			; cancel transfer
+	CRC	= 1			; bit mask CRC enabled
+	EOT	= 4			; end of transmission
+	NAK	= 25			; negative acknowledge (not ok)
+	NKWAIT	= 13.			; initial wait for first NAK in secs
+
+	.psect	xmodat	,rw,d,lcl,rel,con
+aflag:	.word	0			; abort flag
+blkcnt:	.word	0			; for .readw, block just read
+block:	.word	0			; file size in RT-11 blocks
+bytcnt:	.word	0			; number of bytes in input buffer
+chksum:	.word	0			; checksum
+hieff:	.byte	0 ,120			; high efficiency terminal mode emt
+marea:	.word	0 ,0 ,0 ,0		; .mrkt work area
+mtime:	.word	0 ,0			; nkwait in ticks lives here
+nosingle:.byte	0 ,152
+	.word	'T&137,0		; turn off single char mode
+onewide:.byte	0 ,152
+	.word	'Q&137,1		; /62/ activate on field width of 1
+point:	.word	0			; pointer to read buffer
+rbuff:	.word	0			; input file buffer pointer
+single:	.byte	0 ,152
+	.word	'S&137,0		; turn on single char mode
+sizbuf:	.byte	0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ; ascii'd size in xmodem blocks
+tflag:	.word	0			; time-out flag
+ttctlc:	.word	0 ,0 ,0			; for .scca
+wtime:	.word	0 ,6			; 1/10 second (slightly more @ 50Hz)
+xblock:	.word	0 ,0			; file size in xmodem blocks
+xmosts:	.word	0			; status word
+xrecno:	.word	0			; record number for packets
+xtime:	.word	0 ,30.			; wait 0.5sec when finished or abort
+
+	.psect	$pdata			; /63/ consolidate here..
+$beep2:	.byte	bell ,bell ,0		; two bells
+sen.10:	.asciz	<bell>"Send completed"	; /62/
+sen.11:	.asciz	<bell>"Send failed"
+sen.12:	.asciz	'Processing file name "'
+sen.13:	.asciz	'"'
+xmo.01:	.asciz	"File open: "		; tell user about the file
+xmo.02:	.asciz	"["			; size in RT-11 blocks goes here
+xmo.03:	.asciz	"], "			; format the display
+xmo.04:	.ascii	" Xmodem (128 byte) blocks"<cr><lf>	; tag file size
+	.asciz	"Awaiting ready signal (^X aborts).."	; ready to rip..
+xmo.05:	.asciz	"File transfer completed"
+	.even
+
+
+	.psect	$code
+	.sbttl	Send file(s)		; /BBS/ somewhat modified..
+					; /62/ moved here for smaller root
+c$send::clr	wasmore			; init multi-args display flag
+	tst	inopn			; is an input file currently open?
+	beq	10$			; no
+	calls	close	,<#lun.in>	; yes, please close old file up
+10$:	mov	argbuf	,r1		; address of command line buffer
+	tstb	@r1			; anything there?
+	beq	20$			; no
+	call	isitas			; SEND file asfile?  get asname
+	tst	r0			; any parse error?
+	beq	30$			; no
+20$:	mov	#er$snd	,r0		; emit a syntax error message
+	br	50$			; goto error handler
+
+30$:	calls	chk.tt	,<#srcnam>	; /63/ disallow TT as an input dev
+	tst	r0			; /63/ well?
+	bne	50$			; /63/ it was TT
+	tst	wasmore			; working with more than 1 file?
+	beq	40$			; no
+	calls	printm	,<#3,#sen.12,#srcnam,#sen.13> ; ya, say which it is
+40$:	upcase	#srcnam			; upper case the input file name
+	tst	remote			; in remote mode?
+	beq	70$			; no
+	clr	index			; /62/ init lookup's file counter
+	calls	lookup	,<#srcnam,#spare1> ; /62/ look for something to do
+	tst	r0			; /62/ well?
+	beq	60$			; /62/ at least one file exists
+	cmp	r0	,#er$nmf	; if error is "No more files"
+	bne	50$			; then make it say
+	mov	#er$fnf	,r0		; "File not found"
+50$:	direrr	r0			; emit an error message
+	.purge	#lun.sr			; /62/ hose dir search channel
+	br	130$			; go say it's over..
+
+60$:	calls	suspend	,<sendly>	; allow time to start REC at other end
+
+70$:	call	opentt			; open and initialize the link
+	tst	r0			; did it work?
+	bne	120$			; no, error displayed by ttyini
+	call	cantyp			; flush any accumulated NAKs
+80$:	calls	xbinread,<#-1>		; /63/ read with no wait to flush
+	tst	r0			; /63/ any possible junk in buffer
+	beq	80$			; /63/ loop until nothing remains
+	tst	locase			; SET FIL NAM LOWER-CASE?
+	bne	90$			; ya, leave output file name..
+	upcase	#asname			; no, make it upper case
+90$:	clr	index			; /62/ wildcard_file_number := 0
+	call	getnxt			; get the first file name please
+	tst	r0			; did it work?
+	bne	120$			; no, getnxt has sent the error packet
+	mov	sp	,inprogress	; packets are being exchanged
+	calls	sensw	,<#msg$snd>	; now send the file
+	tst	r0			; did it work?
+	bne	120$			; no
+	mov	nextone	,r0		; ya, any more arguments to process?
+	bne	100$			; ya, go do it
+	calls	printm	,<#1,#sen.10>	; no, done
+	br	140$			; note r0 is clear here too
+100$:	cmpb	(r0)	,#space		; is first byte a blank?
+	bne	110$			; no
+	inc	r0			; ya, skip past it
+	br	100$			; and check what is now the first byte
+110$:	copyz	r0 ,argbuf ,#ln$max	; pull up remaining args to top of buf
+	jmp	10$			; /63/ loop back for more
+
+120$:	calls	printm	,<#1,#sen.11>	; it failed, say so if local
+130$:	inc	status			; /45/ flag for batch exit
+140$:	clrb	asname			; /36/ ensure no more alternate names
+	call	clostt			; release the link
+	jmp	clrcns			; /62/ flush TT input, clear r0
+
+
+	.sbttl	XMODEM a file		; /62/ moved this here too..
+
+c$xmodem::tst	tsxsav			; send only, via TT only
+	bne	10$			; must be TSX for this to work
+	mov	#er$tsx	,r0		; say it's not TSX
+	br	60$			; goto error handler
+
+10$:	tst	inopn			; input file currently open?
+	beq	20$			; no
+	calls	close	,<#lun.in>	; yes, please close old file first
+20$:	upcase	argbuf			; upper case all command args
+	mov	argbuf	,r1		; address of command line buffer
+	tstb	@r1			; anybody home?
+	bne	30$			; ya
+	mov	er$wld	,r0		; no, point to err msg
+	beq	60$			; goto error message output
+30$:	mov	#srcnam	,r2		; where to store file name
+40$:	movb	(r1)+	,(r2)+		; copy the name over
+	beq	50$			; can't XMODEM file asfile
+	cmpb	@r1	,#space		; so stop at first space
+	bgt	40$			; next byte
+	clrb	@r2			; ensure source name is asciz
+50$:	calls	iswild	,<#srcnam>	; check for wildcarding
+	tst	r0			; if .ne., then wildcarded
+	bne	60$			; can't process wildcards
+	calls	fparse,<#srcnam,#filnam>  ; parse file name
+	calls	open,<#filnam,#lun.in,#binary>  ; try to open the file
+	tst	r0			; did it work?
+	beq	70$			; ya..
+60$:	direrr	r0			; no.. print mapped error msg
+	call	incsts			; /62/ set global error flag
+	br	80$			; and bail out
+
+70$:	call	x$modem			; run xmodem
+	calls	close	,<#lun.in>	; close file
+	.newline			; ensure prompt is on a newline
+80$:	clr	r0			; any error was already handled
+	return
+
+
+	.sbttl	Initialization
+
+x$modem:.scca	#ttctlc	,#ttctlc+4	; /62/ off ^C
+	.cmkt	#marea	,#40		; and setcc's mark timer
+	clr	xmosts			; clear status word
+	wrtall	#xmo.01			; /63/ "File open: "
+	wrtall	#filnam			; print file specification
+	wrtall	#xmo.02			; /63/ "["
+	mov	#lun.in	,r4		; get I/O channel number
+	asl	r4			; word indexing
+	mov	sizof(r4),r0		; /63/ recover the file size
+	call	L10266			; /63/ dump it to the terminal
+	wrtall	#xmo.03			; /63/ "], "
+	mov	buflst(r4),rbuff	; file input buffer pointer
+	mov	sizof(r4),r1		; get file size
+	mov	r1	,block		; save size of file in blocks
+	clr	r0			; clear hi word
+	asl	r1			; non-eis
+	adc	r0			; 32-bit
+	asl	r1			; multiply
+	adc	r0			; by four
+	mov	r0	,xblock		; save hi word
+	mov	r1	,xblock+2	; save low word
+	clr	r2			; suppress leading 0s in $cddmg output
+	mov	#xblock	,r1		; address of 32-bit number
+	mov	#sizbuf	,r0		; address of out buff for ascii
+	call	$cddmg			; convert 32-bit integer to ascii
+	clrb	@r0			; null terminate the string
+	wrtall	#sizbuf			; and dump it to TT
+	wrtall	#xmo.04			; /63/ tag & say awaiting ready signal
+	call	l$nolf			; /63/
+
+	mov	#nosingle,r0		; single char input dies in hieff mode
+	emt	375			; if activation chars are declared
+	calls	t.ttyini,<#0>		; init TT
+	movb	#1	,hieff		; setup high efficiency emt
+	mov	#hieff	,r0
+	emt	375			; do it
+
+	call	waitnk			; look for the initial NAK
+	tst	aflag			; error detected?
+	bne	abort			; yes, kill transfer
+	clr	blkcnt			; clear block count
+	mov	#1	,xrecno		; init xmodem block count
+	.br	dnload			; /63/
+
+
+	.sbttl	Download
+
+dnload:	call	rdblk			; read some input
+	bcs	eof			; branch if EOF
+10$:	call	sndblk			; send a checksummed block
+	call	getack			; look for ACK from remote
+	tst	aflag			; check result from receiver
+	beq	20$			; zero is an ACKed block
+	cmp	#1	,aflag		; 1 means we NAKed it
+	beq	10$			; so send it again
+	jmp	abort			; else we abort the transfer
+20$:	inc	xrecno			; bump record number
+	add	#128.	,point		; update buffer pointer
+	cmp	point	,bytcnt		; are we at the end of buffer?
+	beq	dnload			; yes, then better read in some more
+	br	10$			; else go send another block
+
+
+	.sbttl	End of file processing
+
+eof:	mov	#eot	,r0		; send end of transmission
+	.ttyout
+	call	getack			; wait for an acknowledgment
+	tst	aflag			; check result
+	beq	10$			; zero means all ok!
+	cmp	#1	,aflag		; 1 means they NAKed it
+	beq	eof			; so try it again
+	br	abort			; else we need to abort
+10$:	beep2
+	.newline
+	wrtall	#xmo.05			; /63/ "File transfer completed"
+	br	reset			; and reset parameters
+
+
+	.sbttl	Clean up and exit Xmodem
+
+abort:	beep2
+	.newline
+	direrr	#er$abt			; aborting transfer..
+
+reset:	.twait	#rtwork	,#xtime		; wait for remote to come back
+10$:	mov	#onewide,r0		; kludge single char input
+	emt	375
+	.ttinr				; suck up garbage
+	bcc	10$
+	clrb	hieff			; set emt argument off hi eff mode
+	mov	#hieff	,r0
+	emt	375			; do it
+	call	ttyrst			; use existing TT reset stuff
+	mov	#single	,r0		; restore single char input mode
+	emt	375
+	clr	r0			; no errors passed back..
+	return
+
+
+	.sbttl	Wait for initial NAK from remote
+
+waitnk:	clr	aflag			; clear abort flag
+	mov	#nkwait*60.,mtime+2	; wait for preset time
+	call	stimer			; start the timer
+10$:	mov	#onewide,r0		; kludge single char input
+	emt	375
+	.ttinr				; pick up a character
+	bcc	20$			; did we get something?
+	tst	tflag			; no, did we time-out?
+	bne	30$			; yes, we should abort this
+	.twait	#rtwork	,#wtime		; else sleep a bit, so we don't burn
+	br	10$			; up the cpu time.  Then check again
+20$:	cmpb	r0	,#nak		; did we get a NAK?
+	beq	40$			; yes, return normally
+	cmpb	r0	,#can		; cancel transmission?
+	beq	30$			; yes, abort this
+	cmpb	r0	,#'C&137	; CRC checksum request?
+	bne	10$			; nope
+	bis	#crc	,xmosts		; ya, enable CRC mode
+	br	40$
+30$:	com	aflag			; else set abort
+	br	50$
+40$:	clr	aflag			; clear abort
+50$:	.cmkt	#marea	,#41		; cancel timer
+	return
+
+
+	.sbttl	Wait for ACK from remote
+
+getack:	clr	aflag			; clear abort flag
+10$:	mov	#onewide,r0		; kludge single char input
+	emt	375
+	.ttinr				; pick up a character
+	bcc	20$			; did we get something?
+	.twait	#rtwork	,#wtime		; no, sleep a bit, don't burn cpu time
+	br	10$			; then check again
+20$:	cmpb	r0	,#ack		; did we get an ACK?
+	beq	40$			; yes, return normally
+	cmpb	r0	,#nak		; did we get a NAK?
+	beq	30$			; yes
+	cmpb	r0	,#can		; cancel?
+	bne	10$			; no, keep looking
+	mov	#2	,aflag		; else set abort
+	return
+30$:	mov	#1	,aflag		; set aflag to 1
+	return
+40$:	clr	aflag			; clear abort
+	return
+
+
+	.sbttl	Send a checksummed block to the remote
+
+sndblk:	clr	chksum			; clear checksum
+	clr	r3			; clear CRC
+	mov	rbuff	,r1		; get address of read buffer
+	add	point	,r1		; add in offset
+	mov	#soh	,r0		; send a SOH
+	.ttyout
+	mov	xrecno	,r0		; send record number
+	.ttyout
+	com	r0			; send complement of record #
+	.ttyout
+	mov	#128.	,r2		; initialize counter
+10$:	movb	(r1)+	,r0		; get next byte
+	add	r0	,chksum		; update checksum
+	call	updcrc			; update CRC
+	.ttyout				; send it
+	sob	r2	,10$		; finished?
+	mov	chksum	,r0		; copy of checksum to send
+	bit	#crc	,xmosts		; CRC enabled?
+	beq	20$			; no
+	call	getcrc			; get the CRC value
+	swab	r0			; high byte first
+	.ttyout
+	swab	r0			; then low byte
+20$:	.ttyout				; send checksum
+	return
+
+
+	.sbttl	Read a block from the input file
+
+rdblk:	clr	point			; clear pointer
+	.readw	#rtwork,#lun.in,rbuff,#256.,blkcnt
+	bcs	20$			; /63/ if EOF...
+	asl	r0			; words to bytes, carry is clear here
+	mov	r0	,bytcnt		; and store it
+	inc	blkcnt			; update block cnt, carry still clear
+10$:	return				; /63/ return with carry bit intact
+
+20$:	movb	@#errbyt,r0		; make sure it is EOF
+	beq	10$			; /63/ yes it is, carry is already set
+	asl	r0			; not EOF, use word indexing to
+	mov	reaerr(r0),r0		; point to error message text
+	.newline			; ensure starting on a fresh line
+	direrr	r0			; we had a read error!
+	beep2				; this doesn't preserve r0..
+	jmp	reset			; exit the program
+
+
+	.sbttl	Schedule a completion routine
+
+stimer:	.cmkt	#marea	,#41		; cancel possible outstanding request
+	clr	tflag			; clear timout flag
+	.mrkt	#marea	,#mtime	,#timout,#41 ; issue a timer request
+	return
+timout:	com	tflag			; set timout flag to indicate time-out
+	return
+
+
+	.sbttl	Update CRC, routine from Steve Brecher's COM program
+
+; Update CRC in r3 with datum in the low byte of r0.  Registers preserved.
+;
+; Algorithm:	for each data bit from bit 7 to bit 0, shift the bit
+;		into the LSB of the CRC.  If 1 shifts out of MSB of CRC,
+;		XOR the CRC with the constant.
+
+CON	= 10041		;constant = 1021 hex, for CCITT, recommended
+			;polynomial of x**16 + x**12 + x**5 + 1
+
+updcrc:	save	<r0,r1,r2>
+	mov	#con	,r2		; the constant
+	mov	#8.	,r1		; number of data bits
+10$:	rolb	r0			; rotate left, byte mode
+	rol	r3			; rotate left, word mode
+	bcc	20$			; nothing shifted out of msb
+	xor	r2	,r3		; something shifted out, fix it
+20$:	sob	r1	,10$		; next data bit
+	unsave	<r2,r1,r0>
+	return
+
+getcrc:	clr	r0			; after all data have passed through
+	call	updcrc			; updcrc, call this routine to get the
+	call	updcrc			; final CRC, for transmission, into r0
+	mov	r3	,r0
+	return
+
+	.end

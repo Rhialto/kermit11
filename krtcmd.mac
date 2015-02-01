@@ -1,0 +1,2085 @@
+	.title	KRTCMD	Kermit-11 main loop, commands calling O:1 or APR4
+
+	.macro	krt.id	RLS=V03	,VER=63	,PAT=0	,LASTED=<27-Sep-97>
+	.ident	"'RLS'.'VER'"
+
+	.ASECT
+.=110
+	.rad50	"'RLS'"
+	.word	'VER'.
+	.iif ne	'PAT'.	.word	'PAT'.
+	.word	-1
+	.psect	$pdata
+sho.ve:	.ascii	"'RLS'.'VER'"	; /62/ added to keep the parity memory vector
+	.iif ne	'PAT'.	.ascii	"-'PAT'" ; /62/ from blowing up SHOW VERSION
+	.asciz	"  Last edit: 'LASTED'"<cr><lf>	; max string length = ln$max
+	.even
+	.endm	krt.id
+
+	krt.id			; /62/ stuff the above in..
+
+
+;	Brian Nelson  01-Dec-83  13:19:14
+;
+;	Change Software, Toledo, Ohio
+;	University of Toledo, Toledo, Ohio
+;
+;	Copyright 1983 Change Software, Inc.
+;
+;	Edits:
+
+; /63/	V03.63  27-Sep-1997  by Billy Youdelman
+;
+;  KRTCDF - modify optional prompt arg to use address of prompt string
+;	    allows longer strings to be used and eliminates redundancy
+;	    drop $CMGLOBAL
+;
+;  KRTCMD - convert "-" to "_" in getcm0
+;	    move most of SHO VER here so the server can call it too..
+;	    call INCSTA on ^C abort of file xfr so stats don't blow up
+;
+;  KRTCM1 - moved sph$xmode after set$modem so it will prevail..
+;	    fixed problem caused by using errtxt buffer to store desired xmode
+;	    where a "?" in a error message acted like SET PHONE XMODE ?
+;
+;  KRTCOM - consolidate local data..
+;	    add DAYTIME
+;	    allow CD, CWD and REMOTE CD, CWD to operate without an argument
+;
+;  KRTCON - marktime (scheduler) completion routines are now more efficient
+;	    fix SET CON 8 test for emulator command chars
+;
+;  KRTCVT - fixfil now fixes unix leading dot ".file" names, also ".x.", etc.
+;	    cleaned up chkext
+;	    move unfmts to KRTSUB so KRTMDM can use this overlay ...
+;
+;  KRTDAT - add rem.ack
+;	    dpmumber conformed to its current 16-bit max value
+;
+;  KRTDIA - use opentt in place of ttyini to set linksts flag
+;	    move the modem definitions to a separate module KRTMDM.MAC
+;	    SET$DTR and SET$MODEM back here from KRTDSP
+;
+;  KRTDIR - buffil back to root (KRTPAK), for speed and room now available
+;	    add support for SET WILDCARDS
+;
+;  KRTEDI - fixed all possible sign extension problems now the LN$MAX > 127.
+;	    but keep it under 255. or you'll have to fix some other stuff!
+;
+;  KRTERM - use hi-efficiency print emt in T.BINWRITE under TSX
+;
+;  KRTERR - strip trailing blank from prompt string when making error message
+;	    add er$wpe, er$dna
+;
+;  KRTHLP - translate "_" to "-" which searching for topics
+;	    move index data to separate file KRTIDX.MAC solving a size problem
+;	    increase text line and terminal input buffers to 132. bytes
+;
+;  KRTIDX - moved this into a module of its own as KRTHLP was > 4096. words
+;
+;  KRTKM  - add SPFUNs to support Xmodem compatibly with the TSX CL handler:
+;
+;		CLSET	<250>	Set CL options (binin and binout only)
+;		CLRSET	<251>	Clear CL options (binin and binout only)
+;		CLIPND	<261>	Get number of input chars pending
+;		CLWBYT	<263>	Write with byte count
+;		CLCHAR	<266>	Get CL characteristics (options flags only)
+;
+;	    added .br macro for clarity.
+;
+;  KRTMAC - add support for SET ATTRIBUTES
+;	    add flag to suspend logging to a disk file
+;	    make $LN$MAX 132. bytes for EIS assembly
+;	    pulled message macro, no longer used..
+;
+;  KRTMDM - created this module as KRTDIA had become too large
+;	    there are now 1793. words free in which more modems may be defined
+;	    defined T3000X.42 modem (it's T3000V.42 but with XOFF restraint)
+;	    convert T3000 (DTE falls back to DCE) def to XOFF flow control
+;
+;  KRTOSI - fix test for running LTC to accomodate QED's fast PDP-11s
+;
+;  KRTPAK - make .TOGO = 16, fixing a (harmless) typo (was 26)..
+;	    dump ^A = restart a packet for SET CONTROL UNPREFIX 1 operation
+;	    BUFFIL back to root (KRTPAK), for speed and room now available
+;	    ERROR: now sends error packet when link's open and xfr in progress
+;	    modify BUFFIL to do BUFPAK too, for repeated char encoding
+;
+;  KRTREC - support gets to LP
+;	    display file size in "created file" messages
+;	    fix unpopped stack on error exit from bufemp
+;	    display file type in file create message
+;	    display file name sent back by remote Kermit
+;
+;  KRTSEN - sdat$$ now rewinds to get back to top of file
+;	    undo repeated char encoding before dispaying remote ACK packet
+;	    display file size and type in "sending file" messages
+;	    display contents of SEND FILE ACK packet, if any..
+;	    redo data packet at sdat$$ when resizing due to first one failing
+;	    so the next retry is actually done with the smaller sized packet
+;
+;  KRTSER - disallow gets to TT
+;	    gen.h now displays the real version data ala SHO VER
+;	    clean up remote command response code, display reasons for retries
+;	    move C$BYE and REMFIN into now improved REMOTE command processor
+;	    on error resend REMOTE command packet before listening again
+;	    dump BUFPAK, use BUFFIL instead for repeated char encoding
+;
+;  KRTSHO - enhanced SHOW CL
+;	    individually display attributes, ala C-Kermit
+;	    add SHOW CONTROL-CHARACTER
+;	    add SHOW WILDCARDS
+;	    moved SHO VERSION to KRTCMD so the server can also call it..
+;	    add SHO DAYTIME
+;	    SHO ALL now shows all, moved to KRTCMD so it can call everything
+;
+;  KRTSTD - consolidate local data..
+;	    add SET WILDCARDS
+;
+;  KRTST0 - add SET CONTROL-CHARACTER
+;	    consolidate local data..
+;	    add file name to when logging to LP so later OS versions are happy
+;
+;  KRTST1 - allow attributes to be individually set, ala C-Kermit
+;	    modify SET FLOW XON to force quoting of XOFF and XON chars
+;	    consolidate local data..
+;	    add SET FILE WILDCARDS
+;	    cd with no arg defaults to home dir, shows default after executing
+;
+;	    /E64/	05-May-96  John Santos
+;
+;	    Fix bug in SET TERM which always set NOSCOPE
+;
+;  KRTSUB - move unfmts here so KRTMDM can live in KRTCVT's overlay ...
+;
+;  KRTXMO - disallow sends from TT (not supported, makes Kermit hang)..
+;
+;  All other modules are unmodified except for possible corrections to
+;  typographical errors in the comments or such that their object code
+;  remains essentially unchanged.
+
+
+; /62/	V03.62-8  27-Jul-1993  by Billy Youdelman
+;
+;  This edit is mostly bug fixes for V03.61, and some enhancements, as below:
+;
+;  KRTAIL - add automatic 50Hz clock rate detection and support for watching
+;	    more than 34. lines, just in case..
+;
+;  KRTATR - add 25% to rec'd length for text files from non RT-11/TSX systems
+;
+;  KRTCM1 - make type append a LF to CR if CR not followed by one
+;	    hose hi bit and type anyway for VT100 and below in c$type
+;
+;  KRTCON - correct comments to indicate r3 is not preserved between tasks
+;	    fixed error handling for suspend/enable CONSOLE logging
+;	    added handling for logfile errors
+;	    move senbrk here
+;	    speed up keyboard input processing at high data rates
+;
+;  KRTCVT - increase size of fixfil stack buffer to SVID limit
+;
+;  KRTDAT - use erbfsiz to size errtxt buffer
+;	    add pkrate buffer
+;
+;  KRTDEB - use erbfsiz to size errtxt buffer
+;
+;  KRTDIA - add support for call back modems, SET DIAL/PHONE [NO]ANSWER
+;
+;	    add a one-tick pacing delay in DODIAL's loop at 50$ (when modem
+;	    doesn't echo commands) to match what was done for echoing modems
+;
+;	    fix SHO MODEM for changes to SET DIAL [NO]ECHO and [NO]INIT-ONCE
+;	    add initiate-prompt, dial-ack, confirm-ack, [no]binary-response
+;
+;	    added x.result (default "Hayes" xmode) and time.settle defaults,
+;	    and in "Hayes" and Telebit modem definitions
+;
+;	    if DCD is high when exiting program, hang up modem
+;	    add support for 38.4kb
+;	    add Telebit T3000 modem definitions
+;
+;	    double the settle-time value for the wait after dropping DTR,
+;	    as some modems (like the T3000) need more time to recover
+;
+;  KRTDIR - reorganized and substantially sped up
+;	    added .csispc comma delimiter parsing
+;	    fixed wildcard "%" match to no longer match on blanks
+;	    moved buffil here, has to be if not in root for getcr0 @sdodir..
+;	    make hd$fir=:6 so badly initted disks don't crash DIR
+;
+;  KRTDSP - leave comm handler chans open after assigning it as the link dev
+;
+;  KRTEDI - add bells: up arrow when nothing saved yet, down arrow at end
+;
+;  KRTERR - add error message for logfile problems
+;
+;  KRTHLP - fix a few very small typos and errors
+;	    expand and enhance help text for SET DIAL, particularly commands
+;	    add dummy file name for HPRINT via RT-11 V5.2/TSX V6.0 LP/LS
+;	    display all subtopic text when wildcarding through nested text
+;
+;  KRTINI - dump FILLOG, as PRINTM now does this
+;	    provide for logfile errors
+;	    add current-block-pointer/size-of file to ^A stats display
+;
+;	    check packet length in dskdmp, don't trap to 4 writing past end
+;	    of buffer due to line noise and/or modems retraining
+;
+;	    major cleanup and maintenance update
+;
+;  KRTLNK - move krtstd back to apr6 as apr1 was over the edge..
+;	    fixed virtual segment 1 size in non-EIS version
+;
+;  KRTMAC - move dispatch macro to KRTSER
+;	    move erbfsiz here from KRTPAK
+;	    condense logging (debug) modes
+;	    increase efficiency of incm64 macro
+;	    increase MAXLNG (long-packet size) to 1920.
+;	    reduce MAXLNG to 520. for NONEIS assembly, so pgm loads under FB..
+;	    ditto for ALSIZE (phone # buffer) and LN$CNT (SL # of lines saved)
+;
+;  KRTOSI - test for indirect command file running program, for error handling
+;	    dump unused BUFDEF stuff
+;	    add Jim Whitlock's VBGEXE fetch pointer fixes
+;
+;  KRTPAK - move erbfsiz to KRTMAC
+;	    patch PRINTM to also write to a logfile, when same is in use
+;	    add logfile error handler and provide for logfile errors
+;	    write error messages to logfile
+;	    include file spec in getnxt error messages
+;	    add individual packet exchange duration timer, for debugging
+;	    make BUFFIL limit test max-0 (was max-4), allows bigger packets
+;	    don't log bogus data for timout
+;	    make ERROR send an error packet, use PRINTM elsewhere
+;	    don't modify SET time-out value
+;	    add/enforce SET SEND PACKET-LEN limit
+;	    move bufpak to KRTSER, no one else uses it
+;	    move buffil to KRTSEN, ditto..
+;	    move bufemp to KRTREC
+;	    add passed buffer length to rpack$
+;
+;  KRTREC - dump FILLOG, as PRINTM now does this
+;	    use log$packets for state logging
+;	    provide for logfile errors
+;	    modify to not NAK unknown packets (noise)
+;	    display any possible contents of "X" packet, for Unix and C-Kermit
+;
+;  KRTRMS - save created (.enter) file size in sizeof entry in data table
+;	    make filtyp entry in same global
+;	    reset SET FILE CREATE-SIZE on successful file open
+;	    moved LOGFIL name buffer here
+;	    dropped NONAME.TMP for a nfs .enter, return "bad file name" error
+;	    move most of ccast to mainline code in KRTCMD.MAC
+;	    moved GETREC here, so HELP via PF2 can't ever crash..
+;
+;  KRTSEN - dump FILLOG, as PRINTM now does this
+;	    use log$packets for state logging
+;	    provide for logfile errors
+;	    modified to wait thru bad ack packets, noise, etc..
+;	    recpkt buffer back to normal size, now passes same to rpack
+;
+;  KRTSER - allow server to talk through the comm handler too..
+;	    move dispatch macro here
+;	    add newline in log file at each new process
+;
+;  KRTSHO - added SHO BAUD, DTR, DUPLEX, END-OF-LINE, FLOW-CONTROL, HOME, LD:,
+;	    LOCAL-ECHO, LOGF, LONG-PACKETS, RANDOM, RECEIVE, SEED, SEND, SPEED
+;	    cleanup, condense logging (debug) modes display
+;	    display current-block-number and size-of logfile in SHO DEBUG
+;	    conform to major sinit stuff update in KRTINI.MAC
+;	    include last number dialed in SH PHONE
+;	    add SHOW CL, EOF
+;
+;  KRTST0 - add support for call back modems, SET DIAL/PHONE [NO]ANSWER
+;	    report file size (blocks free) when opening a log file
+;	    set binary flag instead of close/reopen file for raw I/O debug
+;	    fix typo causing a new logfile of same name not to get opened
+;	    combine FILE, STATE and PACKET into one DEBUG mode (ON)
+;	    redo SET DIAL ECHO and INIT-ONCE as [NO]ECHO and [NO]INIT-ONCE
+;	    SET SETTLE-TIME is now SET DIAL SETTLE-TIME
+;	    drop SET HAND XON, as RT-11 and TSX eat same..
+;	    drop SET DIAL INFO, as any undefined message defaults to it
+;
+;	    rename SET DIAL PROMPT to WAKE-ACK, add BLIND, PULSE, TONE,
+;	    DIAL-ACK, INITIATE-PROMPT, CONFIRM-ACK, [NO]BINARY-RESPONSE
+;
+;  KRTST1 - moved BREAK, CREATE-SIZE and [NO]VOLUME-VERIFY here ..
+;	    conform sinit-related SETs to major update of KRTINI.MAC
+;	    move SET TIME-OUT to SET RECEIVE TIME-OUT and SET SEND TIME-OUT
+;	    add SET CONSOLE PRIORITY for KM/XC/XL under TSX
+;	    add SET FLOW-CONTROL to support RTS/CTS and KM handler
+;
+;  KRTUTL - modify asctim to output ticks
+;	    restored optional time value pointer
+;	    move various items here from root to save space
+;
+;  KRTXL  - corrected suggested XL BUFSIZ to 256.
+;	    keep XL open even for XM, to accommodate RT-11 V5.6
+;	    add support for KM handler
+;	    add version testing to support RT-11 V4
+;	    add DCDTST for status during file transfers
+;	    skip .ABTIO for XC/XL under ALL RT-11 V5.6 monitors
+;	    to avoid hang/race/?
+;
+;  All other modules are unmodified except for possible corrections to
+;  typographical errors in the comments or such that their object code
+;  remains essentially unchanged.
+
+
+;  /BBS/  V03.61  3-Dec-1991  by Billy Youdelman
+;
+;  The following work was done primarily to support the use of Kermit-11 on
+;  a public bulletin board system under TSX-Plus, and then expanded to make
+;  a reliable, general purpose comm program.  Numerous bugs have been fixed
+;  and several new routines added.  Some are RT-11/TSX-Plus specific, all are
+;  described below.  For a more in-depth discussion of what's been done, see
+;  KRT.DOC Appendix A.  Modifications are slugged /BBS/ in the source files.
+;
+;  NOTE that all files previously named K11*.* have been renamed KRT*.* and
+;  in some cases names have been slightly altered, ie: K11TSX.DOC = KRT.DOC,
+;  to avoid any conflict with the existing Kermit-11.  These files are NOT
+;  interchangeable with those of Kermit-11 T3.60 et.al.
+;
+;  RT-11 multi-term support and some other things are pulled to keep the size
+;  reasonable.  You must use a handler, or the controlling terminal line, to
+;  talk to the outside world.  This version is for use with TSX-Plus V6.2 or
+;  above, though most of it runs under TSX V6.0.  It shouldn't be any worse
+;  than the "stock" Kermit-11 T3.60 with RT-11.  Debugging was done on TSX
+;  V6.4, under which it has been thoroughly tested and is extremely reliable.
+;
+;  IMPORTANT NOTE:  While effort has been made to follow the style and format
+;  in which Kermit was written, as in the case of modifying TYPE by the use of
+;  standard calls (getc, putc) available across all operating systems, there
+;  are other instances (such as MOUNT) using emts existing only in TSX+ which
+;  will not be available elsewhere, even under RT-11.  A few new calls have
+;  been added to the op system independent modules, & supporting routines to
+;  the RT-11 modules.  Using some of these mods under other operating systems
+;  will require similar additions to their specific support modules.
+;
+;  Please refer to KRT.DOC for installation instructions, then to Kermit's
+;  on-line help (which is quite extensive) for operational details.
+;
+;
+;		    S p e c i f i c   M o d i f i c a t i o n s
+;		    ---------------   -------------------------
+;
+;  KRTASM - Created KRTASM.NON, assembles Kermit modules for a non-EIS CPU
+;
+;  KRTATR - modified rx.cdt,sn.cdt to do the "#" date/time attribute
+;	    hosed unused stuff, added rx.pro,sn.pro for protected file attr
+;
+;	    added support for date/time/prot file attributes
+;	    patched open, close, I/O data table to support it..
+;
+;	    modified w$attr to send all attributes in a single packet
+;	    rx.xle result in at$len no longer overwritten by rx.len
+;	    added send exact file length in bytes
+;	    call binary files "BINARY" not "IMAGE" so MS-Kermit is happy
+;
+;  KRTCM1 - c$type defaults to .LST, error handling improved, does wildcards
+;	    also sped up, types any size record, binary file filtering added
+;
+;	    c$set - error handling fixed
+;	    c$who, c$pwd, c$cls, c$clx, c$xmodem added..
+;	    c$take parses file name, checks for/disallows wildcards, etc.
+;	    c$conn - disallow connect to TT (since one is there already..)
+;	    mount/dismount logical disks command interface, calls TSX emts
+;	    added RT-11 style assign default device, for DK only
+;	    remote disk_usage passes optional device argument
+;	    made default take file type ".COM"
+;	    reinit modem when exiting if DTR dropped during CONNECT
+;	    added SET CLn LINE x support for TSX-Plus, see HELP SET CL
+;	    added search path for take files
+;	    move sho$line here, added modem type, TSX line # and DCD status
+;	    added call to c$idle in c$exit to reset modem on exit to monitor
+;	    c$set now does multiple args, separated by commas
+;
+;  KRTCMD - dumped ttysav/ttyset from opentt - these killed single char
+;	    input under TSX, thus things like the ^A stats didn't work.
+;	    t.ttysav is now part of the init at start-up, then ttyrst is
+;	    called as needed.  ttyini no longer turns things on which
+;	    ttysav would have to turn off.  also, with 6 char labels,
+;	    %.ttysav = %.ttyset = the same thing under the present system
+;	    of dispatching I/O with "%." prefixing routine names..
+;
+;	    xmode flag used to clean up xreply display by suppressing packet
+;	    log display when either side's blo <>1 forces a send file init
+;
+;	    send file asfile error handling improved, get file asfile now
+;	    shares some of the above code.  one may GET/SEND [DEV:]FILE DEV:
+;	    to send/receive a single file to/on a device other than the
+;	    default.  wildcards are otherwise not allowed whilst renaming.
+;
+;	    readcmd now displays prompt and input strings for getmcr
+;	    also enables take file echo if/after krt.ini has run
+;	    and will allow ";" and "!" comment delimiters anywhere in
+;	    a line in a command file, not just the first column..
+;
+;	    modified getcm0's response to "?" argument to dump commands
+;	    in 4 columns across the screen ala VMS help
+;
+;	    ^C handler in KRTRMS modified, thus cctrap here is unneeded..
+;	    CONNECT automatically if FINISH succeeds..
+;	    ring the bell at the end of RECEIVE, so one will know it's done.
+;	    fixed GET/SEND file asfile to handle node names
+;	    patched to accept "@COMMAND" for take file, ala RT-11
+;	    fixed init/take file error handling in readcmd
+;	    add a "BUG" command ala C-Kermit
+;	    GET/SEND now handle multiple file names delimited by commas
+;	    use DEC method of version numbering
+;
+;  KRTCON - this module has been extensively modified and will now run fine
+;	    under any monitor including SJ if it's built with timer support
+;
+;	    pulled RT-11 multi-terminal and sj monitor w/o twait stuff..
+;
+;	    set/reset a list of "activation" chars under TSX which
+;	    allows non-printing chars input at the terminal, such as ^O,
+;	    to be passed to the remote system during the connect mode
+;
+;	    display handler speed (fixed for 19.2k too) when connecting
+;	    display escape sequence when entering CONNECT
+;	    disallow typing TSX lead-in char to TT when running under TSX
+;	    allow suppression of sign-on text, for use with krttra
+;	    skip TT input routine once done flag is set
+;	    TT input now uses con8bit ala TT output
+;	    added MILNET option to wakeup (XON) MILNET TACs
+;	    added send a control char via esc_char "^x" ala VTCOM
+;	    added esc_char "Z" command to hose/refresh handler
+;
+;  KRTCVT - added useful RT-11/TSX+ binary file types
+;	    modified chkext to handle file types of less than 3 chars
+;	    fixfil - parse a device name in filespec, fixed termination bug
+;	    namcvt now catches unix "/" and pc "\" directory delimiters
+;	    fixed namcvt to not output a "." on a null file name input
+;
+;  KRTDAT - added a general use buffer, some flags and variables
+;	    SL editor insert mode default is set on here in edists
+;
+;  KRTDEB - added new variables to data displayable with EXAMINE
+;	    display ascii chars when dumping byte values
+;	    fixed error handling
+;	    fixed addressing bug in pint (displays word values)
+;
+;  KRTDIA - set$mo now won't write bad modem name into modem: and will try
+;	    to init (killing auto-answer) when set if a line and speed have
+;	    been set first
+;
+;	    if DIAL/REDIAL succeeds jump to CONNECT automatically
+;	    set linksts when dialing so ^C abort will catch correct ttname
+;	    findmodem now does not try to process an empty string in modem:
+;	    added c$idle, call to reset modem to idle (answer) mode
+;	    findmodem/findnumber will match on partial input string
+;	    added %X format effector for Hayes extended response modes
+;	    added Telebit T2500 modem definitions
+;
+;	    redial loop moved to c$dial, runs faster without initializing
+;	    the modem's lun every pass thru the loop, reduces cpu usage too
+;
+;	    load buffer with defmsg after displaying RING, to not overwrite
+;	    the default message with call status stuff
+;
+;	    if DIAL can't translate an alias, say so then die (instead of
+;	    prompting to continue with an empty number buffer)
+;
+;	    added xredial flag word, for keeping return path straight when
+;	    connecting after a successful REDIAL. flag also used to speed up
+;	    redial process for modems which define init.once by not initting
+;	    before every retry.  init.once was added to support all this..
+;
+;	    while waiting for a response after dialing modem, check for
+;	    input from keyboard, allowing an easy abort
+;
+;	    .default patched to get/set handler speed from modem response,
+;	    old speed is saved and restored, unless set different after..
+;	    Hayes definition completed and moved to it.  this also renders
+;	    Hayes responses displayable via SHO MODEM.
+;
+;	    diatmo from SET DIAL TIME-OUT gets written into dial.time(r4)
+;	    when either c$dial or sho$dial is called.  it's now usable with
+;	    any modem type (not just user-defined) by setting the modem's
+;	    internal timer to the max (ATS7=255 etc) then letting Kermit's
+;	    timer take action first.
+;
+;	    modified waitfor to test for keyboard input, allowing a "strike
+;	    any char" abort during dialing, now including the init string.
+;	    DTR is dropped to ensure the modem will actually abort the call.
+;
+;	    SHO MODEM expanded to display everything
+;	    result msgs must match from 1st byte to avoid embedded strings
+;	    save modem init status to drop unnecessary inits
+;	    SET MODEM now inits same, if a line (and speed) have been set
+;	    echo everything from modem (if it echoes) during DIAL
+;	    add CONNECT/nnnn for Hayes to alter DTE speed w/TSX and CL
+;
+;	    add Concord Data Systems 224 Auto-dial modem and make dialer echo
+;	    modem output byte by byte so "..." call progress stuff is echo'd
+;
+;	    moved SET DTR code here, and reinit modem after DTR drop if one
+;	    was on-line before it
+;
+;  KRTDIR - this module has been extensively modified, please refer to it..
+;	    add TSX+ create time, date slug, prot status, summary lines, etc
+;	    corrected bugs in error handling
+;	    added d$cvtnum for file sizes/sums larger than 32767.
+;	    "DK" now uses defdir, not op system DK, needs fparse in krtrms
+;	    ascdat patched for RT-11 V5.5, now also used for cvtdat
+;	    add dirflg to control embedded blanks in file name
+;	    getnth used to reread until context=diridx, now context saves it
+;	    added summary only flag, for use with SPACE and REM SPACE
+;	    force USR to re-read dir segment, allowing one to swap floppies
+;
+;  KRTDSP - this module has been extensively modified
+;
+;	    moved kbread here, one copy is sufficient, cleaned up also
+;	    streamlined jsw/nowait/single_char modes/setting/resetting/etc
+;	    added writ1char routine - writes a single character to TT
+;	    add entry for inqdtr, only works with CL handler
+;	    assdev patched for new mapxl in krtxl
+;	    made packet buffer length = $ALLSIZ to match checkpacket buffer
+;	    ttyrst - resume TSX window processing, as after packets, connect
+;	    added cl.dump to clean up when exiting/modifying a CL line
+;	    inqbuf patched to use MAXLNG for TSX+, MAXPAK for RT-11
+;	    added inqcd
+;
+;	    moved binread here so CONNECT can share it and XL can be left
+;	    open under TSX and RT-11SJ where there is no hope of closing it
+;
+;	    I/O is now dispatched this way:
+;	     1) if via the controlling terminal line, use routines in KRTERM
+;		regardless of operating system.  that is, the t.tty... calls
+;	     2) if via a handler, use routines in KRTXL.  that is, the
+;		 x.tty... calls for CL, XC or XL
+;	     3) RT-11 multi-terminal I/O has been pulled
+;
+;	    moved set$line here, patched to reset modem to idle state and
+;	    release a TSX CL line after SET LINE TT if same was acquired
+;	    within Kermit
+;
+;	    set$line won't write bad device to ttname
+;	    SET LINE TT now reverts to the remote mode
+;
+;  KRTEDI - up/dn arrow command scrolling fixed
+;	    command dispatch table patched for VT-100 keypad (KED equivs)
+;	    dup cmds now not saved even when < max cmds are currently stored
+;	    extend keypad for adv, bkup, word, char, line, delete, undelete
+;	    added check for SS3 for VT-220 keypad
+;	    cleaned up various odds and ends..
+;	    WARNING:  If LN$MAX is made greater than 127. fix sxt stuff here
+;
+;  KRTERM - this module has been extensively modified, please refer to it
+;	    added SET TT XON (TSX) emt to t.ttxon, uses tsxsav for lnum
+;	    add dummy routines for inqdtr, inqcd
+;	    ttyini - suspend TSX window processing, as in connect, packets
+;	    added support for vlflag under TSX+ to ttyini
+;
+;	    drop TSX hi eff term mode and declare a list of activation chars
+;	    instead, allowing single char input (so packets can be longer
+;	    than TSX's internal I/O buffers) whilst offing ^B, ^T, ^W, etc
+;	    so line noise doesn't trigger various annoying things as when
+;	    using the server via TT, also allows passing to remote when in
+;	    the connect mode
+;
+;  KRTERR - moved error message prefix routine here from KRTPAK
+;	    moved all system error messages here, from various modules
+;
+;  KRTHLP - kill extra LF after listing subtopics
+;	    hfind - fixed wildcarding when no subtopics exist for a topic
+;	    help text file updated to reflect mods/additions/omissions
+;	    hindex - display sped up, prompting after it now uses full text,
+;	    also handles topic names greater than 18 bytes ala VMS help
+;	    added fake RMS stuff for RT-11/TSX, and did a general cleanup..
+;	    path for KRTHLP.HLP is now HLP, KRT, SY and DK
+;	    modified to check for correct copy of KRTHLP.HLP
+;	    on topic error nest in as far as possible instead of to the top
+;	    added HPRINT, dumps help text to LP
+;
+;  KRTINI - prompt set to KRT
+;
+;	    call to an .INI file now tries INI, KRT then DK and finally
+;	    SY.  take file echo is disabled if krt.ini is found, then
+;	    enabled when the init file is closed (in readcmd, in krtcmd)
+;	    name of init file (if found) is displayed while reading same..
+;
+;	    recdsp table fixed to call recvt1 (instead of senvt1 .. ) for
+;	    terminals >VT100
+;
+;	    added warning message when 8-bit quoting is first forced on and
+;	    init stuff in fixchk so the need for 8-bit quoting is tested on
+;	    each xfr, thus one need not exit/restart Kermit to turn it off
+;
+;	    packet length display in log files now accommodates four digit
+;	    numbers, as the max. packet is now 1024. bytes
+;
+;	    allow debugging to TT even with no disk file open..
+;	    reset parity found tho set NONE warning before each transaction
+;	    fixed warning messages for unsupported/disabled long packets
+;	    dkname used to home, here it's init'd to physical DK at start-up
+;
+;  KRTLNK - segments have been combined where possible to reduce memory and
+;	    mapping requirements
+;
+;  KRTMAC - modified message macro to call .newline instead of saving CR/LF
+;	    and null for each new line, knocking 1042. bytes off the size
+;	    of this version..  also changed ".print" emulation to wrtall,
+;	    for a similar savings in compiled program size.
+;
+;	    dump raw I/O logging from log$al (SET DEB ALL) - too confusing
+;	    also pulled log$rp out and made it a completely separate item..
+;
+;	    added a couple upper case macros
+;
+;  KRTNHD - made divide macro double precision
+;
+;  KRTPAK - added lun.ld == 12 for TSX logical disk support
+;	    added lun.at == 5 for file attributes support
+;	    prefixing error messages with the prompt string moved to KRTERR
+;	    waitsoh - ^Z abort changed to ^C abort, thus not killing the pgm
+;
+;	    spack$ packet length test fixed to determine the true length of
+;	    a packet near or equal to 94 bytes when long packets are used.
+;	    it was possible to generate a "normal" packet with an out-of-
+;	    range LENGTH character (using all eight bits) when reaching the
+;	    the EOF produced a last packet in a long packet series close to
+;	    94 bytes, as the routine filling the packet data input buffer
+;	    is still looking for enough to make a long packet, with no
+;	    consideration for the added SEQ and TYP bytes nor the checksum
+;	    size (up to three more bytes with CRC block checking)..
+;
+;	    rpakst patched to hose link device whenever the "T" (time-out)
+;	    packet count is incremented, or when a NAK xxx NAK series
+;	    (indicating resonating packets) occurs.  this is very helpful
+;	    when telephone line noise crashes/hangs the handler..
+;
+;	    space padding between elements of an error message moved from
+;	    error: to the err msgs themselves as printm doesn't do it, and
+;	    it's too confusing otherwise..
+;
+;	    incsta patched to compensate for crossing midnight, as long as
+;	    there's less than 24 hours between calls to it, thus 32-bit
+;	    time data from incsta are thought to be sufficient here
+;	    note: the display routine in krtsho limits max to 18.2 hours..
+;
+;	    patched bufemp to not output the lead-in char to TT under TSX
+;
+;	    moved RPACK debug stuff to rawio: as when it was in rpakrd: it
+;	    missed the SOH, which is handled by waitsoh: (both call rawio)..
+;	    also cleaned up display at the EOL and added display of TIMOUTs
+;
+;	    fixed non-init'd repeat count reg bug in bufunpack
+;
+;  KRTREC - rfil.x: put "Remote server response:" here so it displays even
+;	    when blo <>1.  also set image=binary here so typing 8-bit
+;	    files doesn't die on checksum error when clrpar hoses hi bits
+;
+;	    rfil.f: check asname here (instead of rfil.d), also fixed so
+;	    VMS filespecs longer than 66. bytes don't write past end of the
+;	    scratch buffer.  also namcvt strips VMS node::dev:[dir] here..
+;
+;	    kill debug to TT if not running as a local Kermit
+;	    add support for INCOMPLETE-FILE-DISPOSITION
+;
+;  KRTRMS - iswild modified to catch implicit wildcarding
+;	    error mapping tables augmented to accommodate new routines
+;	    .rctrlo added to file close routine
+;	    chkdev added, used for bbs device access restriction
+;	    limits: (activation char list for TSX) lives here, also vlflag
+;	    added prewind routine to fake RMS stuff when reading help text
+;	    add er$dev at end of faterr: table to catch non-init'd lookup
+;
+;	    suspend: patched to wait in one tick increments, allowing ^C to
+;	    abort - also now uses clkflg to accommodate 50 or 60 Hz..
+;
+;	    fixed fparse handling of device name, also disallow a leading
+;	    comma in the arg string, as this will do a nfs lookup..
+;
+;	    ccast - now does trouble-free aborts from anywhere you'd need it
+;	    when talking to the handler or when something is running which
+;	    if aborted would leave virtual addressing in a mess, the bell
+;	    will be rung acknowledging the abort, at which point it's best
+;	    to wait for the program to do it, which it will as soon as it
+;	    can.  further ^C's will ring the bell up to CC$MAX times, then
+;	    a complete abort and return to the main command line via .spcps
+;	    occurs.  if necessary an error packet will be sent, however this
+;	    may not be as effective as using ^E, which waits for the packet
+;	    in progress to complete first..
+;
+;	    added getmcr routine to get arg(s) from KMON passed to chain
+;	    area when Kermit is started.  owing to the way RT-11/TSX+ parse
+;	    the "@" (causes KMON to try to open the file and read the
+;	    first line of it into the command buffer, including the chain
+;	    area) the syntax "KERMIT @TAKEFILE" is not usable under RT/TSX.
+;	    "KERMIT TAKE TAKEFILE" is a poor but functional substitute..
+;	    any other command and args may be passed, ie; .kermit dial tommy
+;
+;	    add fixwild, translates "?" to "%" in file names
+;	    fixed error handling in file close routine
+;	    added getdk, gets physical name of "DK"
+;
+;	    moved direr$ here, moved error messages from various modules to
+;	    krterr, and added calls to them via direrr..
+;
+;  KRTSJ  - link command file to build minimum memory version of this
+;	    program.  KRT.SAV is disk overlaid, uses 51kb..
+;
+;  KRTOSI - "pic" code dumped
+;	    if TSX, line number saved in tsxsav during init, for t.ttxon
+;	    store clock rate (50/60 Hz) in clkflg, use elsewhere for timers
+;	    add init for TSX activation char list
+;	    call assdev when PRO-350 tries to automatically assign CL or XC
+;	    .SERR is set here and then left on forever..
+;	    VT200 now sets con8bit
+;	    cleaned up init code
+;	    increase ALSIZE to 1024. (user-defined modem and ph numb buffer)
+;	    under RT-11 display memory free for handlers at sign-on
+;
+;  KRTSEN - increased size of recpkt buffer to $allsiz to avoid writing past
+;	    eob (causing trap to 4 in rpack$ which crashes the program) when
+;	    packets are out of sync and a long packet arrives where an ack
+;	    is expected, or line noise "extends" otherwise ok data..
+;
+;	    kill debug to TT if not running as a local Kermit
+;	    modified to (w/KRTATR) send all attributes in a single packet
+;	    ensure directory search channel is closed on errors/aborts
+;
+;	    display abort message when file skipped due to SET FILE PROTECT
+;	    (by an "X" or "Z" in the ACK packet) on the other Kermit
+;
+;  KRTSER - gen.t filespec more carefully tested, defaults to .LST type
+;	    double prompt on server exit killed by hosing ^M in FIN packet
+;	    remget - now uses srcnam for input file
+;	    no args to server command allowed under RT/TSX
+;	    input file name to serv.r checked by fparse
+;	    gen.c inserts colon after device name if necessary
+;	    gen.w - remote who via xreply added
+;	    upcase incoming remote command args, so mskerm is happy
+;	    gen.d checks for valid device before initiating any output,
+;	    defaults to DK if no arg given, as from MSKermit
+;	    modified gen.u to use krtdir
+;	    remspa accepts optional device argument, gen.u passes to krtdir
+;	    remfin returns error status in r0, to CONNECT if FINISH succeeds
+;	    disallow running server unless link device is TT
+;
+;  KRTSHO - SHOW command with no args displays assigns ala RT-11
+;	    sho$all - shortened up
+;	    added sho$attributes
+;	    added sho$devices - displays the bbs access permission list only
+;	    added sho$submounts, using TSX emts
+;	    added sho$vl - displays status of vlswch under TSX+
+;	    add DEC-Multinational type to sho$file
+;	    moved release notes to the help text file
+;	    sho$packet - display "^A" notation in addition to octal numbers
+;	    also lists long-packets max length, set length, rec'd length
+;	    add xtime for spiffier transfer time display, other small fixes
+;	    sho$fi: indicate if file name conversion disabled, lower case on
+;	    added home directory to sho$default
+;	    fixed display formatting for sho$phone_numbers
+;	    sho$params indicates if SET LONG OFF or SET NOLONG
+;	    added MILNET to SHO CONSOLE
+;	    added c$print
+;	    moved sho$line to krtcm1
+;	    added SHO TERMINAL
+;	    add SHOW INCOMPLETE-FILE-DISPOSITION
+;	    add SHO MEMORY, display remaining handler free space under RT-11
+;	    add SHO SL, SHO UPDATE, added LOCAL-ECHO, BREAK to SHO CONSOLE
+;	    add SHO REPEAT-CHAR, SERVER
+;	    pass file date/time/prot to COPY output file
+;	    added SHOW commands for everything else possible..
+;	    SHO VERSION uses DEC method of version numbering
+;
+;  KRTST0 - set$pa - fixed display bug with "?" arg
+;	    enhanced set$speed error handling
+;	    added SET PHONE XMODE n for Hayes extended response mode support
+;	    cleaned up all debug code, allowing debug to TT w/o a disk file
+;	    moved set$line to KRTDSP, so it can call c$idle in adj. overlay
+;	    make SET DEBUG NONE off ALL debugging, including TT
+;	    add separate parameter for initial-connect retry ala VMS Kermit
+;	    add SET INCOMPLETE-FILE-DISPOSITION
+;	    add SET SL
+;	    move [SET] LOGFILE here, integrate with SET DEBUG..
+;	    make logfile default type .LOG, ask before zapping existing file
+;	    allow LP as the logfile, please SPOOL this in the op system!
+;	    add optional debug mode to LOGFILE, file name to SET DEBUG mode
+;	    LOGFILE sans args closes an open logfile
+;	    add SET SETTLE-TIME to allow for modem's reset processing time
+;	    add SET SL ON,OFF,[NO]KED
+;
+;	    added SET DIAL RINGING, CONnnnn for supported speeds, ABORT
+;	    COMMENT, IDLE, PROMPT and INIT.ONCE for user-defined modem
+;
+;  KRTST1 - HOME uses dkname:
+;	    set$df - now calls c$cwd
+;	    set$sn - clear r0 after printing error message, avoid dupe msg
+;	    sts$pl - corrected packet length max test to 94. (maxpak)
+;	    set$attributes - fixed so "?" arg doesn't set to last displayed
+;	    added set ld empty, using TSX emts
+;	    sf$typ - patched to pass proper arg to any routine it calls ..
+;	    str$pl re-enables long packets if set >94., warns if CRC not on
+;	    set$file - added SET FILE NAMING [NO]LOWER-CASE, for Unix
+;	    SET LONG ON now also does SET REC PAC 1204 and SET BLO 3
+;	    con8bit set/cleared as appropriate by set$tt
+;	    time-out may now be set as low as 1 second
+;	    SET REC PAC >94 now enables long-packets, if set off prior to it
+;	    added SET CL PORTS, UNITS for auto line assign under TSX+
+;	    added SET CONSOLE [NO]MILNET to force 2 XONs when CONNECTing
+;	    cleaned up SET FILE code, see HELP SET FILE for details
+;
+;	    set$bi - modified to be augmented by new entries, not trashed,
+;	    to allow dependence on it for selection of filtering for the
+;	    new improved type routine in KRTCM1, supports types <3 chars
+;
+;	    st$nlp - clr senlng, which is now used to ensure a packet of
+;	    almost or equal to 94 bytes in a long-packet xfr will get the
+;	    correct header.  command dispatch table also patched for this
+;
+;	    added set$vl - sets action on vlswch char ^W and print window
+;	    char ^B in the CONNECT mode under TSX+  see HELP SET VLSWCH
+;
+;	    moved SET [NO]QUIET here, made it SET TT [NO]QUIET, added tests
+;	    for it where missing..
+;
+;  KRTSUB - added upper case subroutine
+;	    moved itoa here
+;	    add support for non-EIS CPUs
+;
+;  KRTTRA - after each byte sent the response from the receiver is echo'd
+;	    this makes it handy for reading text files into a called
+;	    system's message editor, etc..  speed is locked at 1 byte/tick,
+;	    which is 600 baud in 60Hz land
+;
+;	    added code to echo last char(s) from remote after EOF is reached
+;	    modified action on EOF to reconnect to remote system, suppressing
+;	    CONNECT's sign-on for a cleaner (cursor+display intact) return
+;
+;  KRTUTL - added logical disk mount using TSX+ emts
+;	    getrec patched to accept passed buffer-length
+;	    50/60Hz test added to asctim
+;	    ascdat now uses copy in krtdir
+;	    cleaned up the delete, rename and copy subroutines..
+;	    move copy file name checking to c$copy, now shared with PRINT
+;	    try to mount .DEV logical disk if .DSK default fails
+;	    fixed COPY error handling when out file is too small
+;
+;  KRTXL  - DTR drop sped up to a 0.5 second interval..
+;	    dumped waitti as multiple byte reads accomplish the same thing
+;	    CLHOSE defined for use in clearing CL handler, uses spfun 265
+;	    CLSTAT defined and inqdtr added, for CL lines only..
+;	    enhanced set$speed error handling
+;	    mapxl now allocates the handler under TSX
+;	    added inqcd
+;	    SET SPEED reinits modem if one was on-line
+;
+;	    mapxl now uses .cstat to get physical name from logical name
+;	    one may ASS CL0 PHN then run Kermit and SET LINE PHN within it
+;
+;	    dropped TSX hi-eff term mode when data are going thru a handler
+;	    allowing use of ^A and etc during transfers under TSX
+;
+;	    allow LFOUT operation of CL handler.  under TSX return is made
+;	    an activation character, thus no LF is appended..
+;
+;  KRTXM  - added equiv. of SETSIZ KRTTSX/T:64., helps on some TSX systems..
+;
+;  KRTXMO - added xmodem..  this is currently send only from here via the
+;	    connected terminal line (no handler support)
+
+
+; /BBS/	Non-relevant edits (other operating systems) have been pulled below..
+
+; 60 21-Mar-89	00:00:00  K11DIA.MAC	Completed definition of DF224 modem
+; 59 17-Sep-87	15:28:36  K11SER.MAC	Fix processing of server cwd cmd
+; 56 23-Jun-87	07:41:18  K11PRT.MAC	Fix sending break for XL on RT-11
+; 56 19-Feb-87	15:58:58  All sources	Use teco macro to change all the
+;					.includeS to be conditional, this
+;					was done to allow assembly on RT-11
+;					version 4 and P/OS
+; 56 09-Dec-86	14:15:23  K11INI.MAC	Control A stats support
+;			  K11REC.MAC
+;			  K11SEN.MAC
+; 56 06-Nov-86	08:27:54  K11SHO.MAC	Fix command macro list (SHO ?)
+; 55 23-Oct-86	11:00:59  K11CMD.MAC	Prompting bug for RT-11 XM overlay
+; 54 30-Sep-86	13:24:07		SHOW DIAL
+; 54 29-Sep-86	10:23:49  Numerous	Fix sources for possible I/D space
+;					linking under RSTS/E and RSX11M+
+; 54 23-Sep-86	16:28:14  K11DIA.MAC	Support VADIC 4224 .v22bis modem
+; 54 23-Sep-86	16:28:46  K11ST0.MAC	SET PHONE TONE/PULSE and SET PHONE
+;					BLIND, added for VA4224 support
+; 54 09-Sep-86	16:01:27  K11ST1.MAC	SET FILE NAMING/NAMES option
+;			  K11CVT.MAC	Options are: LITERAL, CONVERTED
+;			  K11DAT.MAC		     FULL, UNTRANSLATED
+; 53 13-Aug-86	09:38:04  K11PAK.MAC	Add SET SEN [NO]XON so one can force
+;			  K11ST1.MAC	every packet sent to be prefixed with
+;			  K11DAT.MAC	an XON.  Perhaps this will help for
+;					the DHV/U problems with flow control.
+; 53 12-Aug-86	16:28:14  K11PAK.MAC	Fix BUFUNP to process repeat counts
+;			  K11SER.MAC	It would seem the 2.29 of MS Kermit
+;			  K11REC.MAC	is prefixing file name in F packets
+; 53 12-Aug-86	11:05:03  K11CMD.MAC	Allow ; and ! to delimit comments
+; 53 07-Aug-86	08:40:36  K11RCO.MAC	Minor changes to connect under RT-11
+;			  K11PRT.MAC	SJ without timer support. This was
+;					done AGAINST my better judgement.
+; 53 05-Aug-86	19:35:19  Many		Make CMDBUF and ARGBUF pointers to
+;					the actual data in order to reduce
+;					the K11XM and K11RT4 sizes to help
+;					in SRUN or FRUN. Add code to re-
+;					locate some PIC code into dynamic
+;					region based from APR7 for RT-11.
+; 53 29-Jul-86	13:10:34  K11ST1.MAC	Add SET FIL TYP DEC_MULTINATIONAL
+;					to allow 8-bit text files. The mod
+;					to K11ATR was to add support for
+;					this between two 3.53 or later K11
+;					systems.
+; 52 28-Jul-86	17:10:00  K11RTI.MAC	More TSX+ features, also for PRO
+;					(I now have a TSX+ system on my
+;					PRO/350)
+; 52 2X-Jul-86		  Numerous	Command line editing and recall,
+;					use arrow keys to control. Created
+;					K11EDI.MAC from CLEEDI.MAC
+; 52 2x-Jul-86		  K11RT*.MAC	Root size reductions for XM, via
+;					moving more things into dynamic
+;					region.  Some things in K11DAT were
+;					changed to pointers.
+; 51 07-Jul-86	12:31:17  K11PRT.MAC	.TWAIT for packet reads to reduce
+;					overhead on XM and TSX+
+; 51 13-Jun-86	13:53:05  K11CVT.MAC	Truncate file names for RT-11
+; 51 06-Jun-86	09:52:29  K11RTI.MAC	Alter TSX+ memory allocation
+; 51 06-Jun-86	09:52:57  K11PRT.MAC	Get rid of .HRESET for XC handler
+; 51 04-Jun-86	11:16:07  Misc.		More changes to get K11XM.SAV to run
+;					in the Foreground on RT-11 V5
+; 51 29-May-86	13:50:00  K11CMD.MAC	Remove first (unneeded) call to SETCC
+;					so we can wait for XINIT to do a .QSET
+;					as we need extra one for the control
+;					C watcher on RT-11.
+; 51 29-May-86	13:46:07  K11RT4.MAC	Add a real control C trap. IE, start a
+;					watchdog timer to check the terminal
+;					status word.
+; 51 27-May-86	11:33:23  K11RCO.MAC	Kludge for bug in RT 5.1 XL handler
+; 51 25-May-86	09:33:12  K11RT4.MAC	Move XINIT out into K11RTI.MAC and put
+;			  K11RTI.MAC	into an overlay. Also redo the overlay
+;			  K11XM.COM	to cut down autoload vectors on RT XM.
+; 51 23-May-86	11:49:44  A few		Allocate ALBUFF at run time
+; 51 23-May-86	10:50:16  K11RCO.MAC	Check for SJ exec having a clock
+; 51 08-May-86	15:54:56  K11RCO.MAC	Rewrote RT-11 connect code
+; 51 08-May-86	13:20:33  K11CM1.MAC	Fix TYPE command for large recordsize
+;					files
+; 49 28-Mar-86	09:25:10  K11HLP.MAC	Rewrote help routine
+; 49 24-Mar-86	12:16:33  K11ATR.MAC	Fix protocol error for attribute
+;					packets. See K11INS.DOC and K11.BWR,
+;					also see K11ATR.MAC
+; 48 13-Mar-86	14:28:10  K11SHO.MAC	SHOW PHONE
+; 47 05-Mar-86	12:48:19  K11PCO.MAC	Trash K11CON, K11RTC is for RT-11
+; 45 20-Feb-86	15:28:56  K11DIA.MAC	Added SET PHONE NUMBER
+;			  K11ST0.MAC
+; 45 18-Feb-86	11:14:04  K11ST0.MAC	Added SET DIAL
+; 45 11-Feb-86	12:17:09  K11RT4.MAC	Pass KMON command BYE for server
+;					logout on TSX+
+; 45 11-Feb-86	12:27:42  K11RTD.MAC	Skip volume verify for LDn:
+; 45 11-Feb-86	12:28:06  K11PRT.MAC	Do a SET CLn LFOUT when closing line
+; 45 10-Feb-86	11:52:21  K11CON.MAC	Removed RT-11 code
+; 45 10-Feb-86	11:30:41  Misc		Final MODS from Steve Heflin
+; 44 07-Feb-86	15:48:45  K11PAK.MAC	Change Steve Heflin's exiting Kermit
+;					if the wait for SOH reads a contrl Z
+;					to require TWO ^Zs in a row
+; 44 07-Feb-86	13:58:09  K11DAT.MAC	Data for displaying TIMEOUT count
+;			  K11INI.MAC	Display TIMEOUT count
+; 44 04-Feb-86	09:00:12  K11PRT.MAC	Implicit SET CL NOLFOUT for TSX+
+;					Write SET SPEED code for CL (TSX+)
+; 44 03-Feb-86	12:46:50  K11PRT.MAC	Allow CLn: for TSX+, where N is 0..7
+;			  K11DSP.MAC
+; 43 24-Jan-86	16:30:22  K11PRT.MAC	Added SET RT-11 BREAK [SHORT][LONG]
+;			  K11DAT.MAC	Short is 275 MS, long is 3 Sec
+;			  K11ST0.MAC
+; 43 23-Jan-86	15:58:51  Misc		Added stats for packet and file data
+;					Also compute data rate in STAT and
+;					SHO PAC commands
+; 43 17-Jan-86	13:39:50  K11INI.MAC	Clean up SET SEND/RECEIVE and also
+;			  K11ST1.MAC	use LONG PACKETS only if the user
+;					did SET REC PAC > 94
+; 43 17-Jan-86	11:26:01  K11PAK.MAC	Change packet stats into 32. bits
+;			  K11INI.MAC	to avoid overflow. Run DOB on SYSLIB
+;			  K11DAT.MAC	modules CDDMG, CBTA and SAVRG and
+;			  K11SHO.MAC	put them into K11RT4.MAC
+;			  K11REC.MAC
+;			  K11SEN.MAC
+;			  K11RT4.MAC
+; 42 14-Jan-86	13:03:38  K11DIA.MAC	Rixon R212A modem support added
+;					by Robin Miller of Northern Telecom
+; 42 10-Jan-86	11:43:37  several	LONG packet support
+; 41 31-Dec-85	12:23:53  K11ST1.MAC	Added SET SERVER [NO]TIME_OUT [value]
+;			  K11PAK.MAC
+;			  K11INI.MAC
+;			  K11DAT.MAC
+;			  K11SER.MAC
+;			  K11DEB.MAC
+; 41 31-Dec-85	04:23:27  K11PRT.MAC	Added support for RT-11 5.2 and DTR
+;					control
+; 41 28-Dec-85	11:43:52  Numerous	Added Steve Heflin's mods in for AtoZ
+;
+; The following things (edit 40) came up from comments received at F85 Decus
+;
+; 40 18-Dec-85	10:03:57  K11DSP.MAC	Added dummy EP for INQDTR:
+; 40 18-Dec-85	10:03:02  K11ST0.MAC	Print DTR status on SET LINE
+; 40 17-Dec-85	13:20:12  K11DIA.MAC	Added REDIAL ntimes command
+;			  K11DAT.MAC	Added global PHNUM for REDIAL command
+; 40 16-Dec-85	15:14:23  K11CVT.MAC	Remove .COM from default binary types
+;
+; 2.39 is the Fall Decus version
+;
+; 39 04-Dec-85	17:58:37  K11DIA.MAC	Modem type data structure mods, see
+;					K11DIA.MAC for more info
+; 39 03-Dec-85	13:00:14  K11TSX.MAC	More mods to use CONSOLE port on RT-11
+;			  K11DSP.MAC	Also, SET LIN TT will override the
+;					use of XL or MT service
+; 39 30-Nov-85	12:35:44  K11INI.MAC	Send ESC> to force ANSI mode if VT-100
+; 39 14-Nov-85	10:17:15  K11RT4.MAC	Check for XC, XL and MT service.  If
+;					not present, warn and fake using TSX
+;					TT code.
+; 38 07-Nov-85	15:13:06  K11RTD.MAC	Rewrite handling for REMOTE DIR server
+;			  K11SER.MAC	processing so that we do not fill up
+;					a file with the directory listing and
+;					then send the file.  Instead stuff
+;					GETROUTINE: with &SDODIR.
+; 38 06-Nov-85	16:20:33  K11SER.MAC	Change REM HELP to use asciz sender
+;					instead of dumping to file and sending
+;					the file for the extended response
+; 38 06-Nov-85	15:17:36  K11RT4.MAC	Change EPT name GETCR0 to FGETCR0
+; 38 06-Nov-85	15:13:59  K11PAK.MAC	Moved GETCR0 to call actual next_char
+;					routine via CALL @GETROUTINE so we can
+;					support the use of alternate routines.
+;					This allows extended server responses
+;					to use memory or whatever instead of
+;					temporary files.
+; 37 05-Nov-85	10:19:47  K11PRT.MAC	Added .TWAIT for 1/3 second in TTYFIN
+;					to avoid turning the XC/XL driver off
+;					before all I/O has been sent to host
+; 37 04-Nov-85	17:23:30  K11PRT.MAC	Put back  in the kludges for the lack
+;					of a clock, which somehow got lost in
+;					subspace somewhere (RT-11 specific)
+; 37 04-Nov-85	15:25:08  K11PRT.MAC	Various mods for CL handler for TSX+
+;			  K11RT4.MAC	to allow the use of 8-BIT mode on the
+;			  K11TSX.MAC	handler, also avoid dropping DTR when
+;			  K11DSP.MAC	we close CL line. Dummy EPTs stuffed
+;					in K11TSX for reset @ exit code.
+; 37 04-Nov-85	13:23:52  K11REC.MAC	ensure call to FPARSE for case where
+;					user says GET remote_name local_name
+; 37 01-Nov-85	10:51:33  K11INI.MAC	Get defensive in RPAR so we can catch
+;					short SINIT packets better and fix(?)
+;					them.  Needed for FIDO Kermit.
+; 37 19-Oct-85	17:17:49  K11DIA.MAC	Add DIAL command
+; 37 19-Oct-85	17:00:01  K11ST0.MAC	Added SET MODEM command
+; 36 13-Oct-85	15:27:45  K11SEN.MAC	Fix up control C aborts. Add new state
+;			  K11REC.MAC	called STA.CCABORT for processng ctl C
+;					aborts.
+; 36 10-Oct-85	14:51:33  K11PAK.MAC	Fix call from M$RETRY to ERROR()
+; 36 24-Sep-85	12:29:53  K11SER.MAC	Added REMOTE LOGIN and support for it
+;			  K11COM.MAC	in the server
+;			  K11CMD.MAC
+;			  K11CMD.MAC	Disabled for SEND if wildcarded file
+;			  K11SEN.MAC	name and GET filename asfilename
+; 36 17-Sep-85	10:55:06  K11REC.MAC	Allow SEND file asfile
+; 36 17-Sep-85	10:54:11  K11ST0.MAC	Added SET RT-11 CREATE_SIZE value to
+;					for allocation for small disks on file
+;					creates, sometimes needed in Kermit-11
+;					to non Kermit-11 transfers
+; 36 13-Sep-85	12:30:12  K11ST1.MAC	Added SET REC START-OF-PACKET, SET
+;			  K11PAK.MAC	SEND START, SET START-OF-PACKET which
+;					forces both SOPs to same value
+; 36 10-Sep-85	13:38:31  K11ST0.MAC	Added SET RT-11 command, currently as
+;			  K11RTD.MAC	SET RT-11 [NO]VOLUME_VERIFY, to skip
+;			  K11DAT.MAC	checking systype at offset 760 in the
+;			  K11RT4.MAC	directory header for disks. Also added
+;			  K11COM.MAC	SET RT-11 [NO]FLOW_CONTROL same as the
+;					old SET RTFLOW [ON][OFF]
+; 35 01-Sep-85	14:45:33  K11SEN.MAC	Added messages for retry aborts
+; 35 01-Sep-85	14:30:22  K11PAK.MAC	Modified insertion of prompt into
+;					error messages
+; 35 01-Aug-85	14:15:10  K11CVT.MAC	Fix file names with fubar characters
+;			  K11REC.MAC	to be legit (insert "X" into name),
+;					as in GET abcde_f.dat --> abcdexf.dat
+; 34 29-Jul-85	14:22:28		Mod REM CWD to accept password if
+;					present, no prompts though
+; 32 02-Jul-85	22:29:34  K11HLP.RNO	Add Doc for modems
+; 32 02-Jul-85	13:44:50  K11CMD.MAC	Added support for CWD and REM CWD
+;			  K11SER.MAC	Support for GN$CONNECT (rem cwd)
+;			  K11COM.MAC	Added CWD and REM CWD to command lists
+; 32 02-Jul-85	13:14:22  K11INI.MAC	Set pro/350 to 7-bit to avoid multinat
+;					char sets, use SET CONS 8 to override
+; 32 02-Jul-85	13:02:04  K11PAK.MAC	Insert current prompt into error text
+;					sent to other system
+;
+; New tape to Columbia	  V2.31
+;
+; 31 20-Jun-85	18:42:39  K11SEN.MAC	Update SDATA to not abort on "unknown"
+;					packet type
+; 31 20-Jun-85	18:42:27  K11SHO.MAC	Updated SHOW command
+; 31 17-Jun-85	15:29:36  K11RT4.MAC	Add .HRESET if device was X?: at exit
+; 30 01-Jun-85	11:03:30  K11INI.MAC	Mods for SET UPDATE, also set do a SET
+;					TERM VT100 for PRO/3xx systems
+; 30 01-Jun-85	11:02:28  K11ST1.MAC	Added LOGFILE filnam.typ so we can
+;					be more compatible (calls SET LOGFILE)
+; 30 01-Jun-85	11:01:45  K11DAT.MAC	Added BLIP:: for packet logging ala
+;					SET UPDATE n.  SET UPD 0 will disable
+;					all packet counts to the terminal.
+; 29 18-May-85	14:17:39  K11SER.MAC	Update packet types to symbolic names
+; 29 17-May-85	05:08:47  K11ST1.MAC	Add SET FILE [NO]SUPERSEDE to protect
+;			  K11REC.MAC	files that already exists
+; 29 14-MAY-85	10:26:33  K11INI.MAC	Fix bug for setting 8-bit prefixing
+;					Quite noticeable on PRO/RT version
+; 28 09-May-85	07:40:41  K11RTD.MAC	Add support for server REM DIR command
+;					for RT and TSX+
+; 28 07-May-85	17:40:06  K11TSX.MAC	Final mods by Ned Rhodes for TSX+
+;			  K11PRT.MAC
+; 28 01-May-85	16:00:01  K11ST1.MAC	Ignore TYPE in SET FILE [TYPE] arg
+; 28 22-Apr-85	10:34:56  K11RT4.MAC	Kludge if RT system does not have a
+;					clock
+; 28 20-Apr-85	09:22:01  K11ST1.MAC	Added SET BINARY-TYPE .typ for
+;			  K11CVT.MAC	overriding the built-in binary file
+;					type list
+; 27 19-Mar-85	15:59:06  K11SEN.MAC	Fix losing attribute packets in case
+;					we timed out or were NAKed
+; 26 28-Feb-85	14:00:30  K11RT4.MAC	Fixes for TSX+
+;			  K11DSP.MAC
+;			  K11TSX.MAC
+; 25 29-Jan-85	09:40:22  K11SEN.MAC	Fix things up for ^E,^X and ^Z inter-
+;			  K11REC.MAC	upts on getting and sending files
+; 25 28-Jan-85	15:30:01  K11SER.MAC	Get rid of embedded CR/LFs in short
+;					server reply string
+; 25 17-Jan-85	10:56:03  K11HLP.HLP	More explanation about BINARY files as
+;					there seems to be a lot of confusion
+;					about binary file transfer
+; 25 17-Jan-85	10:52:38  K11DSP  BDN	Clear PROFLG in ASSDEV if SET LINE is
+;					done and device is not X?: for RT-11
+; 25 17-Jan-85	10:51:58  K11SEN  BDN	Added abort (^E,^X & ^Z) for SENDing
+; 24 09-Nov-84	15:35:17  K11TSX  BDN	Creation from NED RHODE'S mods for TSX
+; 24 09-Nov-84	15:35:05  K11DSP  BDN	Creation
+; 24 09-Nov-84	15:32:36  K11RT?  BDN	Virtual overlays for XM, K11DSP to
+;					call the correct terminal I/O overlay
+;					based on the exec and line type (ie,
+;					TSX+ and XC/XL).  We can now AVOID
+;					generating a different save image for
+;					each config.
+; 23 25-Oct-84	16:47:20  K11XXX  BDN	This is getting to be a drag having to
+;					generate six different versions of the
+;					Kermit-11 each time I change something
+; 23 25-Oct-84	16:46:01  K11CON  BDN	Removed break sending code to specific
+;					executive support modules
+; 23 25-Oct-84	16:45:36  K11PRT  BDN	Real break sending for the PRO/RT-11
+; 23 25-Oct-84	16:45:11  K11ST1  BDN	SET REPEAT ON/OFF
+; 23 25-Oct-84	16:44:52  K11PAK  BDN	Repeat count prefixing added
+; 23 21-Oct-84	16:37:57  K11???  BDN	Got sick of working on PRO/RT-11
+; 23 21-Oct-84	16:38:36  K11CMD  BDN	Moved printing of banner
+; 23 21-Oct-84	16:37:16  K11REC  BDN	Added error logging and got all state
+;					switches parameterized
+; 23 21-Oct-84	16:36:51  K11CVT  BDN	Added new file types for binary mode
+; 23 16-Oct-84	15:32:31  K11CM1  BDN	Removed number of commands from K11CMD
+;					to save space for PRO/RT-11 version
+; 23 15-Oct-84	13:52:09  K11RT?  BDN	Fixed all the .FETCH stuff
+; 23 15-Oct-84	13:39:22  K11ST1  BDN	Creation-split K11STT in 1/2 for RT-11
+; 23 15-Oct-84	13:39:22  K11ST0  BDN	Creation-split K11STT in 1/2 for RT-11
+; 23 15-Oct-84	13:39:05  K11CMD  BDN	Moved C$SET back in
+; 23 14-Oct-84	16:01:22  K11PRT  BDN	New  module for XC port communications
+;					with PRO/RT-11 version 5.1
+; 23 14-Oct-84	15:20:13  K11SEN  BDN	Creation, split receive and send state
+;			  K11REC	out from K11PAK to save space for  the
+;					PRO/RT-11 version of Kermit
+; 22 14-Aug-84	10:24:23  K11RTU  BDN	Added code for ASCTIM for RT-11 Kermit
+; 22 14-Aug-84	10:21:51  K11ATR  BDN	Add attribute packet type 41 (8) so we
+;			  K11RT4	send  the receiving Kermit the size of
+;					the file.  Need for RT-11 Kermit since
+;					RT-11 has to preallocate files.  Could
+;					not create file larger than 243 blocks
+;					on the PDT150 until this was put in.
+; 22 10-Aug-84	13:20:31  K11RT4  BDN	Moved ERROR text and error lookup code
+;			  K11RTU	to K11RTE, also moved RT-11 COPY to
+;					K11RTU overlay
+; 22 08-Aug-84	15:50:33  K11RTD  BDN	Change check for RT-11 volume valid
+;					from home block offset 730 to 760
+; 22 03-Aug-84	10:28:54  K11PAK  BDN	Finish code for talking to half duplex
+;			  K11COM	IBM 370 compatible systems.  Added SET
+;			  K11STT	IBM ON/OFF, SET LOCAL ON/OFF.  SET LOC
+;					is equivalent to SET DUPLEX FULL/HALF.
+; 21 30-Jul-84	16:07:44  K11CVT  BDN	Add .EXE and .RTS to binary file list
+; 21 30-Jul-84	11:17:24  K11PAK  BDN	More work for IBM mode
+; 21 24-Jul-84	11:35:15  K11RTD  BDN	Extended directory lookup for RT-11 to
+;					allow "%" in the file name or type
+; 21 23-Jul-84	12:47:03  K11DEF  BDN	New module, an .include file to
+;					define all the packet types
+; 21 23-Jul-84	12:32:11  K11SER  BDN	Stuff the default dev into the server
+;					extended reply temp file name (needed
+;					for RT-11 Kermit)
+; 21 23-Jul-84	12:31:47  K11RT4  BDN	ensure that we are NOT running under
+;					the SJ monitor
+; 21 19-Jul-84	15:35:00  K11PAK  BDN	Added 8-bit prefixing
+; 20 19-Jul-84	10:26:57  K11RTU  BDN	Add support for REN, DEL for RT-11 V5
+; 18 06-Jul-84	15:20:34		Update sent to Frank Da Cruz for fubar
+;					RT-11 code with .FETCH and .DSTAT
+; 18 03-Jul-84	10:16:03  K11INI  BDN	Moved INIT + KERINI from K11CMD.MAC to
+;					module (K11INI). Also moved SPAR,RPAR,
+;					DSKDMP,FILLOG from K11PAK to here to
+;					save space in the root for RT-11
+; 18 06-Jul-84	12:45:27  K11RT4  BDN	Finally found out that I had the
+;					arguments for .DSTAT swapped, which
+;					explain why the RT-11 file opens and
+;					creates were being so flakey
+;
+; 17 22-Jun-84	12:33:15  !!! finally ship new version out to Columbia !!!
+;
+; 17 21-Jun-84	19:33:48  K11RT4  BDN	Final RT-11 code modifications
+; 17 21-Jun-84	16:22:12  K11CMD  BDN	Fix open for takefile (no type arg)
+; 17 19-Jun-84	18:08:56  misc	  BDN	Add wildcard support for RT-11 version
+; 17 11-Jun-84	11:21:51  K11CVT  BDN	Add code to decide if a file is binary
+;					based on the file type (ala .SAV)
+; 17 10-Jun-84	16:44:50  K11RT4  BDN	Timing bug in file open routine (?)
+;					Fix overlay error (K11ATR with K11SUB)
+; 16 28-May-84	15:55:08  K11PAK  BDN	ensure that BUFEMP does not try to
+;					CTL chars that could not have been set
+;					Defensive response to CPM Kermit 3.9
+;					which ALWAYS sends &s over with the
+;					CTL quote, "#".  Note: 20KERMIT does
+;					this also. Fix should be in CPM Kermit
+;					but it's simple to fix at this end.
+; 16 28-May-84	09:10:19  K11CMD  BDN	Fix call to TTYRST for Kermit-11/RT
+; 16 25-May-84	15:39:26  K11STT  BDN	Moved command definitions for the SET
+;					command to K11COM.MAC to save space
+; 16 25-May-84	12:18:08  K11DEB  BDN	Added DISPLAY globalsym command
+;					Prints out values in module
+;					K11DAT.MAC for debugging purposes
+; 16 21-May-84	17:01:56  K11PAK  BDN	Don't retry until MAXTRY the SINFO
+;					packet since older Kermits will not be
+;					able to understand "I" packets.  Old
+;					Kermits ALWAYS send NAKS for SINFO.
+; 16 18-May-84	10:29:02  K11SER  BDN	The code for response to an "R" packet
+;					was sending the RMS error text after
+;					routine GETNXT already sent err packet
+; 15 08-May-84	11:15:35  K11PAK  BDN	ensure R0 cleared in BUFEMP in case
+;					the data packet was null
+; 15 06-May-84	11:33:56  K11PAK  BDN	Moved the ACK for the EOF packet to be
+;					send AFTER output file is closed.  An
+;					occasional RSX problem in the BREAK
+;					packet lost due to timing required
+;					this mod, though if the line is set up
+;					properly this would not be a problem.
+; 15 01-May-84	11:41:49  K11ATR  BDN	Added support for attribute packets
+;					Auto determination of binary mode
+;					Support for getting the IFAB data will
+;					only work between like Kermits
+;					Added SET ATTRIB OFF command to dis-
+;					able any attribute sending even if the
+;					other Kermit's CAPAS field indicates
+;					support of it (ie, handle incompatible
+;					protocol versions or bugs)
+; 14 18-Apr-84	10:40:01  K11PAK  BDN	Mods for deferred file creates to
+;					handle attribute packets
+; 13 04-Apr-84	18:39:38  K11SER  BDN	Calls to SINFO if we expect extended
+;					reply from a remote server, required
+;					if block checks are type 2 or 3
+; 13 04-Apr-84	18:37:58  K11CON  BDN	Have X cmd cancel link being XOFF'd
+;					by the remote as well as send the
+;					remote an XON
+; 13 04-Apr-84	10:13:32  K11PAK  BDN	Debug logging mods. Added TTXON calls
+;					to fix XOFF'd line.  Added SINFO
+;					to handle init for expected server
+;					reply.
+; 13 02-Apr-84	11:14:36  K11CON  BDN	Added support for half duplex link
+;					added global "duplex" to K11DAT.MAC
+; 13 30-Mar-84	10:40:35  K11MAC  BDN	Defined a macro for XOR which does not
+;					require "XOR reg,dst" format.  It uses
+;					4 instructions and will	be needed
+;					anyway for the RT-11 version.
+; 13 30-Mar-84	10:34:02  K11PAK  BDN	Fix extended server replies to work
+;					when the checksum is type 2 (12bit
+;					arith sum) or type 3 (16 bit CRC)
+; 13 30-Mar-84	10:31:46  K11PAK  BDN	Added software parity generation. Will
+;					be mainly used when connecting out to
+;					a remote system that requires parity
+; 12 20-Mar-84	19:55:15  K11CVT  BDN	New module.  Do executive independent
+;					parsing of file specs to return only
+;					filename.type.  This will help users
+;					who need DAP support.  It's also
+;					overlaid into the ERRDVR region.
+; 12 08-Mar-84	12:33:59  K11CMD  BDN	Added default of ".CMD" for TAKE
+; 12 08-Mar-84	11:56:14  K11CMD  BDN	Move "remlst" and "cmdlst" into K11COM
+;					which is overlaid in the ERROR seg.
+;					Added calls to LOACMD + LOAREM to get
+;					the overlay with K11COM resident + to
+;					return a pointer to the command list.
+;					It saves about 3000 (8) bytes in task
+;					size.
+; 12 07-Mar-84	12:28:16  K11TRA  BDN	Added routine to "brute force" a file
+;					to a remote line. Needed it to get the
+;					new (and not yet done) RT-11 version
+;					on RT-11 system being used for test
+;					which is, would you believe, a real
+;					PDT150
+; 11 05-Mar-84	10:22:48		Sent version 2.11 to Columbia and DEC
+; 11 02-Mar-84	11:27:22  K11CMD  BDN	Modified init stuff to look for init
+;					file KERMIT.INI in SY: then
+;					to try	LB:[1,2], SY:[1,2] and KERMIT:
+; 10 17-Feb-84	15:08:05  K11CMD  BDN	Did some trial stuff on talking to IBM
+;					mainframes, but the CMS Kermit makes
+;					things difficult as it can't time out.
+;					Added Set Handshake and show for it
+;					Not yet done with handshake garbage
+; 10 17-Feb-84	15:07:14  K11PAK  BDN	Mods for doing ^X and ^Z things
+; 07 08-Feb-84	15:19:58  K11SER  BDN	Force mode to be remote if to run as a
+;					server. Not really needed, but what
+;					about doing a SET LINE + then SERVER ?
+; 06 06-Feb-84	10:34:04  K11PAK  BDN	Added SETTMO to decide receive time
+;					out to use based on server timeout,
+;					the other Kermit's desired timeout +
+;					any timeout set via SET TIMEOUT value
+; 06 04-Feb-84	11:55:22  K11CMD  BDN	Added local and remote copy, rename
+; 06 04-Feb-84	11:54:59  K11SER  BDN	Added remote copy and rename support
+; 06 01-Feb-84	13:07:26  K11CMD  BDN	Local and remote WHO commands
+; 06 01-Feb-84	13:07:10  K11SER  BDN	Add support for remote WHO command
+; 06 01-Feb-84	10:37:49  K11SER  BDN	Support remote type in server
+; 06 01-Feb-84	10:36:27  K11CMD  BDN	Add REMOTE TYPE and added DISK to be
+;					same as SPACE
+; 06 01-Feb-84	10:21:19  K11CMD  BDN	Moved type and rename cmds to K11SHO
+;					to space space in the root
+; 05 31-Jan-84	08:41:03  K11CMD  BDN	Moved SHOW command to K11SHO.MAC, also
+;					moved $NAME + COMMAND macros to K11CDF
+; 05 30-Jan-84	16:38:01  K11SER  BDN	Consolidated remote server command
+;					packet sending and creation
+; 05 30-Jan-84	12:01:41  K11CMD  BDN	Add ERASE, DELETE
+; 04 27-Jan-84	21:33:21  K11CMD  BDN	Added REM ERASE, also add synonym
+;					for SET LOGFILE as LOG_FILE
+; 04 27-Jan-84	20:02:34  K11HLP  BDN	Fix keyword match to match @ pos 1
+; 04 27-Jan-84	18:55:44  K11PAK  BDN	If datafield.len < 0 reset checksum
+;					type to type "1" in RPACK$
+; 04 27-Jan-84	18:45:08  K11SER  BDN	Redo support for remote commands
+; 04 27-Jan-84	18:30:07  K11PAK  BDN	Redo support - extended server replies
+;
+; Version 2
+;
+; I decided that I would like to have the normal TED timestamp on the edit.
+;
+;	03 25-Jan-84  K11HLP	BDN	Finished subtopics for HELP command
+;	02 18-Jan-84  K11CMD	BDN	Added REMOTE, SPACE and REMOTE SPACE
+;	02 17-Jan-84  K11CMD	BDN	Added commands NOTE and COMMENT for
+;					echoing text from indirect files
+;	02 17-Jan-84  K11CMD	BDN	Allow open for KERMIT.INI
+;	02 17-Jan-84  K11PAK	BDN	Allow 12 bit and CRC-CCITT Checksums
+;					User should always set the checksum
+;					type for both KERMITS
+;	02 16-Jan-84  K11CMD	BDN	Allow underscore and digits in command
+;					names
+;	02 16-Jan-84  K11PAK	BDN	Redo checksum processing to
+;					accommodate 12 bit and CRC types
+;	02 16-Jan-84  K11CMD	BDN	Add Set Block-Check-Type + SHOW BLOCK
+;	02 13-Jan-84  K11CMD	BDN	Moved C$HELP to module K11HLP
+;	02 13-Jan-84  K11CMD	BDN	Added showing speed for SHOW LINE
+;	02 13-Jan-84  K11CMD	BDN	Added TAKE and @ commands
+;	02 12-Jan-84  K11PAK	BDN	Fix checking for X, Z in ACK for Sdata
+;	02 11-Jan-84  K11CMD	BDN	Added RENAME command
+;	01 08-Jan-84  K11PAK	BDN	Fix .asciz for ERROR: SPACK
+;	01 08-Jan-84  K11CMD	BDN	Added call to XINIT for initialization
+;					based on the operating system
+;	01 08-Jan-84  K11PAK	BDN	Change timeout to MYTIME from MAXTIME
+;					if remote's SINIT packet had a value
+;					of zero for the timeout (CMS Kermit?)
+;	01 08-Jan-84  K11CMD	BDN	fix SET PARITY
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+	.include "IN:KRTDEF.MAC"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MAC failed>
+
+	.mcall	.CMKT	,.PURGE	,.RCTRLO,.TWAIT	; /62/
+
+
+	.sbttl	Local data		; /63/
+
+	.psect	$pdata
+fifteen:.word	0 ,15			; /62/ 15 ticks for .twait
+;nosub:	.byte	0 ,152			; /BBS/ disable subprocess access
+;	.word	'H
+;	.word	0
+caratc:	.asciz	"^C"<cr><lf>		; /62/ something to echo
+cmd.01:	.ascii	"Kermit-11 for "	; for SHOW VERSION
+	.if df	NONEIS			; include which
+	.ascii	"NON"			; instruction set
+	.endc				; Kermit is using
+	.asciz	"EIS RT-11"
+cmd.02:	.asciz	"XB,XM,ZB,ZM"
+cmd.03:	.asciz	"FB,SB,SJ"
+cmd.04:	.asciz	"/TSX-Plus  "
+cmd.05:	.asciz	" failed at line #"	; error message
+cmd.06:	.asciz	':'<cr><lf>'  "'	; line number tag & top of next line
+cmd.07:	.asciz	'"'<cr><lf>'  '		; end of line & top of following line
+cmd.08:	.asciz	" closed"<cr><lf>	; take file is closed
+cmdch:	.asciz	"_ABCDEFGHIJKLMNOPQRSTUVWXYZ-@0123456789." ; /63/ legal chars
+comment:.byte	scolon ,'! ,0		; /63/ comment delimiters list
+	.even
+
+
+	.psect	$code
+	.sbttl	Init the program
+
+kermit::mov	#stack	,sp		; initialize a large stack
+;	mov	#nosub	,r0		; /BBS/ do this for this bbs to
+;	emt	375			; /BBS/ prevent leaving until done
+	call	sho$version		; print version and edit number
+	call	kerini			; init program, look for KRT.INI
+	tst	sy.ini			; /BBS/ init file going to run?
+	bne	10$			; /62/ ya, wait until after it's done
+	call	sho$line		; /BBS/ no, display default now
+10$:	call	binini			; load binary-types list into buffer
+	br	NEW10$			; /BBS/ skip over ^C's newline
+
+
+	.sbttl	CCAST returns here	; /62/ moved all this to mainline
+
+cmdloop::.cmkt	#rtwork	,#40		; in case not coming from ccast
+	mov	#stack	,sp		; reset the stack
+	.rctrlo				; ensure TT output is enabled
+	tst	sl.on			; is SL on?
+	beq	10$			; no, monitor will echo "^C"
+	wrtall	#caratc			; ya, print "^C"
+10$:	clr	xprint			; kill the print the world facility
+	call	clrcns			; hose any pending terminal input
+
+	tst	linksts			; was link running?
+	beq	30$			; nope..
+	tst	inprogress		; packet exchange in progress?
+	beq	20$			; nope..
+	spack	#msg$error,paknum	; yes, try to break out of it all
+	.twait	#rtwork	,#fifteen	; wait 15 ticks for output completion
+	call	incsta			; /63/ finish up transfer stats
+	movb	#defchk	,chktyp		; reset the checksum type
+	mov	#1	,chksiz		; and the size of the checksum
+20$:	call	clostt			; close it up
+30$:	clr	inserv			; not a server now
+	clr	sertim			; not waiting for a server command
+	clr	xmode			; just in case..
+
+	clr	bufp+0			; hose TT channel, pointer := 0
+	mov	buflst+0,r4		; get the buffer address
+	mov	bufsiz+0,r0		; and size
+40$:	clrb	(r4)+			; for i := 1 to bufsiz
+	sob	r0	,40$		;   do buffer[i] := chr(0)
+	calls	close	,<#lun.in>	; hose input channel
+	clr	inopn			; reset its flag
+	calls	close	,<#lun.ou>	; hose output channel
+	.purge	#lun.ou			; /62/ in case close chokes..
+	clr	outopn			; reset its flag
+; /BBS/	note the log file (lun.log) remains open..
+	calls	close	,<#lun.ta>	; hose command file channel
+	clr	cmdlun			; reset its flag
+	clr	tk.err			; done with this now
+	clr	sy.ini			; ditto
+	mov	qu.ini	,infomsg	; restore SET TT [NO]QUIET
+	.purge	#lun.sr			; dump dir search channel
+	clr	dirflg			; /62/ reset embedded blanks flag
+	.br	NEW10$			; /63/ fall through to NEW10$
+
+
+	.sbttl	Kermit main_program_loop
+
+NEW10$:	clr	cccnt			; no ^Cs typed yet
+	call	setcc			; /BBS/ enable ^C test's mark timer
+	mov	argbuf	,argpnt		; ensure arg pointer is reset
+	call	fixchk			; restore the SET block check type
+	textsrc				; /62/ ensure reset to file I/O
+	clr	inprogress		; /63/ packet xfr no longer active
+	clr	rem.ack			; /63/ no ACK rec'd for REMOTE cmd
+	clr	xredial			; /BBS/ hose redial options word
+	clr	status			; /BBS/ reset take file error status
+	clr	summary			; /BBS/ reset summary only flag
+	clr	logini			; /BBS/ reset packet log display flag
+	clr	at$len			; /BBS/ used to pass file size locally
+	clr	pf2$ok			; /BBS/ PF2 can overlay help from here
+	call	getcmd			; read and parse the command
+	mov	sp	,pf2$ok		; /BBS/ so PF2 doesn't eat overlays
+	tst	r0			; get a valid command?
+	blt	40$			; no, goto command error handler
+	jsr	pc	,@cmdadr	; ya, dispatch to the command
+
+10$:	tst	jobtype			; /62/ command file or detatched job?
+	beq	30$			; /62/ no
+	bmi	20$			; /62/ detached, always bail on error
+	tst	exieof			; /62/ cmd file, does user want out?
+	beq	30$			; /62/ no, keep Kermit alive..
+20$:	tst	status			; /45/ error status ok so far?
+	beq	NEW10$			; /BBS/ ya
+	tst	cmdlun			; /62/ no, reading from indirect file?
+	bne	NEW10$			; ya, do one more loop to dump err msg
+	bisb	#fatal$	,@#userrb	; /62/ no, inform rest of the world
+	jmp	c$exit			; /BBS/ an error occured and exit..
+
+30$:	cmp	r0	,#cmd$ab	; /62/ ^C typed?
+	bne	NEW10$			; /62/ no
+	jmp	cmdloop			; /62/ ya
+
+
+	.sbttl	Parse errors or EOF come here
+
+40$:	save	<r0>			; /BBS/ save error from above
+	cmp	r0	,#cmd$bad	; /BBS/ come here on ^C/^Z abort?
+	bhi	60$			; /62/ ya, don't run a take file!
+	mov	cmdbuf	,r4		; /BBS/ pointer to command buffer
+	cmpb	#'@	,(r4)+		; /BBS/ is it RT-11 style "@COMMAND" ?
+	bne	60$			; /BBS/ nope
+	tst	(sp)+			; /BBS/ ya, pop saved error off stack
+	mov	argbuf	,r0		; /BBS/ pointer to argument buffer
+50$:	movb	(r4)+	,(r0)+		; /BBS/ copy it in like a command arg
+	bne	50$			; /BBS/ until the null
+	call	c$take			; /BBS/ attempt to take it
+	br	10$			; /BBS/ done..
+
+; /BBS/ allow changing default device ala CP/M by entering device name
+;	requires enabling access control from which names are tested
+
+60$: ;	scan	#':	,cmdbuf		; /BBS/ find first colon in string
+;	mov	r0	,r1		; /BBS/ save its offset
+;	strlen	cmdbuf			; /BBS/ get string length
+;	tst	r0			; /BBS/ anybody there?
+;	beq	90$			; /BBS/ nope..
+;	cmp	r0	,#4		; /BBS/ more than 4 bytes?
+;	bgt	90$			; /BBS/ ya, bail out
+;	tst	r1			; /BBS/ is there a colon in cmdbuf?
+;	beq	70$			; /BBS/ no, go pop one in..
+;	cmp	r0	,r1		; /BBS/ is first colon also last one?
+;	bne	90$			; /BBS/ nope, :: is not allowed..
+
+;70$:	add	cmdbuf	,r0		; /BBS/ point to end
+;	cmpb	#':	,-(r0)		; /BBS/ is last byte a colon?
+;	beq	80$			; /BBS/ ya
+;	tstb	(r0)+			; /BBS/ no, back to end of string
+;	movb	#':	,(r0)+		; /BBS/ tag it with a colon
+;	clrb	@r0			; /BBS/ reterminate
+
+;80$:	calls	fparse	,<cmdbuf,#errtxt> ; /BBS/ this lets "LD" become "LD0"
+;	tst	r0			; /BBS ..is it an authorized dev?
+;	bne	90$			; /BBS/ nope..
+;	tst	(sp)+			; /BBS/ dump now meaningless error reg
+;	copyz	#errtxt	,#defdir,#5	; /BBS/ modify default dir
+;	call	sho$yy			; /BBS/ and display the change
+;	br	NEW10$			; /BBS/ back for more..
+
+90$:	unsave	<r0>			; /BBS/ pop err reg from getcmd, etc..
+	cmp	r0	,#cmd$ex	; ^Z typed?
+	bne	100$			; no
+	jmp	c$exit			; yes, exit normally
+
+100$:	cmp	r0	,#cmd$bad	; invalid command?
+	bne	110$			; no
+	direrr	#er$unr			; /BBS/ ya, print out an error message
+	br	140$			; /62/ check exit status
+
+110$:	cmp	r0	,#cmd$ab	; /BBS/ ^C abort?
+	bne	120$			; /39/ no
+	jmp	cmdloop			; /BBS/ ya, return to ^C entry point
+
+120$:	cmp	r0	,#cmd$un	; /39/ not unique?
+	bne	130$			; /62/ no
+	direrr	#er$amb			; /BBS/ yes, say so
+	br	140$			; /62/ check exit status
+
+130$:	cmp	r0	,#cmd$nx	; /62/ ^Z but don't exit to monitor?
+	beq	NEW10$			; /62/ ya
+
+140$:	tst	jobtype			; /62/ command file or detatched job?
+	beq	NEW10$			; /62/ no
+	bmi	150$			; /62/ detached, always bail on error
+	tst	exieof			; /62/ cmd file, does user want out?
+	beq	NEW10$			; /62/ no, keep Kermit alive..
+150$:	bisb	#fatal$	,@#userrb	; /62/ no, inform rest of the world
+	jmp	c$exit			; /62/ an error occured and exit..
+
+
+	.sbttl	SHOW ALL		; /63/ here to call different overlays
+
+sho$all::.newline			; /63/ format display for readability
+	call	sho$a0			; /63/ this is all to place the modem
+	tst	modtype			; /63/ (has a modem type been set?)
+	beq	10$			; /63/ in a good place for SHOW ALL..
+	call	shodia			; /63/ (ya)
+	.newline			; /63/ format display
+10$:	call	sho$a1			; /63/ do remaining parameters
+	return
+
+
+	.sbttl	Kludge to put new code in caller's overlay
+
+xxsdia::jmp	shodia			; /62/ SHOW DIAL
+
+
+	.sbttl	The FINISH command
+
+c$fin::	call	ckremote
+	bcs	10$			; we are remote, abort this
+	call	remfin			; tell remote server to exit
+	tst	rem.ack			; /63/ did it work?
+	beq	10$			; /63/ nope..
+	jmp	c$conn			; /BBS/ ya, go CONNECT
+10$:	clr	r0			; /62/ error already handled
+	return
+
+
+	.sbttl	The REMOTE command
+
+c$rem::	call	ckremote		; running as remote?
+	bcs	40$			; nope..
+	call	loarem			; get the remote command overlay in
+	calls	getcm0	,<argbuf,r0>	; and try it please
+	mov	r0	,r3		; /BBS/ save the index (can't use r1)
+	bmi	10$			; /BBS/ didn't find the remote command
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	40$			; /BBS/ ya
+	call	loarem			; get the overlay resident
+	calls	getcm1	,<argbuf,r0,r3>	; get any required args for command
+	tst	r0			; now could we get command arguments?
+	bmi	10$			; /BBS/ no
+	call	lower			; /62/ SET FILE NAMING LOWER-CASE?
+	jsr	pc	,@r1		; dispatch on it now please
+	jmp	clrcns			; /62/ flush TT input, clear r0
+
+10$:	cmp	r0	,#cmd$un	; /BBS/ ambiguous?
+	bne	20$			; /BBS/ nope..
+	mov	#er$ram	,r0		; /62/ really ambiguous REMOTE command
+	br	30$			; /62/ done
+20$:	cmp	r0	,#cmd$bad	; /BBS/ bad command?
+	bne	40$			; /62/ no
+	mov	#er$run	,r0		; /62/ unrecognizable REMOTE command
+30$:	direrr	r0			; /62/ report the error
+40$:	return
+
+
+	.sbttl	REMOTE command sub-routines
+
+rmtcop::call	gettwo			; ensure both arguments are here
+	tst	r0			; are they?
+	bne	10$			; no, just exit then please
+	call	lower			; /62/ in case 2d arg came from gettwo
+	call	remcop			; /62/ attempt the copy operation
+10$:	return
+
+rmtren::call	gettwo			; ensure both arguments are here
+	tst	r0			; are they?
+	bne	10$			; no, just exit then please
+	call	lower			; /62/ in case 2d arg came from gettwo
+	call	remren			; /62/ attempt the rename operation
+10$:	return
+
+ckremo::tst	remote			; local or remote?  also clears carry
+	beq	10$			; /63/ 0 means local, carry is clear
+	direrr	#er$not			; /BBS/ not running as a local Kermit
+	sec				; which is not ok
+10$:	return
+
+lower:	tst	locase			; /BBS/ SET FIL NAM LOWER-CASE?
+	bne	10$			; /BBS/ ya, leave it alone
+	upcase	argbuf			; /BBS/ no, make it upper case
+10$:	return
+
+
+	.sbttl	Shared parse routine	; /BBS/ almost all new
+
+isitas::mov	csi.fake,nextone	; /62/ use fake csi comma parsing?
+	beq	20$			; /62/ no (also clears nextone..)
+	scan	#comma	,r1		; more than one set args supplied?
+	mov	r0	,nextone	; save its position in the arg buffer
+	beq	20$			; no comma found
+	add	r1	,nextone	; save pointer to next argument(s)
+	mov	nextone	,r0		; copy to
+	clrb	-(r0)			; put a null where the comma was..
+	tstb	(r1)			; anything left?
+	bne	10$			; ya
+	mov	#er$fnm	,r0		; no, emit an
+	br	50$			; error message
+10$:	mov	sp	,wasmore	; for display formatting
+20$:	calls	fixwild	,<r1>		; make "?" into "%"
+	mov	#srcnam	,r2		; destination address
+	clrb	asname			; not renaming yet..
+30$:	tstb	@r1			; end of the line today?
+	beq	80$			; yes, exit this loop
+	cmpb	@r1	,#space		; if a space they may have typed
+	beq	40$			; SEND file asfile
+	movb	(r1)+	,(r2)+		; ok so far, copy the name over
+	br	30$			; next please
+40$:	clrb	@r2			; ensure source name .asciz
+	inc	r1			; found a space in the command line
+	tstb	@r1			; anything left?
+	beq	80$			; no
+	calls	iswild	,<#srcnam>	; check for wildcarding in name
+	tst	r0			; can't rename outfile if wildcarded
+	beq	60$			; no wildcard found
+50$:	direrr	r0			; display error..
+	return				; and return with r0 intact
+
+60$:	strcpy	#asname	,r1		; 1st arg not wildcard, copy 2nd arg
+	mov	rawfil	,-(sp)		; save current setting
+	clr	rawfil			; enable namcvt
+	calls	namcvt	,<r1,#spare1>	; dump everything but "file.typ"
+	tstb	spare1			; anything left?
+	bne	70$			; ya, continue
+	calls	namcvt	,<#srcnam,#spare1> ; no, get inp "file.typ" only
+	calls	fixfil	,<#spare1,#errtxt> ; truncate rec'd names, send is ok
+	strcat	#asname	,#errtxt	; concat in_file_name to out_dev
+
+70$:	mov	(sp)+	,rawfil		; back to where it wuz..
+	calls	iswild	,<#asname>	; ensure file name is ok
+	tst	r0			; is it?
+	bne	50$			; no
+80$:	clrb	@r2			; ensure source name .asciz
+	return				; note r0 is cleared by chk.tt, above
+
+chk.tt::strcpy	#errtxt	,(r5)		; /63/ make a temp copy of file name
+	upcase	r0			; /63/ so it can be upper cased
+	cmpb	#'T&137	,(r0)+		; /63/ is first byte an "T" ?
+	bne	10$			; /63/ nope..
+	cmpb	#'T&137	,(r0)+		; /63/ is second byte a "T" ?
+	bne	10$			; /63/ nope..
+	cmpb	#':	,(r0)		; /63/ is "TT" followed by a colon?
+	bne	10$			; /63/ no
+	mov	#er$ttx	,r0		; /63/ ya, must REM TY to do this..
+	return
+10$:	clr	r0			; /63/ not TT, thus no problem
+	return
+
+
+	.sbttl	Get command from the attached terminal
+
+;	G E T C M D
+;
+;	input:		written into cmdbuf
+;	output:	 r0	= command index in dispatch table
+;		 r0	= -1 (cmd$bad) for invalid command
+;			  -2 (cmd$ex)  for exit
+
+	CVTARG	= C.CRLF ! C.LSPA ! C.SSPA ! C.TSPA ; /BBS/ don't upper case
+
+	; offsets into command dispatch data table
+	.NAME	=	0	; command name
+	.MINLE	=	2	; minimum length of string to match
+	.CMDAD	=	4	; the command's address
+	.CMDAR	=	6	; address of prompting string, or 0 if none
+
+getcmd:	clrb	@argbuf			; ensure argument buffer is cleared
+10$:	clr	cmdnum			; init command index number
+	.rctrlo				; /BBS/ be sure one can see what's up
+	mov	cmdbuf	,r4		; point to the command buffer
+	calls	readcmd	,<r4,#prompt>	; get from current input stream
+	tst	r0			; and exit if it failed for whatever
+	bne	20$			; /BBS/ preserve r0, check for ^C, ^Z
+	calls	cvt$$	,<r4,r1,#cvtarg> ; remove junk
+	tst	r0			; anything left?
+	beq	10$			; no, reprompt and try again
+	add	cmdbuf	,r0		; ya, point to the end of it all
+	clrb	@r0			; and make it .asciz
+	mov	sp	,pf2$ok		; /BBS/ so PF2 can't eat overlays
+	call	loacmd			; get the command list overlay
+	calls	getcm0	,<r4,r0>	; search for the command
+	mov	r1	,cmdadr		; store address of routine away
+	mov	r0	,cmdnum		; store index of command away
+	mov	r0	,r3		; did we actually find a command?
+	bmi	20$			; no
+	tst	wasnul			; /BBS/ were commands listed via "?"
+	bne	20$			; /BBS/ ya
+	call	loacmd			; get the command list overlay
+	calls	getcm1	,<r4,r0,r3>	; now get the rest of the command line
+	tst	r0			; or prompt for extra
+	bmi	20$			; it didn't work
+	mov	cmdnum	,r0		; return command number
+20$:	return
+
+
+	.sbttl	Get the next command	; /BBS/ heavily modified..
+
+;	R E A D C M D
+;
+;	input:	 (r5)	= buffer address
+;		2(r5)	= prompt address
+;	output:	  r0	= error
+;		  r1	= byte count
+
+readcmd::mov	r2	,-(sp)
+10$:	tst	cmdlun			; reading from indirect file?
+	bne	20$			; ya
+	jmp	170$			; no
+20$:	tst	tk.err			; successful last take command?
+	bne	30$			; nope
+	tst	status			; check this one too..
+	beq	40$			; it was ok
+30$:	tst	infomsg			; /62/ if TT is not set quiet, the bad
+	bne	110$			; /62/ cmd line is already displayed
+	br	100$			; /62/ go do error message(s)
+
+40$:	clr	r2			; /62/ init temp KRT.INI running flag
+	inc	exstal			; increment command file line number
+	calls	getrec	,<@r5,#lun.ta,#ln$max> ; /62/ read the record in
+	tst	r0			; did it work?
+	bne	90$			; nope..
+	mov	r1	,r0		; copy of length
+	add	@r5	,r0		; end of record just read
+	clrb	@r0			; null terminate
+	tst	infomsg			; echo this?
+	beq	50$			; no
+	wrtall	2(r5)			; yes, print the passed prompt
+	wrtall	@r5			; and also echo the command
+	.newline
+
+50$:	tst	r1			; was anything there?
+	beq	10$			; no, on to the next one..
+	mov	@r5	,r2		; ya, pointer to buffer
+60$:	scan	(r2)+	,#comment	; look for a comment delimiter
+	tst	r0			; well?
+	bne	70$			; found one..
+	tstb	@r2			; anything left to check?
+	bne	60$			; ya, go try the next char
+	br	80$			; no, no comments found
+
+70$:	clrb	-(r2)			; zap starting at comment char
+	strlen	@r5			; get remaining length
+	mov	r0	,r1		; save copy
+	beq	10$			; /62/ nothing remains
+80$:	clr	r0			; clear error register and
+	jmp	190$			; /62/ exit with a successful read
+
+90$:	cmp	r0	,#er$eof	; hopefully, it's end of file
+	beq	120$			; yes
+	direrr	r0			; no, get error message text to errtxt
+100$:	wrtall	#indnam			; dump offending file's name
+	wrtall	#cmd.05			; /63/ " failed at line #"
+	mov	exstal	,r0		; load line number
+	call	L10266			; dump it to TT
+	wrtall	#cmd.06			; /63/ ':'<cr><lf>'  "'
+	wrtall	@r5			; append the offending string
+	wrtall	#cmd.07			; /63/ '"'<cr><lf>'  '
+110$:	wrtall	#errtxt			; now dump the error message
+	call	incsts			; /62/ flag the error here too..
+	.newline
+
+120$:	mov	sy.ini	,r2		; /62/ from KRT.INI?
+	beq	130$			; no
+	call	defterm			; display default, set up TT
+	br	140$			; and continue
+130$:	tst	infomsg			; really print the message?
+	beq	140$			; no
+	wrtall	#indnam			; use file name
+	wrtall	#cmd.08			; /63/ " closed"<cr><lf>
+140$:	calls	close	,<#lun.ta>	; close the file on any errors
+	clr	tk.err			; /62/ reset the take file error flag
+	clr	cmdlun			; /62/ next command is comming from TT
+	tst	status			; /62/ did an error occur?
+	bne	150$			; /62/ ya
+	tst	r2			; /62/ no, closing KRT.INI?
+	bne	170$			; /62/ EOF exit is only for TAKE files
+	tst	exieof			; /62/ exit at EOF?
+	beq	170$			; /62/ no
+	mov	#cmd$ex	,r0		; /62/ yes, pass a ^Z back to exit
+	br	190$			; /62/
+
+150$:	tst	jobtype			; /62/ detatched job?
+	bmi	160$			; /62/ ya, always bail on an error
+	tst	exieof			; /62/ does user want out?
+	beq	170$			; /62/ no, keep Kermit alive..
+160$:	bisb	#fatal$	,@#userrb	; /62/ ya, inform rest of the world
+	jmp	c$exit			; /62/ and exit..
+
+170$:	tst	mcrcmd			; did we ever look for a MCR> command?
+	bne	180$			; ya, just do a terminal read
+	calls	getmcr	,<@r5>		; no MCR> command yet, check for it
+	mov	r0	,r1		; did we get any characters there?
+	beq	180$			; no
+	wrtall	2(r5)			; print the prompt
+	wrtall	@r5			; and echo the passed command
+	.newline
+	clr	r0			; no error
+	br	190$
+
+180$:	calls	kbredi	,<2(r5),@r5>	; read a record from the terminal
+190$:	mov	(sp)+	,r2
+	return
+
+
+	.sbttl	Find the command in the table
+
+;	G E T C M 0
+;
+;	input:	 (r5)	= command buffer
+;		2(r5)	= first command descriptor block
+;	output:	  r0	= command index
+;		  r1	= dispatch address
+;	errors:	  r0	= -1 (cmd$bad)	unrecognized command
+;			  -4 (cmd$un)	command not unique
+;
+;	descriptor block:
+;		.word	address of command name text
+;		.word	minimum number of name chars to make a match
+;		.word	address of command subroutine itself
+;		.word	address of optional argument prompt (null if unused)
+
+getcm0::save	<r2,r3,r4>
+	clr	wasnul			; /45/ not null (ie, ?) anymore
+	mov	#4	,-(sp)		; /BBS/ number of names per line
+	mov	@r5	,r1		; the passed command buffer
+	strlen	r1			; get the command length
+	mov	r0	,r3		; error if nothing is there
+	beq	170$			; oops
+	cmpb	@r1	,#'?		; /45/ help desired today?
+	bne	90$			; /45/ no
+	mov	2(r5)	,r4		; /45/ yes, get start of list
+
+10$:	mov	.name(r4),r1		; /45/ anything to dump?
+	beq	70$			; /BBS/ no, exit
+
+	; /BBS/ this does 4 columns across the screen, ala VMS help..
+20$:	strlen	r1			; compute the padding to next column
+	mov	r0	,r3		; get copy of length
+30$:	sub	#18.	,r3		; assume worst case 18. spaces needed
+	neg	r3			; we now have the number of spaces
+	bgt	40$			; that is, if it's a positive number
+	inc	r3			; add in leading blank missed at 40$
+	neg	r3			; preset for looping into next column
+	dec	(sp)			; is there a next column to overwrite?
+	bne	30$			; yes, pad to end of it
+	.newline			; no, goto a new line
+	mov	#4	,(sp)		; reset the counter now
+	br	20$			; and start fresh again..
+40$:	mov	#space	,r0		; load a space
+	call	writ1ch			; dump it to TT
+	wrtall	r1			; add on the current name
+	add	#$listl*2,r4		; bump to the next entry
+	dec	(sp)			; is there room left for the next one?
+	beq	60$			; nope
+	mov	#space	,r0		; load a space
+50$:	call	writ1ch			; dump it to TT
+	sob	r3	,50$		; until padded to length of 18. bytes
+	br	10$			; then back for more
+60$:	.newline
+	mov	#4	,(sp)		; reset the counter now
+	br	10$			; back for more
+70$:	cmp	#4	,(sp)		; is the current line blank?
+	beq	80$			; ya, skip the extra blank line
+	.newline			; no, do a newline
+
+80$:	mov	#nulcmd	,r1		; /45/ no, return nulcmd
+	mov	sp	,wasnul		; /45/ flag as having been null
+	clr	r0			; /45/ no errors from getcm0
+	br	180$			; that's it
+
+90$:	clr	r2			; length := 0
+	upone	r1			; /BBS/ upcase for the search..
+100$:	scan	(r1)	,#cmdch		; /63/ is this character ok in name?
+	dec	r0			; /63/ find it in the list?
+	blt	120$			; /63/ no, it must be a delimiter
+	bgt	110$			; /63/ ya, and it's not a "_"
+	movb	#'-	,(r1)		; /63/ convert "_" to "-"
+110$:	inc	r1			; /63/ next time check the next char
+	inc	r2			; command name length so far
+	sob	r3	,100$		; next
+
+120$:	tst	r2			; anything useful in command line?
+	ble	170$			; no
+	mov	2(r5)	,r4		; the list of edit commands
+	clr	r3			; r3 will have the command number
+
+130$:	tst	.name(r4)		; anything left in the command list?
+	beq	170$			; no
+	strlen	.name(r4)		; get the length of the command name
+	calls	instr, <.name(r4),r0,@r5,r2> ; the next command?
+	cmp	r0	,#1		; /39/ find anything?
+	bne	140$			; /39/ no
+	mov	r0	,@sp		; /39/ save it
+140$:	cmpb	r2	,.minle(r4)	; check if command length is ok
+	blo	150$			; no, not enough for the command
+	 dec	r0			; if match = position 1 we have
+	 beq	160$			; found the command
+150$:	inc	r3			; commandnum := commandnum + 1
+	add	#$listl*2,r4		; cmdsaddr   := succ(cmdsaddr)
+	br	130$			; try again..
+
+160$:	mov	r3	,r0		; return command index and
+	mov	.cmdad(r4),r1		; the command address
+	br	180$
+
+170$:	mov	#cmd$ba	,r0		; bad command
+	dec	@sp			; /39/ command not unique?
+	bne	180$			; /39/ no
+	mov	#cmd$un	,r0		; /39/ yes, say so
+180$:	tst	(sp)+
+	unsave	<r4,r3,r2>
+	return
+
+
+	.sbttl	Check for additional input needed
+
+;	G E T C M 1
+;
+;	input:	 (r5)	= current command buffer
+;		2(r5)	= command table address
+;		4(r5)	= index of the current command
+;
+;	output:	  r0	= index of current command or < 0 for error
+;		argbuf	= any additional input or rest of the command line
+
+getcm1::save	<r1,r2,r3>
+	sub	#ln$max+2,sp		; /BBS/ allocate a small buffer for
+	mov	sp	,r2		; /55/ saving the command prompt
+	tst	wasnul			; /45/ was the command for ?
+	beq	10$			; /45/ no
+	clr	wasnul			; /45/ not null anymore
+	clr	r0			; /45/ yes, return index 0
+	br	60$			; /45/ exit
+10$:	mov	@r5	,r1		; get command line address
+	scan	#space	,r1		; look for a delimiter between
+	tst	r0			; the command name and its argument
+	beq	20$			; nothing there
+	add	r1	,r0		; point to the string after the space
+	copyz	r0 ,argbuf ,#ln$max	; /BBS/ copy the command arg over
+	br	40$			; done
+
+20$:	clrb	@argbuf			; /BBS/ don't mistake arg0 for arg1 !
+	mov	4(r5)	  ,r3		; get the command index
+	mul	#$listl*2 ,r3		; if no arg given see if one is needed
+	add	2(r5)	  ,r3		; add in base address of command table
+	mov	.cmdar(r3),r3		; get the argument prompt now
+	beq	40$			; /63/ no arg prompt for this command
+	strcpy	r2	,r3		; /55/ copy the prompt over now
+30$:	calls	kbredi	,<r2,argbuf>	; /55/ read a command from keyboard
+	tst	r0			; get anything?
+	bne	50$			; read failed or ^C or ^Z typed
+	calls	cvt$$,<argbuf,r1,#cvtarg> ; remove junk
+	tst	r0			; is there anything left?
+	beq	30$			; no, reprompt and try again
+	mov	r0	,r1		; something is left, point to the
+	add	argbuf	,r1		; end of the line
+	clrb	@r1			; null terminate
+40$:	mov	4(r5)	,r0		; /62/ return command index
+	br	60$
+
+50$:	cmp	r0	,#cmd$ex	; /62/ was ^Z typed?
+	bne	60$			; /62/ no
+	mov	#cmd$nx	,r0		; /62/ ya, don't exit pgm from here
+60$:	add	#ln$max+2,sp		; /BBS/ pop the temp buffer
+	unsave	<r3,r2,r1>
+	return
+
+
+	.sbttl	Null command, do nothing..
+
+nulcmd:	clr	r0			; /45/ no errors
+	return
+
+
+	.sbttl	SHOW VERSION		; /63/ here so server can also call it
+
+sho$ve::calls	get$ve	,<#spare1>	; separate this from the actual
+	wrtall	#spare1			; version string build so the
+	return				; server can get the same string..
+
+get$ve::strcpy	(r5)	,#cmd.01	; /63/ display name, instruction set
+	tst	imgtyp			; virtual overlay image running?
+	beq	10$			; no
+	strcat	r0	,#cmd.02	; /63/ ya, say so
+	br	20$
+10$:	strcat	r0	,#cmd.03	; /63/ it's the low memory image
+20$:	strcat	r0	,#cmd.04	; /63/ tag with "/TSX-Plus  "
+	strcat	r0	,#sho.ve	; release, ver, last edit date
+	return				; /63/ note that the returned string's
+					; length must not exceed LN$MAX bytes
+	.end	kermit

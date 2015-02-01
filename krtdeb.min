@@ -1,0 +1,311 @@
+	.title	KRTDEB.MIN  Examine data in memory
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984 Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	CHR	=	1
+	INT	=	2
+
+	.macro	entry	name ,type ,size
+	.save
+	.if  b	<name>
+	.psect	$addr
+	.word	0
+	.iff
+	.dsabl	lc
+	.psect	$name	,ro,d,lcl,rel,con
+	$$ = .
+	.asciz	#name#
+	.psect	$addr
+	.word	$$
+	.psect	$addr1
+	.word	name
+	.psect	$type
+	.word	type
+	.psect	$size
+	.word	size
+	.enabl	lc
+	.endc
+	.restore
+	.endm	entry
+
+
+	.sbttl	Symbol name data table
+
+	.psect	$addr	,ro,d,lcl,rel,con
+texadr:
+	.psect	$addr1	,ro,d,lcl,rel,con
+virtad:
+	.psect	$type	,ro,d,lcl,rel,con
+symtyp:
+	.psect	$size	,ro,d,lcl,rel,con
+symsiz:
+	.psect	$code
+	entry	<$image>, int, 1
+	entry	<argbuf>, int, 1
+	entry	<argpnt>, int, 1
+	entry	<asname>, chr, ln$max
+	entry	<at$len>, int, 1
+	entry	<at$sys>, chr, 2
+	entry	<blknum>, int, 5
+	entry	<buflst>, int, 5
+	entry	<bufp>,   int, 5
+	entry	<bufs>,   int, 5
+	entry	<chksiz>, int, 1
+	entry	<chktyp>, chr, 1
+	entry	<cmdbuf>, int, 1
+	entry	<conpar>, chr, 20
+	entry	<context>,int, 1
+	entry	<date.a>, int, 5
+	entry	<do8bit>, int, 1
+	entry	<dorpt> , int, 1
+	entry	<edists>, int, 1
+	entry	<ebquot>, chr, 1
+	entry	<errtxt>, chr, erbfsiz
+	entry	<filnam>, chr, ln$max
+	entry	<filtyp>, int, 5
+	entry	<image>,  int, 1
+	entry	<index>,  int, 1
+	entry	<lokdate>,int, 1
+	entry	<loklen>, int, 1
+	entry	<lokstat>,int, 1
+	entry	<maxtop>, int, 1
+	entry	<mcrcmd>, int, 1
+	entry	<mode>,   int, 5
+	entry	<numtry>, int, 1
+	entry	<outlun>, int, 1
+	entry	<outopn>, int, 1
+	entry	<packet>, chr, $allsiz
+	entry	<paknum>, int, 1
+	entry	<pcnt.r>, int, 2*34
+	entry	<pcnt.s>, int, 2*34
+	entry	<prexon>, int, 1
+	entry	<prot.a>, int, 5
+	entry	<qu.ini>, int, 1
+	entry	<restof>, int, 1
+	entry	<rptquo>, int, 1
+	entry	<rtwork>, int, 10
+	entry	<senpar>, chr, 20
+	entry	<size>,   int, 1
+	entry	<sizof>,  int, 5
+	entry	<snd8bit>,int, 1
+	entry	<spare1>, chr, 256.
+	entry	<sparsz>, int, 1
+	entry	<srcnam>, chr, ln$max
+	entry	<stklim>, chr, stksiz
+	entry	<totp.r>, int, 1
+	entry	<totp.s>, int, 1
+	entry	<ttbuf>,  int, ttbsiz+2
+	entry	<ttparm>, int, 1
+	entry	<ttpar2>, int, 1
+	entry	<undchr>, chr, 2
+	entry	<undlin>, chr, ln$max+2
+	entry
+
+
+	.sbttl	EXAMINE data in memory
+	.enabl	lsb
+
+c$disp::upcase	argbuf
+	cmpb	@r0	,#'0
+	blo	5$
+	cmpb	@r0	,#'9
+	bhi	5$
+	calls	octval	,<r0>
+	tst	r0
+	bne	93$
+	bic	#1	,r1
+	octout	@r1
+	br	100$
+
+5$:	cmpb	@r0	,#'*
+	bne	20$
+	clr	r0
+10$:	tst	texadr(r0)
+	beq	101$
+	call	prtsym
+	add	#2	,r0
+	.newline
+	br	10$
+
+20$:	call	findsy
+	tst	r0
+	bmi	90$
+	call	prtsym
+	br	100$
+
+90$:	wrtall	#300$
+	wrtall	#310$
+	br	100$
+93$:	wrtall	#300$
+	wrtall	#320$
+100$:	.newline
+101$:	clr	r0
+	return
+
+	.save
+	.psect	$pdata
+300$:	.asciz	"?KRTDEB-E-"
+310$:	.asciz	"Symbol not in internal STB"
+320$:	.asciz	"Bad octal value"
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Print symbol
+	.enabl	lsb
+
+prtsym:	save	<r0>
+	sub	#20	,sp
+	mov	sp	,r3
+	mov	r0	,r5
+	wrtall	texadr(r5)
+	mov	symtyp(r5),r4
+	asl	r4
+	wrtall	200$-2(r4)
+	deccvt	symsiz(r5),r3,#5
+	clrb	5(r3)
+	wrtall	r3
+	mov	#'.	,r0
+	call	writ1ch
+	wrtall	#300$
+	octout	virtad(r5)
+	.newline
+	.newline
+	jsr	pc	,@190$-2(r4)
+	add	#20	,sp
+	unsave	<r0>
+	return
+
+	.save
+	.psect	$pdata
+190$:	.word	pbyte ,pint
+200$:	.word	210$ ,220$
+210$:	.asciz	<tab>"Byte data, size"
+220$:	.asciz	<tab>"Word data, size"
+300$:	.asciz	<tab>"  Starting address: "
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Format byte data
+	.enabl	lsb
+
+pbyte:	sub	#20	,sp
+	mov	symsiz(r5),togo
+	beq	390$
+	mov	virtad(r5),r5
+310$:	mov	#20	,r3
+	mov	#ascbuf	,r1
+320$:	mov	sp	,r2
+	clr	r4
+	bisb	(r5)+	,r4
+	clrb	(r1)
+	bisb	r4	,(r1)
+	bicb	#^c177	,(r1)
+	cmpb	(r1)	,#space
+	blt	321$
+	cmpb	(r1)	,#177
+	blt	323$
+321$:	movb	#'.&77	,(r1)+
+	br	325$
+323$:	tstb	(r1)+
+325$:	mov	r4	,r0
+	ash	#-6	,r0
+	bic	#^c3	,r0
+	add	#'0	,r0
+	movb	r0	,(r2)+
+	mov	r4	,r0
+	ash	#-3	,r0
+	bic	#^c7	,r0
+	add	#'0	,r0
+	movb	r0	,(r2)+
+	mov	r4	,r0
+	bic	#^c7	,r0
+	add	#'0	,r0
+	movb	r0	,(r2)+
+	movb	#space	,(r2)+
+	clrb	@r2
+	mov	sp	,r2
+	wrtall	r2
+	dec	togo
+	beq	330$
+	sob	r3	,320$
+	call	400$
+	br	310$
+330$:	dec	r3
+	ble	337$
+333$:	wrtall	#octpad
+	sob	r3	,333$
+337$:	call	400$
+390$:	add	#20	,sp
+	return
+
+400$:	movb	#cr	,(r1)+
+	movb	#lf	,(r1)+
+	clrb	@r1
+	wrtall	#ascbuf
+	return
+
+
+	.sbttl	Format integer data
+
+pint:	mov	symsiz(r5),r1
+	beq	490$
+	mov	virtad(r5),r2
+410$:	mov	#4	,r3
+420$:	mov	(r2)+	,r4
+	decout	r4
+	message	<. (>
+	octout	r4
+	message	<)   >
+	dec	r1
+	beq	430$
+	sob	r3	,420$
+	.newline
+	br	410$
+430$:	.newline
+490$:	return
+
+	.save
+	.psect	$rwdata	,rw,d,lcl,rel,con
+togo:	.word	0
+ascbuf:	.blkb	24
+octpad:	.asciz	"    "
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+	.sbttl	Locate symbol offset in index
+
+findsy:	clr	r3
+
+10$:	mov	texadr(r3),r1
+	beq	90$
+	mov	r0	,r2
+20$:	cmpb	(r2)+	,(r1)+
+	bne	30$
+	tstb	(r2)
+	bne	20$
+	br	40$
+30$:	add	#2	,r3
+	br	10$
+
+40$:	mov	r3	,r0
+	br	100$
+
+90$:	mov	#-1	,r0
+100$:	return
+
+	.end

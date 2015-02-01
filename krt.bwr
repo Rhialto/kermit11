@@ -1,0 +1,14 @@
+KRT.BWR  "Beware file" for KRT and KRTTSX     V03.63    27-Sep-1997
+-------  ------- ----- --- --- --- ------     ------    -----------
+
+This release of Kermit-11 for RT-11/TSX-Plus has been extensively
+tested and is believed to be essentially bug free.  If you encounter
+any problem, please contact the maintainer of this software, which
+is actively supported.
+
+	Billy Youdelman				billy@MIX.COM
+	PO Box 1207
+	Culver City, California  90232-1207
+	USA
+
+-eof-

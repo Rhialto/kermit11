@@ -1,0 +1,80 @@
+	.sbttl	KRTDEF	Packet types (edited from VMS Kermit)
+;	.ident	"V03.63"	; this is an .include file
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+
+;	Note the use of the "=:" direct assignment ensures these
+;	rather long names are unique in the first 6 characters.
+
+	.sbttl	Protocol V1.0 message types
+
+MSG$ACK		=: 'Y&137	; acknowledgment (ACK)
+MSG$BREAK	=: 'B&137	; break transmission (EOT)
+MSG$DATA	=: 'D&137	; data packet
+MSG$EOF		=: 'Z&137	; end of file (EOF)
+MSG$ERROR	=: 'E&137	; error
+MSG$FILE	=: 'F&137	; file header
+MSG$NAK		=: 'N&137	; negative acknowledgment (NAK)
+MSG$SND		=: 'S&137	; send initiate
+
+	.sbttl	Protocol V2.0 message types
+
+MSG$COMMAND	=: 'C&137	; host command
+MSG$GENERIC	=: 'G&137	; generic Kermit command
+MSG$KERMIT	=: 'K&137	; perform Kermit command (text)
+MSG$RCV		=: 'R&137	; receive initiate
+
+	.sbttl	Protocol V4.0 message types
+
+MSG$ATR		=: 'A&137	; attribute packet
+MSG$SER		=: 'I&137	; server initialization
+MSG$TEXT	=: 'X&137	; text header message
+
+	.sbttl	Generic Kermit commands
+
+GN$BYE		=: 'L&137	; logout
+GN$CONNECT	=: 'C&137	; connect to a directory
+GN$COPY		=: 'K&137	; copy file
+GN$DELETE	=: 'E&137	; delete a file
+GN$DIRECTORY	=: 'D&137	; directory
+GN$DISK		=: 'U&137	; disk usage
+GN$EXIT		=: 'F&137	; finish (stop the server)
+GN$HELP		=: 'H&137	; help
+GN$JOURNAL	=: 'J&137	; perform journal functions
+GN$LOGIN	=: 'I&137	; login
+GN$PRINT	=: 'P&137	; print
+GN$PROGRAM	=: 'P&137	; run program and pass data
+GN$QUERY	=: 'Q&137	; query status
+GN$RENAME	=: 'R&137	; rename file
+GN$SEND		=: 'M&137	; send a message to a user
+GN$SUBMIT	=: 'S&137	; submit
+GN$TYPE		=: 'T&137	; type a file specification
+GN$VARIABLE	=: 'V&137	; return/set variable state
+GN$WHO		=: 'W&137	; who's logged in?
+
+	.sbttl	Acknowledgment modifiers (V4.0)
+
+ABT$ALL		=: 'Z&137	; abort entire stream of files
+ABT$CUR		=: 'X&137	; abort current file
+ABT$ERROR	=: 'E&137	; abort because an error occured
+
+	.sbttl	End of file packet modifier
+
+EOF$DISCARD	=: 'D&137	; discard data from previous file
+
+	.sbttl	Send/receive states
+
+STA.CCA		=:  100		; ^C from keyboard abort
+STA.ABO		=: 'A&137	; abort
+STA.ATR		=: 'H&137	; send attributes
+STA.BRK		=: 'B&137	; break link
+STA.COM		=: 'C&137	; transaction complete
+STA.DAT		=: 'D&137	; data
+STA.EOF		=: 'Z&137	; end of file or reply
+STA.FIL		=: 'F&137	; file name header
+STA.INI		=: 'I&137	; init
+STA.RIN		=: 'R&137	; receive init
+STA.SIN		=: 'S&137	; send init
+STA.TYP		=: 'X&137	; extended reply

@@ -1,0 +1,53 @@
+	.sbttl	KRTCDF.MIN  Define command macro
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+	KRTCDF	=  1
+	$LISTL	== 4
+	$$TRIP	=  0
+
+	.macro	command	list ,name ,min ,addres ,arg
+	.list me
+	.save
+	.nlist me
+	.if b <name>
+	.list me
+	.psect	cmddsp	,ro,d,lcl,rel,con
+	.nlist me
+	.word	0
+	$$trip	= 0
+	.iff
+	.iif ne	$cmglob, .globl addres
+	.list me
+	.psect	cmdtxt	,ro,d,lcl,rel,con
+	.nlist me
+	$$name	= .
+	.asciz	#name#
+	  $arg	= .
+	  .if b <arg>
+	  .byte	0
+	  .iff
+	  .asciz #arg#
+	  .endc
+	.list me
+	.even
+	.psect	cmddsp	,ro,d,lcl,rel,con
+	.nlist me
+	  .if eq $$trip
+	    .if ne $cmglob
+'list::
+	    .iff
+'list:
+	    .endc
+	  $$trip = 1
+	  .endc
+	.word	$$name
+	.word	min
+	.word	addres
+	.word	$arg
+	.endc
+	.list me
+	.restore
+	.nlist me
+	.endm

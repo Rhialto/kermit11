@@ -1,0 +1,1274 @@
+	.title	KRTDIA	Dial command and related items
+	.ident	"V03.63"
+
+; /63/  27-Sep-97  Billy Youdelman  V03.63
+;
+;	use opentt in place of ttyini to set linksts flag
+;	move the modem definitions to a separate module KRTMDM.MAC
+;	SET$DTR and SET$MODEM back here from KRTDSP
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	add support for call back modems, SET DIAL/PHONE [NO]ANSWER
+;
+;	add a one-tick pacing delay in DODIAL's loop at 50$ (when the modem
+;	doesn't echo commands) to match what was done for echoing modems
+;
+;	fix SHO MODEM for changes to SET DIAL [NO]ECHO and [NO]INIT-ONCE
+;	add initiate-prompt, dial-ack, confirm-ack, [no]binary-response
+;
+;	added x.result (default "Hayes" xmode) and time.settle defaults,
+;	and in "Hayes" and Telebit modem definitions
+;
+;	if DCD is high when exiting program, hang up modem
+;	add support for 38.4kb
+;	add Telebit T3000 modem def, needs KM handler and SET FLOW-CONTROL RTS
+;
+;	double the settle-time value for the wait after dropping DTR,
+;	as some modems (like the T3000) need more time to recover
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	set$mo now won't write bad modem name into modem:
+;	if DIAL/REDIAL succeeds jump to CONNECT automatically
+;	set linksts when dialing so ^C abort will catch correct ttname
+;	findmodem now does not try to process an empty string in modem:
+;	added c$idle, call to reset modem to idle (answer) mode
+;	findmodem/findnumber will match on partial input string
+;	added %X format effector for setting Hayes extended response mode
+;	added Telebit T2500 modem definitions
+;
+;	redial loop moved to c$dial, runs faster without initializing
+;	the modem's lun every pass thru the loop, reduces cpu usage too
+;
+;	load buffer with defmsg after displaying RING, to not overwrite
+;	the default message with call status stuff
+;
+;	if DIAL can't translate an alias, say so then die (instead of
+;	prompting to continue with an empty number buffer)
+;
+;	added xredial flag word, for keeping return path straight when
+;	connecting after a successful REDIAL. speed up redial process for
+;	modems which define init.once by not initting before every retry.
+;	init.once and mready (status flag) were added to support all this..
+;
+;	while waiting for a response after dialing modem, check for
+;	input from keyboard, allowing an easy abort
+;
+;	.default patched to get/set handler speed from modem response,
+;	old speed is saved and restored, unless set different after..
+;	Hayes definition completed and moved to it.  this also renders
+;	Hayes responses displayable via SHO MODEM.
+;
+;	diatmo from SET DIAL TIME-OUT gets written into dial.time(r4)
+;	when either c$dial or sho$dial is called.  it's now usable with
+;	any modem type (not just user-defined) by setting the modem's
+;	internal timer to the max (ATS7=255 etc) then letting Kermit's
+;	timer take action first.
+;
+;	modified waitfor to test for keyboard input, allowing a "strike
+;	any char" abort during dialing, now including the init string.
+;	DTR is dropped to ensure the modem will actually abort the call.
+;
+;	SHO MODEM expanded to display everything
+;	result message must match from 1st byte to avoid embedded strings
+;	save modem init status to drop unnecessary inits
+;	SET MODEM now inits same, if a line (and speed) have been set
+;	echo everything from modem (if it echoes) during DIAL
+;	add CONNECT/nnnn for Hayes to alter DTE speed w/TSX and CL
+;	add Concord Data Systems 224 Auto-dial modem
+;
+;	moved SET DTR code here, and reinit modem after DTR drop if one
+;	was on-line before it
+
+;	Copyright 1985,1986 Change Software, Inc.
+;
+;	18-Oct-85  20:06:09 Brian Nelson
+;
+;	04-Dec-85  11:22:32 BDN	 Add optional linked list structure to
+;				 define modem responses, will be useful
+;				 when adding a SET DIAL command
+;	09-Jan-86  17:48:17 RTM  Added support for the RIXON Intelligent
+;				 auto-dial modem (R212A) (edit RTM01)
+;	13-Feb-86  10:10:08 BDN	 Put the DF112 and DF224 responses into
+;				 linked lists
+;	23-Sep-86  14:10:30 BDN	 Vadic 4224 modems
+;	23-Sep-86  14:10:42 BDN	 Added format effector %M for pulse/tone
+;				 if a SET PHONE PULSE/TONE was done
+;				 Added %B for "blind" dialing, enabled if
+;				 SET PHONE BLIND
+;	30-Sep-86  13:05:53 BDN	 Added CTS2424, Also SHO DIAL
+;	09-Feb-89  00:00:00 JCH  Complete definition of DF224 modem
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+
+; /BBS/	This is used by SHOW MODEM to format the display of response messages
+; and actions to them.  It's the column at which the actions begin and may be
+; increased if longer response strings must accommodated.
+
+	COL.ACT	  =	18.
+
+
+	.sbttl	Local macros
+
+	$$TRIP	= 0			; /63/ init trip counter
+
+	.macro	des  type ,offset ,title
+	.save				; /63/
+	.psect	$pdata			; /63/
+	.if  b	<type>
+	.byte	0	,0
+	.even				; /63/ do this here, once is enough..
+	$$trip=0			; /63/ reset for possible future use
+	.iff
+	  .if eq $$trip			; /63/ if at the first list entry
+deslist:				; /63/ insert the label for the list
+	  .endc
+	  $$trip=1			; /63/ not the first entry any more
+	.byte	type	,offset		; type_0=integer, type_1=string
+	.asciz	@title@			; /62/ type_2=on/off
+	.endc
+	.restore			; /63/
+	.endm	des
+
+	.macro	ttgetc	wait		; get one char from the link device
+	.if  b	<wait>			; wait value is in seconds
+	calls	xbinread,<#1>		; /62/ this waits up to one second
+	.iff
+	calls	xbinread,<wait>
+	.endc
+	.endm	ttgetc
+
+	.macro	ttputc	c		; send one char to the link device
+	clr	-(sp)			; create a one word buffer
+	bisb	c	,(sp)		; stuff in byte sans sign extension
+	mov	sp	,r0		; point to buffer
+	calls	binwri	,<r0,#1>	; send it
+	tst	(sp)+			; pop buffer
+	.endm	ttputc
+
+	.macro	ttputs	s		; send a string to the link device
+	mov	r1	,-(sp)		; a one word buffer
+	mov	s	,r1		; pass string location to do.put
+	call	do.put			; /63/ send it
+	mov	(sp)+	,r1		; pop buffer
+	.endm	ttputstr
+
+	.macro	waitfor  s ,time ,fail	; wait for a response from modem
+	.if  b	<time>			; time value is in seconds
+	clr	-(sp)			; time buffer
+	inc	@sp			; /BBS/ default wait is one second
+	.iff
+	mov	time	,-(sp)		; pass time to wait
+	.endc
+	mov	s	,-(sp)		; and address of expected string
+	call	waitfor			; go look for it
+	.if nb	<fail>			; if given a failure routine address
+	tst	r0			; check to see if it worked..
+	beq	fail			; it did not
+	.endc
+	.endm	waitfor
+
+
+	.sbttl	Local data
+
+	.psect	$pdata			; /63/ consolidate all data here
+abort:	.asciz	"% Aborted from keyboard"
+bells:	.byte	bell ,bell ,0		; two bells when CONNECTing
+defmsg:	.asciz	"% Timed out"
+dia.01:	.asciz	"Toggling DTR.."	; /63/ moved message macro data here
+dia.02:	.asciz	"Re-initting modem.."
+dia.03:	.asciz	" modem is on-line"<cr><lf>
+dia.04:	.asciz	"Try #"
+dia.05:	.asciz	":"<cr><lf>
+dia.06:	.asciz	"The known modem types are:"<cr><lf>
+dia.07:	.asciz	"% No answer"<cr><lf>
+dia.08:	.asciz	"Yes"
+dia.09:	.asciz	"No"
+dia.10:	.asciz	"Dial time-out secs: "
+dia.11:	.asciz	"Settle-time ticks:  "
+dia.12:	.asciz	'%X = "X'
+dia.13:	.asciz	"Binary-responses:   "
+dia.14:	.asciz	"Result strings:"<cr><lf>
+dia.15:	.asciz	"Success"
+dia.16:	.asciz	"Rings+1"<cr><lf>
+dia.17:	.asciz	"Failure"<cr><lf>
+dia.18:	.asciz	"Link "
+dia.19:	.asciz	" disconnected"<cr><lf>
+msg$dte:.asciz	",  DTE is forced to "	; /63/ tag messages that alter speed
+msg$fmt:.asciz	"Format effectors:   "	; /62/
+nodpro:	.asciz	"% No dial$prompt"
+nod.go:	.asciz	"% No dial$go"
+nod.ack:.asciz	"% No dial$ack"
+prefix:	.asciz	\ = "\			; /62/ prefix for format effector data
+tripsp:	.asciz	\"   \			; /62/ a " followed by three blanks
+	.even
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+buffer:	.blkb	84.			; /BBS/ general purpose buffer
+mute:	.word	0			; /BBS/ use to mute output to TT
+retries:.word	0			; /BBS/ redial this many times..
+
+
+	.psect	$code
+	.sbttl	SET MODEM-TYPE		; /BBS/ almost 100% new..
+
+set$mo::strcpy	#spare1	,#modem		; save copy of what's there now
+	mov	modtype	,r4		; address of its structure
+	mov	mready	,r3		; and its status
+	upcase	argbuf			; upper case the argument
+	copyz	argbuf	,#modem ,#40	; copy new modem name over
+	call	findmodem		; and look for it in the list
+	tst	r0			; did it work?
+	bne	10$			; ya
+
+	strcpy	#modem	,#spare1	; no, restore the old modem type
+	mov	r3	,mready		; its status
+	mov	r4	,modtype	; and its structure's address
+	call	incsts			; flag error, so r0 can be cleared
+	clr	r0			; strcpy, just above, trashes this reg
+	return				; error already handled by findmodem
+
+10$:	clr	blind			; reset this
+;	clr	pulse			; commented out, phone line is same..
+	mov	dial.time(r0),diatmo	; /62/ start with default time-out
+	mov	time.set(r0) ,settle	; /62/ and settle-time
+	mov	#xresult     ,r1	; /62/ where to put new extended mode
+	mov	x.result(r0) ,r0	; /62/ default supplied?
+	bmi	20$			; /62/ no, let null say it's nothing..
+	call	L10012			; /62/ ya, write it as ascii number(s)
+20$:	clrb	(r1)			; /62/ null terminate the string
+	clr	r0			; preset to no error
+	tstb	ttname			; is line to modem set yet?
+	beq	30$			; no
+	call	ttyhang			; ya, assert DTR on PRO, reset modem
+	tst	r0			; did it work?
+	bne	30$			; no, ttyini handles its own error
+	mov	settle	,r0		; /62/ double the wait here because
+	asl	r0			; /62/ some modems are just too slow!
+	calls	suspend	,<#0,r0>	; /62/ let modem recover from DTR drop
+	call	set.mo			; shared code
+30$:	tst	r0			; did all this work?
+	bne	dia.er			; /63/ no, goto error handler
+	return
+
+
+	.sbttl	SET DTR and HANGUP
+
+set$dt::call	set.dtr			; toggle DTR
+	tst	r0			; did it work?
+	bne	dia.er			; /63/ no
+	.newline
+	return
+
+c$hang::call	set.dtr			; toggle DTR
+	tst	r0			; did it work?
+	bne	dia.er			; /63/ no
+	wrtall	#dia.18			; "Link "
+	wrtall	#ttname			; include the device name
+	wrtall	#dia.19			; " disconnected"<cr><lf>
+	return
+
+dia.er:	direrr	r0			; /63/ dump error message
+	call	incsts			; flag error, so r0 can be cleared
+	clr	r0			; only do error message once
+	return
+
+
+	.sbttl	The real work of SET MODEM
+
+set.mo:	mov	linksts	,r2		; save link open/closed status
+	bne	10$			; it's open now
+	call	opentt			; /63/ open link device
+	tst	r0			; successful open on line?
+	bne	20$			; no, give up
+
+10$:	call	fixspeed		; restore set speed if need be
+	mov	sp	,mute		; turn off echo
+	call	getatn			; try to get modems attention
+	clr	mute			; turn echo back on
+	tst	r0			; success?
+	bne	20$			; no
+	tst	sy.ini			; come here while executing KRT.INI?
+	bne	20$			; ya, don't echo modem I/O
+	tst	infomsg			; SET TT QUIET?
+	beq	20$			; ya..
+	wrtall	#modem			; no, display name of modem
+	wrtall	#dia.03			; /63/ " modem is on-line"<cr><lf>
+					; note r0 still =0 here, from above..
+20$:	mov	r0	,-(sp)		; save error
+	mov	r2	,linksts	; restore link status
+	bne	30$			; it was open, leave it that way
+	call	ttyfin			; close the link
+30$:	mov	(sp)+	,r0		; restore error
+	return
+
+
+	.sbttl	The real work of SET DTR
+	.enabl	lsb
+
+set.dtr:wrtall	#dia.01			; /63/ "Toggling DTR.."
+	call	l$nolf			; just a return, unless TT is NOSCOPE
+	call	ttyhang			; drop DTR for 0.5sec
+	tst	r0			; did it work?
+	bne	10$			; no
+	tst	modtype			; was a modem on-line?
+	beq	10$			; no
+	mov	settle	,r0		; /62/ double the wait here because
+	asl	r0			; /62/ some modems are just too slow!
+	calls	suspend	,<#0,r0>	; /62/ let modem recover from DTR drop
+	.br	reinit			; /63/
+
+reinit::wrtall	#dia.02			; /63/ "Re-initting modem.."
+	call	l$nolf			; just a return
+	mov	infomsg	,-(sp)		; save state of SET TT [NO]QUIET
+	clr	infomsg			; temporarily off display
+	call	set.mo			; go re-init the modem
+	mov	(sp)+	,infomsg	; restore SET TT [NO]QUIET
+10$:	return
+
+	.dsabl	lsb
+
+
+	.sbttl	The REDIAL command	; /BBS/ slightly modified..
+
+c$redi::mov	argbuf	,r3		; argbuf address
+	mov	phnum	,r2		; address of phone number
+	mov	#-1	,r4		; default repeat count = 65535.
+	tstb	@r3			; any repeat count passed?
+	beq	20$			; no
+	calls	l$val	,<r3>		; convert ascii to integer
+	tst	r0			; success?
+	bne	10$			; no
+	mov	r1	,r4		; save repeat count
+	bne	20$			; disallow 0, it would really = 65536.
+10$:	mov	#er$inr	,r0		; invalid number of retires
+	br	40$			; go handle error
+20$:	tstb	@r2			; anything to dial?
+	bne	30$			; yes
+	mov	#er$npn	,r0		; no previous number dialed
+	br	40$			; bail out
+30$:	strcpy	r3	,r2		; copy old phone num to argbuf
+	mov	sp	,xredial	; flag c$dial was called by c$redial
+	clr	retries			; init number of tries counter
+	call	c$dial			; redial loop moved to c$dial
+	br	50$			; c$dial handles its own errors
+
+40$:	direrr	r0			; for local errors
+	call	incsts			; set global flag also
+50$:	clr	r0			; error was just handled
+	return
+
+
+	.sbttl	The DIAL command	; /BBS/ substantially changed..
+	.enabl	lsb
+
+c$dial::tst	signon			; if coming here from init file
+	bne	10$			; dump sign-on stuff before dial
+	call	sho$line
+
+10$:	tstb	ttname			; check for a real terminal name
+	bne	20$			; ok
+	mov	#er$pls	,r0		; please SET LINE first
+	br	70$			; goto error handler
+
+20$:	call	inqcd			; /62/ check to see if already talking
+	tst	r0			; /62/ or prior session not dead yet
+	ble	30$			; /62/ no data carrier is now present
+	mov	#er$dcd	,r0		; /62/ can't DIAL whilst DCD asserted
+	br	70$			; goto error handler
+
+30$:	call	findnumber		; perhaps a SET PHONE NUMBER?
+	bcs	100$			; findnu handles its own error
+	call	loamdm			; /63/ ensure modem data are loaded
+	mov	modtype	,r0		; recover the address of descriptor
+	bne	40$			; ok
+	mov	#er$mdm	,r0		; please SET MODEM first
+	br	70$			; goto error handler
+
+40$:	clr	mute			; turn echo back on just in case
+	mov	dial.string(r0),r0	; get dial format string address
+	tstb	@r0			; anything there?
+	bne	50$			; yes
+	mov	#er$ndf	,r0		; no dial format string defined
+	br	70$			; goto error handler
+
+50$:	call	opentt			; /63/ open the link device
+	tst	r0			; successful?
+	bne	100$			; no, ttyini does the error message
+	call	fixspeed		; restore set speed if need be
+	call	eatjunk			; /63/ flush any late redial response
+	mov	modtype	,r0		; recover top of list
+	tst	init.once(r0)		; need to re-init modem?
+	beq	60$			; evidently..
+	tst	mready			; is the modem now on-line?
+	bne	80$			; ya
+60$:	call	getatn			; try to get modems attention
+	tst	r0			; did getting modems attn succeed?
+	beq	80$			; ya
+70$:	direrr	r0			; no, emit error msg
+	br	100$			; /62/ and exit
+
+80$:	tst	cccnt			; abort?
+	bne	100$			; ya..
+	tst	xredial			; redialing?
+	beq	90$			; no
+	inc	retries			; ya, bump retries count
+	wrtall	#dia.04			; /63/ "Try #"
+	mov	retries	,r0		; copy for integer to ascii conv
+	call	L10266			; print integer as decimal numb
+	wrtall	#dia.05			; /63/ ":"<cr><lf>
+
+90$:	call	dodial			; actually try to dial the number now
+	tst	r0			; returns 1 for success, 0 if failed
+	bne	130$			; success, go CONNECT
+	tst	xredial			; redialing this?
+	beq	100$			; no, die..
+	sob	r4	,80$		; ya, try again?
+
+100$:	call	incsts			; set global error flag
+
+110$:	call	ttyfin			; close the handler
+	clr	linksts			; flag for ccast
+120$:	clr	r0			; /62/ error already handled
+	return
+
+130$:	tst	xredial			; come here from c$redial?
+	beq	140$			; nope
+	tst	(sp)+			; ya, pop its return address
+140$:	jmp	c$conn			; and CONNECT automatically..
+
+
+	.sbttl	Reset the modem		; /BBS/ all new
+
+c$idle::call	loamdm			; /63/ ensure modem data are loaded
+	mov	modtype	,r4		; get modem type
+	beq	120$			; no modem is on-line
+	tst	r50dev			; is there a line set?
+	beq	120$			; no, thus can't talk to modem
+	call	inqcd			; /62/ ya, is the modem active?
+	tst	r0			; /62/ well..
+	ble	150$			; /62/ probably not, do the init
+	call	ttyhang			; /62/ ya, try to hang it up!
+	calls	suspend	,<#0,settle>	; /62/ let modem recover from DTR drop
+150$:	clr	mready			; no longer ready no matter what
+	call	opentt			; /63/ init handler, etc..
+	tst	r0			; get a successful open on line?
+	beq	160$			; ya
+	mov	#er$idl	,r0		; can't release modem
+	br	70$			; and off to common code..
+
+160$:	call	fixspeed		; restore set speed if need be
+	ttputs	dial.idle(r4)		; send idle command string to modem
+	br	110$			; and off to common code..
+
+	.dsabl	lsb
+
+
+	.sbttl	Restore last set speed	; /BBS/ added..
+
+fixspeed:tst	b4speed			; did last call alter speed?
+	beq	10$			; nope
+	calls	setspd	,<b4speed>	; restore speed before that happened
+	clr	b4speed			; once iz enuff..
+10$:	return
+
+
+	.sbttl	Find location of a modem's data structure
+
+;	F I N D M O D E M		; /BBS/ substantially revised..
+;
+;	assumes:  modem	= name of the desired modem
+;	returns:    r0	= address of modem data structure or 0 if not found
+
+findmo:	save	<r3>
+	tstb	modem			; did caller supply a modem name?
+	beq	80$			; nope..
+	call	loamdm			; /63/ load predefined modems' data
+	mov	r0	,r3		; /63/ get address of head of list
+	cmpb	#'?	,modem		; come here for help?
+	beq	40$			; ya, format display accordingly
+
+10$:	mov	mod.string(r3),r0	; allow match if ok up to end of
+	mov	#modem	,r1		; argbuf so partial string works
+20$:	cmpb	(r0)+	,(r1)+		; are they the same
+	bne	30$			; no
+	tstb	(r1)			; end of argbuf?
+	bne	20$			; no, continue
+	mov	r3	,modtype	; save address of the structure
+	copyz	mod.string(r3),#modem	; be sure whole name is there
+	br	70$			; done
+
+30$:	mov	mod.next(r3),r3		; no, try the next one please
+	bne	10$			; keep going
+	direrr	#er$unm			; modem type is unknown
+	tst	infomsg			; SET TT QUIET?
+	beq	80$			; ya, skip list of possibilities
+
+40$:	wrtall	#dia.06			; /63/ "..known modem types.."<cr><lf>
+	call	loamdm			; /63/ load predefined modems' data
+	mov	r0	,r3		; /63/ get address of head of list
+50$:	wrtall	mod.string(r3)		; now print the list of modems
+	strlen	mod.string(r3)		; length of modem type
+	sub	#20	,r0		; cut to 16. for tighter display
+	neg	r0			; make it a positive number
+	mov	r0	,r1		; stash a copy for the loop
+	mov	#space	,r0		; load up a space
+60$:	call	writ1ch			; write it to TT
+	sob	r1	,60$		; loop until properly padded
+	wrtall	mod.com(r3)		; dump comment string
+	.newline
+	mov	mod.next(r3),r3		; next one in list
+	bne	50$			; ok
+	br	80$			; exit with failure
+
+70$:	mov	r3	,r0		; return address of structure
+	br	90$
+80$:	clr	r0			; failure
+90$:	unsave	<r3>
+	return
+
+
+	.sbttl	Find a defined phone number
+
+findnu:	save	<r3,r2>			; /45/ Added 20-Feb-86 13:00:50 BDN
+	strcpy	#errtxt	,argbuf		; /63/ save a copy of input string
+	cmpb	@argbuf	,#'0		; only if not number in first position
+	blo	10$			; ok
+	cmpb	@argbuf	,#'9		; well?
+	blos	70$			; /BBS/ it's a number
+10$:	mov	#pnhead	,r2		; get listhead
+
+20$:	mov	(r2)	,r2		; loop a little, get next entry
+	beq	60$			; nothing there
+	mov	r2	,r3		; get address of text
+	add	#2	,r3		; +2 is offset for the data
+
+	strcpy	#errtxt	,r3		; /63/ save a copy of input string
+	mov	#errtxt	,r1		; /63/ save un-upper-cased name here
+	mov	#buffer	,r0		; store temp copy here
+30$:	cmpb	(r3)	,#space		; all done looking?
+	beq	40$			; yes
+	movb	(r3)	,(r1)+		; /63/ copy for "last # dialed"
+	movb	(r3)+	,(r0)+		; no, copy more of the name
+	bne	30$			; and continue
+40$:	clrb	(r0)			; ensure .asciz please
+	clrb	(r1)			; /63/ ditto
+
+	; /BBS/ checking for end of argbuf matches on any partial string
+	upcase	argbuf			; also leaves r0 -> argbuf
+	mov	r0	,r1		; save pointer
+	upcase	#buffer			; /62/ temp buff allows upcasing name
+50$:	cmpb	(r0)+	,(r1)+		; are they the same?
+	bne	20$			; no
+	tstb	(r1)			; ya, hit end of argbuf yet?
+	bne	50$			; no, continue
+	inc	r3			; point to number field
+	tstb	(r3)			; anything really there?
+	beq	60$			; /BBS/ no, go print error message
+	strcpy	argbuf	,r3		; copy into the real argument buffer
+	br	70$			; /BBS/ go clear carry and exit
+
+60$:	direrr	#er$nnf			; /BBS/ say why it's gonna die
+	sec				; /51/ failure
+	br	80$
+70$:	copyz	#errtxt	,phnum,#60	; /63/ stash copy for "last # dialed"
+	clc				; /51/ success
+80$:	unsave	<r2,r3>
+	return
+
+
+	.sbttl	Wake up (init) modem	; /BBS/ almost 100% new..
+
+;	G E T A T N
+;
+;	In case the modem is already awake (at command prompt mode)
+;	we will dump the string,  wait for the  acknowledgment  and
+;	loop until we are sure there are no more data.  For example
+;	the VA212 will send back an  INVALID  COMMAND\n* string for
+;	for the ^E and one also for the <CR>.  We could, of course,
+;	first send the modem its idle command,  but there are times
+;	when that may be undesirable,  like when the modem is being
+;	accessed via some sort of LAN or PABX.
+;
+;	input:	modtyp	= address of modem descriptor
+;	return:	  r0	= if <>, the error code
+
+getatn:	save	<r1,r2,r3,r4>
+	clr	-(sp)			; init "msg rec'd" flag
+	mov	#buffer	,r2		; write init string here
+	call	loamdm			; /63/ ensure modem data are loaded
+	mov	modtype	,r4		; get address of structure
+	clr	mready			; modem is no longer ready
+	mov	wake.string(r4),r3	; point to the init string
+	tstb	(r3)			; is there one to send?
+	bne	10$			; ya
+	mov	#er$wks	,r0		; nope..
+	jmp	200$			; handle the error
+
+10$:	tstb	(r3)			; done?
+	beq	70$			; yes
+	cmpb	(r3)	,#'%		; look for a format effector
+	bne	50$			; ya, not no..
+	cmpb	1(r3)	,#'x!40		; "%X" to set Hayes extended mode?
+	beq	20$			; yes
+	cmpb	1(r3)	,#'X&137	; check both cases
+	bne	50$			; not formatting, copy char over
+20$:	tstb	xresult			; is there an extended mode set?
+	beq	40$			; no, kill leading space here
+	movb	#'X&137	,(r2)+		; ya, insert an "X"
+	mov	#xresult,r1		; make copy to auto-increment
+30$:	movb	(r1)+	,(r2)+		; then insert the mode, ala "X4"
+	bne	30$			; stop on the first null
+40$:	dec	r2			; then back up over it
+	inc	r3			; skip over the "%" please
+	br	60$			; next please
+50$:	movb	(r3)	,(r2)+		; not formatting, copy character
+60$:	inc	r3			; skip over current char now
+	br	10$			; next
+70$:	clrb	(r2)			; .asciz
+
+	mov	#3	,r3		; loop a little to get modem going
+80$:	call	eatjunk			; trash stuff that may be waiting
+	mov	#buffer	,r2		; get address of wakeup string
+	br	100$			; for display format on abort
+
+90$:	tstb	(r2)+			; /62/ next byte..
+	beq	140$			; /62/ that's all there is
+	tst	mute			; allow strike any key abort?
+	bne	100$			; no, not this time
+	call	chkabo			; strike any key to abort
+	tst	r0			; get anything?
+	beq	100$			; nope
+	inc	cccnt			; fake abort so modem is stopped
+	call	clrcns			; eat LF after a CR, etc..
+	tst	(sp)			; /62/ anything typed out yet?
+	beq	180$			; /62/ no
+	.newline			; ya, ensure abort message is on \n
+	br	180$			; and bail out..
+
+100$:	ttputc	(r2)			; /62/ put a char to the modem
+	tst	dial.echo(r4)		; /62/ does it echo?
+	beq	110$			; /62/ no
+	ttgetc	#-1			; then look for its echo
+	tst	r0			; anything there?
+	bne	130$			; no
+	bicb	#^c<177>,r1		; remove parity always
+	cmpb	r1	,#cr		; is it a return?
+	beq	130$			; ya, don't echo it
+	cmpb	r1	,#lf		; is it a line feed?
+	beq	130$			; ya, don't echo it
+	movb	r1	,r0		; get a copy of it
+	br	120$			; /62/ and go dump same to the screen
+110$:	calls	suspend	,<#0,#1>	; /62/ match above ttgetc 1 tick lag
+	movb	(r3)	,r0		; cop char just sent
+120$:	tst	mute			; echo this to TT?
+	bne	130$			; no, don't echo modem I/O
+	mov	r0	,@sp		; set "msg rec'd" flag
+	call	writ1char		; and echo to TT
+130$:	calls	suspend	,<#0,wake.rate(r4)> ; no, pause if need be
+	br	90$			; and do some more
+
+140$:	tst	(sp)			; was anything echo'd to TT?
+	beq	150$			; no, skip the newline
+	.newline			; ya, tag it
+150$:	waitfor	wake.prompt(r4),#2,160$	; now wait 2 secs for a response
+	br	170$			; success
+160$:	tst	cccnt			; abort?
+	bne	180$			; ya..
+	dec	r3			; decrement loop counter
+	beq	190$			; a complete failure, exit
+	jmp	80$			; next please
+
+170$:	mov	r4	,mready		; flag that modem is initialized
+	clr	r0			; return(success)
+	br	210$
+
+180$:	mov	#er$abk	,r0		; say it's a keyboard abort
+	br	200$
+190$:	mov	#er$wke	,r0		; can't get wake$pmpt from modem
+200$:	clr	mready			; modem is not now ready
+210$:	call	eatjunk			; just to be sure..
+	tst	(sp)+			; pop "msg rec'd" flag buffer
+	unsave	<r4,r3,r2,r1>
+	return
+
+
+	.sbttl	Dial the number		; /BBS/ moderately modified..
+
+;	Note that the waitfor routine,  called by macro of same name, will
+;	exit immediately if the string to compare against is NULL, thus it
+;	won't hurt anything to call it for modems that may not respond, as
+;	long dmod.* aren't defined for such a modem, that is..
+
+dodial:	save	<r2,r3,r4>
+	clr	-(sp)			; /62/ init "msg rec'd" flag
+	mov	#buffer	,r3		; pointer to a handy buffer
+	mov	modtype	,r4		; get address of modem descriptor
+	call	fmtstr			; format the dialing string
+
+	ttputs	dmod.string(r4)		; dump the prompt for dialing out
+	waitfor	dmod.prompt(r4),#4,70$	; wait for a response
+	call	eatjunk			; let things settle a bit
+	br	30$			; display format on abort kludge
+
+10$:	tstb	(r3)+			; next byte..
+	beq	80$			; that's all there is
+
+	call	chkabo			; strike any key to abort
+	tst	r0			; get anything?
+	beq	30$			; nope
+	inc	cccnt			; fake abort so modem is stopped
+	call	clrcns			; eat LF after a CR, etc..
+	tst	(sp)			; /62/ was anything echo'd to TT?
+	beq	20$			; /62/ no, skip the newline
+	.newline			; /62/ ya, tag it
+20$:	jmp	150$			; /62/ go clean up
+
+30$:	ttputc	(r3)			; send a char to the modem
+	tst	dial.echo(r4)		; does it echo?
+	beq	40$			; no
+	ttgetc	#-1			; ya, wait one tick for echo
+	tst	r0			; get anything?
+	bne	60$			; no
+	bicb	#^c<177>,r1		; remove parity always
+	movb	r1	,r0		; copy the char
+	br	50$			; and go dump same to the screen
+40$:	calls	suspend	,<#0,#1>	; /62/ match above ttgetc 1 tick lag
+	movb	(r3)	,r0		; cop char just sent
+50$:	mov	r0	,@sp		; /62/ set "msg rec'd" flag
+	call	writ1char		; and echo it to TT
+60$:	calls	suspend	,<#0,dial.rate(r4)> ; pace chars if dial.rate is not 0
+	br	10$			; loop
+
+70$:	mov	#nodprompt,r0		; no dial prompt
+	br	130$
+
+80$:	tst	(sp)			; /62/ ever type anything to TT?
+	beq	90$			; /62/ no, thus a newline isn't needed
+	.newline			; for dial string above
+90$:	mov	#buffer	,r3		; restore buffer pointer
+	waitfor	dial.ack(r4),#4,110$	; wait for numb to echo perhaps
+	ttputs	dial.conf(r4)		; stuff a confirm (ok if null)
+	waitfor	dial.go(r4),#5,120$	; maybe wait for any confirming string
+	call	getsts			; get final result of the call please
+	tst	cccnt			; did this die from a keyboard abort?
+	bne	140$			; ya
+	inc	r0			; success?
+	bgt	180$			; yes
+	beq	100$			; no, but modem stopped itself
+	ttputs	dial.xabort(r4)		; get the modem to stop
+	calls	suspend	,<#0,settle>	; let modem recover from abort!
+100$:	tstb	buffer			; anything in the buffer?
+	bne	170$			; ya, message already displayed..
+	mov	#defmsg	,r0		; no, must have timed out, say so
+	br	130$			; go dump failure message
+
+110$:	mov	#nod.ack,r0		; no dial ack
+	br	130$
+120$:	mov	#nod.go	,r0		; no dial.go confirmation
+130$:	tst	cccnt			; was ^C typed?
+	beq	160$			; no
+
+140$:	tstb	buffer			; anything in the buffer?
+	beq	150$			; no, don't need a newline
+	.newline			; ya, goto a clean line
+150$:	ttputs	dial.xabort(r4)		; get the modem to stop
+	calls	suspend	,<#0,settle>	; let modem recover from abort!
+	mov	cccnt	,-(sp)		; save number of times ^C typed
+	clr	cccnt			; do this so set.dtr can call getatn
+	call	set.dtr			; drop DTR and re-init modem
+	direrr	r0			; /62/ if set.dtr failed, say why
+	mov	(sp)+	,cccnt		; restore ^C count
+	mov	#abort	,r0		; user interrupt message
+
+160$:	wrtall	r0			; say why we are here..
+	.newline
+170$:	clr	r0			; failure
+	br	190$
+
+180$:	wrtall	#bells			; beep just before CONNECTing
+	mov	#1	,r0		; success
+190$:	tst	(sp)+			; /62/ pop "msg rec'd" flag buffer
+	unsave	<r4,r3,r2>
+	return
+
+
+	.sbttl	Get final result of dialing	; /BBS/ somewhat modified
+
+	NOREPLY	=	7		; /62/ fail call after this many rings
+
+	; offsets to local data on stack
+	STATUS	=	0		; current status
+	NRINGS	=	2		; number of rings
+	LOCSIZ	=	4		; size of the above
+
+;	passed:	  r4	= pointer to modem's data structure
+;	return:	  r0	= if <>, the error code
+
+getsts:	save	<r5>
+	mov	diatmo	,r3		; /62/ # secs to wait for response
+	mul	clkflg	,r3		; convert to ticks per second
+	mov	r3	,r2		; save 16-bit product here
+	sub	#locsiz	,sp		; allocate a local data buffer
+	mov	sp	,r5		; and a pointer to it
+	clr	-(sp)			; init "msg rec'd" flag
+	mov	#noreply,nrings(r5)	; after this many rings, give up..
+	clr	(r5)			; status = 0
+
+10$:	tst	(r5)			; while (status == 0)
+	bne	90$			; exit with result
+	mov	#buffer	,r3		; a buffer pointer
+	clrb	(r3)			; init buffer
+
+20$:	call	chkabo			; strike any key to abort
+	tst	r0			; get anything?
+	beq	30$			; nope
+	inc	cccnt			; fake abort so modem is stopped
+	call	clrcns			; eat LF after a CR, etc..
+	br	40$			; and bail out
+
+30$:	calls	xbinrea	,<#-1>		; this actually waits one tick
+	tst	r0			; did that work?
+	beq	50$			; ya
+	sob	r2	,20$		; no, try it all again
+
+40$:	mov	#aborted,(r5)		; flag modem needs to be killed
+	br	90$			; exit loop
+
+50$:	tstb	r1			; never suffer embedded nulls
+	beq	20$			; a null, skip it
+	bicb	#^c<177>,r1		; ensure a real seven bit character
+	movb	r1	,(r3)+		; copy the byte over
+	clrb	(r3)			; ensure we stay .asciz
+	tst	res.bin(r4)		; exit loop on single character I/O?
+	bne	70$			; yes
+	cmpb	r1	,#cr		; carriage return finally found?
+	beq	60$			; yes
+	cmpb	r1	,#lf		; no, but
+	beq	60$			; a line feed will do nicely
+	mov	r1	,@sp		; it's neither, set "msg rec'd" flag
+	mov	r1	,r0		; pass char to writ1char
+	call	writ1char		; echo to TT
+	br	20$			; then go back for more input
+
+60$:	cmpb	buffer	,#cr		; leading return?
+	beq	10$			; can't be a valid response
+	cmpb	buffer	,#lf		; leading line feed?
+	beq	10$			; ditto..
+
+70$:	tst	(sp)			; was anything echo'd to TT?
+	beq	80$			; no, cursor is already on column one
+	.newline			; ya, tag it
+80$:	jsr	pc,.default		; go check result message
+	br	10$			; next please
+
+90$:	mov	(r5)	,r0		; recover error
+	tst	(sp)+			; pop "msg rec'd" flag buffer
+	add	#locsiz	,sp		; pop temp buffer
+	unsave	<r5>
+	return
+
+
+	.sbttl	Check modem's response	; /39/ 4-DEC-1985, Brian Nelson
+
+;	Read possible responses and their message classes from a linked
+;	list whose first address is in res.header(modem_address).  If a
+;	modem has no mod$res entries this routine will fail any call.
+
+.default:save	<r3>			; /BBS/ about 50% new..
+	mov	res.head(r4),r3		; get listhead of responses
+	beq	90$			; nothing defined..
+10$:	save	<r1,r2,r3>
+	add	#4	,r3		; 4 byte offset for text
+	mov	#buffer	,r2		; address of response to find text in
+20$:	cmpb	(r2)	,#space		; is this a space or below?
+	bgt	30$			; no, continue
+	inc	r2			; ya, skip past leading blanks and non
+	br	20$			; printing stuff before checking match
+30$:	upcase	r3			; uppercase text
+	strlen	r3			; get its length
+	mov	r0	,r1		; save it
+	upcase	r2			; uppercase response from modem
+	strlen	r2			; get its length
+	calls	instr	,<r2,r0,r3,r1>	; see if desired text is in response
+	unsave	<r3,r2,r1>
+	dec	r0			; match must begin from the top of
+	beq	40$			; the response string, else ignore it
+	mov	(r3)	,r3		; get the next in the list
+	bne	10$			; something is left to try
+	br	100$			; tried 'em all..
+40$:	mov	2(r3)	,(r5)		; response class
+	blt	50$			; /62/ < is 38.4kb or a failed call
+	bgt	60$			; 1 = ring, >1 = connect..
+	br	100$			; 0 = info only, display but no action
+50$:	cmp	(r5)	,#con38400	; /62/ is it 38.4kb?
+	bne	90$			; /62/ no, it's a failed call..
+
+60$:	cmp	(r5)	,#2		; what to do ??
+	blo	80$			; it wuz ring /62/ fix for 38.4kb
+	beq	100$			; connect without speed check
+	call	ttspeed			; speed supplied, get handler's speed
+	tst	r0			; is it settable?
+	beq	70$			; /62/ nope..
+	cmp	r0	,(r5)		; does modem speed = handler speed?
+	beq	70$			; ya..
+	mov	r0	,b4speed	; no, save speed before fallback..
+	calls	setspd	,<@r5>		; set it now
+70$:	mov	#connect,@r5		; say it's time to connect
+	br	100$
+
+80$:	clr	@r5			; turn ring into an info message
+	dec	nrings(r5)		; if more than number in nrings
+	bne	100$			; then give up
+	wrtall	#dia.07			; /63/ "% No answer"<cr><lf>
+	mov	#aborted,(r5)		; flag need to make modem stop
+	br	100$
+90$:	mov	#failed	,(r5)		; come here if modem stopped itself
+100$:	unsave	<r3>
+	return
+
+
+	.sbttl	Format dial string
+
+;	passed:	  r3	= address of buffer to place result
+;		argbuf	= the phone number to insert via %S
+
+fmtstr:	save	<r3>
+	mov	dial.string(r4),r2	; point to the dial format string
+10$:	tstb	(r2)			; done?
+	beq	140$			; yes
+	cmpb	(r2)	,#'%		; look for a format effector
+	bne	120$			; no
+
+	mov	argbuf	,r0		; assume phone number insertion
+	cmpb	1(r2)	,#'s!40		; %S formatting?
+	beq	100$			; yes
+	cmpb	1(r2)	,#'S&137	; check both cases
+	beq	100$			; yes
+
+	mov	dial.wait(r4),r0	; no, assume pause string formatting
+	cmpb	1(r2)	,#'p!40		; %P for pause string?
+	beq	100$			; yes
+	cmpb	1(r2)	,#'P&137	; check both cases
+	beq	100$			; yes
+
+	cmpb	1(r2)	,#'x!40		; /BBS/ "%X" for Hayes extended mode?
+	beq	20$			; /BBS/ yes
+	cmpb	1(r2)	,#'X&137	; /BBS/ check both cases
+	bne	40$			; /BBS/ no
+20$:	tstb	xresult			; /BBS/ is there an xmode set?
+	beq	30$			; /BBS/ no, kill leading space here
+	movb	#'X&137	,(r3)+		; /BBS/ ya, insert an "X"
+	movb	xresult	,(r3)+		; /BBS/ then the mode, ala "X4"
+	movb	xresult+1,(r3)+		; /BBS/ one char or two?
+	bne	110$			; /BBS/ it was two this time..
+30$:	dec	r3			; /BBS/ it was one, fix pointer
+	br	110$			; /BBS/ and continue
+
+40$:	cmpb	1(r2)	,#'M&137	; /54/ mode (ie PULSE, TONE)?
+	beq	50$			; /54/ found it
+	cmpb	1(r2)	,#'m!40		; /54/ try lower case also..
+	bne	60$			; /54/ nope
+50$:	mov	dial.pulse(r4),r0	; /54/ assume PULSE dialing
+	tst	pulse			; /54/ ever SET PHONE PULSE or TONE?
+	beq	110$			; /54/ no, ignore string
+	bmi	100$			; /54/ ya, it's PULSE
+	mov	dial.nopulse(r4),r0	; /54/ it's TONE
+	br	100$
+
+60$:	cmpb	1(r2)	,#'B&137	; /54/ SET PHONE BLIND?
+	beq	70$			; /54/ ya..
+	cmpb	1(r2)	,#'b!40		; /54/ no, perhaps lower case?
+	bne	80$			; /62/ nope
+70$:	tst	blind			; /54/ ever do the SET PHONE BLIND?
+	beq	110$			; /54/ no, ignore string
+	mov	dial.blind(r4),r0	; /54/ yes, insert the data then
+	br	100$
+
+80$:	cmpb	1(r2)	,#'A&137	; /62/ auto-answer format effector?
+	beq	90$			; /62/ ya
+	cmpb	1(r2)	,#'a!40		; /62/ try lower case also..
+	bne	120$			; /62/ no, copy data then
+90$:	mov	ph.noanswer(r4),r0	; /62/ default to not answering phone
+	tst	answer			; /62/ did user SET PHONE ANSWER?
+	beq	100$			; /62/ no
+	mov	ph.answer(r4),r0	; /62/ ya, insert answer command
+
+100$:	movb	(r0)+	,(r3)+		; copy a byte please
+	bne	100$			; not a null, next please
+	dec	r3			; fix current pointer up
+110$:	inc	r2			; skip over the "%" please
+	br	130$			; next please
+120$:	movb	(r2)	,(r3)+		; not formatting, copy character
+130$:	inc	r2			; skip over current character now
+	br	10$			; next
+
+140$:	clrb	(r3)			; ensure dial string is .asciz
+	unsave	<r3>
+	return
+
+
+	.sbttl	Wait for a response	; /BBS/ moderately revised..
+
+;	passed:	 2(sp)	= string
+;		 4(sp)	= time-out
+;	return:	   r0	= <> for success, 0 for time out
+
+waitfor:save	<r2,r3,r4>		; this decrements stack pointer 6
+	mov	2+6(sp)	,r4		; string we are expecting
+	mov	4+6(sp)	,r3		; time-out in seconds
+	mul	clkflg	,r3		; make it ticks
+	clr	-(sp)			; init data rec'd flag
+10$:	movb	(r4)+	,r2		; next character to await
+	beq	50$			; success, we can leave now
+
+20$:	tst	mute			; allow strike any key abort?
+	bne	30$			; no
+	call	chkabo			; strike any key to abort
+	tst	r0			; get anything?
+	beq	30$			; nope
+	inc	cccnt			; fake abort so modem is stopped
+	call	clrcns			; eat LF after a CR, etc..
+	br	60$			; and bail out
+
+30$:	dec	r3			; one less tick to wait
+	beq	60$			; no more ticks left
+	calls	xbinrea	,<#-1>		; this actually waits one tick
+	tst	r0			; success?
+	bne	20$			; no
+	bicb	#^c<177>,r1		; remove parity always
+	cmpb	r1	,#cr		; is it a return?
+	beq	40$			; ya, don't echo it
+	cmpb	r1	,#lf		; is it a line feed?
+	beq	40$			; ya, don't echo it
+	movb	r1	,r0		; get a copy of it
+	beq	20$			; dump nulls
+	tst	mute			; echo to TT this time?
+	bne	40$			; no, don't echo modem I/O
+	mov	r0	,@sp		; set "msg rec'd" flag
+	call	writ1char		; keep user informed of what's up..
+40$:	cmpb	r1	,r2		; did we get the correct character?
+	bne	20$			; no, keep waiting then
+	br	10$			; found it, check for next character
+
+50$:	mov	sp	,r0		; success
+	br	70$
+60$:	clr	r0			; failure
+70$:	tst	(sp)+			; was anything dumped to TT?
+	beq	80$			; nope
+	.newline			; ya, tag it with a newline
+80$:	unsave	<r4,r3,r2>
+	mov	(sp)	,4(sp)		; move return address up and fix stack
+	cmp	(sp)+	,(sp)+		; here instead of in calling macro
+	return
+
+
+	.sbttl	Eat junk from modem
+
+eatjunk:save	<r0,r1>
+10$:	ttgetc	#-1			; /BBS/ speed up junk consumption
+	tst	r0			; /BBS/ and thus redial faster..
+	beq	10$			; loop until nothing remains
+	unsave	<r1,r0>
+	return
+
+
+	.sbttl	Send a string to the modem
+
+do.put:	strlen	r1			; /63/ get length
+	tst	r0			; anything to send?
+	beq	10$			; no
+	calls	binwri	,<r1,r0>	; ya, length is in r0
+10$:	return
+
+
+	.sbttl	SHOW MODEM, SHOW DIAL	; /BBS/ heavily hacked
+
+shodia::call	loamdm			; /63/ ensure correct overlay loaded
+	mov	modtype	,r4		; get address of descriptor
+	bne	10$			; got it
+	direrr	#er$mdm			; no modem type has been set
+	return
+
+10$:	mov	#deslist,r3		; /63/ info list start
+20$:	movb	(r3)+	,r1		; /62/ type 2=on/off,1=string,0=number
+	movb	(r3)+	,r2		; /62/ offset, zero implies end
+	beq	100$			; all done
+	add	r4	,r2		; move to the correct offset
+	mov	r3	,-(sp)		; /62/ save the header address
+30$:	tstb	(r3)+			; now look for the end of it
+	bne	30$			; not yet
+	decb	r1			; /62/ determine data type
+	bgt	70$			; /62/ it's "2"  goto on/off displayer
+	beq	40$			; /62/ it's "1"  goto string handler
+	wrtall	(sp)+			; /62/ dump the header
+	mov	@r2	,r0		; it is "0"  copy number to display
+	call	L10266			; write it to terminal
+	br	90$			; next please
+
+40$:	mov	(r2)	,r0		; get the string address
+	beq	50$			; /62/ nothing there
+	tstb	@r0			; again
+	bne	60$			; /62/ there is something to see
+50$:	tst	(sp)+			; /62/ nothing, dump unused header
+	br	20$			; /62/ skip newline, try next one
+60$:	wrtall	(sp)+			; /62/ dump the header
+	call	unfmts			; convert and print it
+	wrtall	r0			; do it
+	br	90$			; next
+
+70$:	wrtall	(sp)+			; /62/ dump the header
+	mov	(r2)	,r0		; /62/ get the data
+	beq	80$			; /62/ 0 = no
+	wrtall	#dia.08			; /63/ anything_else = "Yes"
+
+	br	90$			; /62/
+80$:	wrtall	#dia.09			; /63/ "No"
+90$:	.newline
+	br	20$			; next
+
+100$:	wrtall	#dia.10			; /63/ "Dial time-out secs: "
+	mov	diatmo	,r0		; /62/ get time-out time
+	call	L10266			; /62/ display it
+	.newline			; /62/
+
+	wrtall	#dia.11			; /63/ "Settle-time ticks:  "
+	mov	settle	,r0		; get settle time
+	call	L10266			; display it
+	.newline			; /62/
+
+	clr	-(sp)			; a flag, if <> something found
+
+	mov	ph.noanswer(r4),r1	; /62/ default to not answering phone
+	tst	answer			; /62/ did user SET PHONE ANSWER?
+	beq	110$			; /62/ no
+	mov	ph.answer(r4),r1	; /62/ ya, insert answer command
+110$:	tstb	@r1			; /62/ if there is any..
+	beq	120$			; /62/ there isn't
+	movb	#'A&137	,r2		; /62/ there is, and it's this type
+	call	foreff			; /62/ go display it
+
+120$:	tst	blind			; ever SET PHONE BLIND?
+	beq	130$			; no, ignore string
+	mov	dial.blind(r4),r1	; yes, insert the data then
+	tstb	@r1			; if there is any..
+	beq	130$			; there isn't
+	movb	#'B&137	,r2		; /62/ there is, and it's this type
+	call	foreff			; go display it
+
+130$:	mov	dial.pulse(r4),r1	; assume PULSE dialing
+	tst	pulse			; ever SET PHONE PULSE or TONE?
+	beq	150$			; no, ignore string
+	bmi	140$			; ya, it's PULSE
+	mov	dial.nopulse(r4),r1	; it's TONE
+140$:	tstb	@r1			; anything defined?
+	beq	150$			; nope
+	movb	#'M&137	,r2		; /62/ there is, and it's this type
+	call	foreff			; go display it
+
+150$:	tstb	xresult			; anything set here?
+	beq	170$			; nope..
+	tst	(sp)			; /62/ has this stuff been identified?
+	bne	160$			; /62 ya
+	wrtall	#msg$fmt		; /62/ no, do that now
+	mov	sp	,(sp)		; /62/ and set flag it has been done
+160$:	wrtall	#dia.12			; /63/ ya, dump a header: '%X = "X'
+	wrtall	#xresult		; and the actual number
+	mov	#'"	,r0		; /62/
+	call	writ1char		; /62/
+
+170$:	tst	(sp)+			; /62/ dump formatter flag buffer
+	beq	180$			; /62/ no newline needed..
+	.newline			; done with format effectors
+
+180$:	wrtall	#dia.13			; /63/ "Binary-responses:   "
+	tst	res.bin(r4)		; /62/ on or off?
+	beq	190$			; /62/ 0 = no
+	wrtall	#dia.08			; /63/ anything_else = "Yes"
+	br	200$			; /62/
+190$:	wrtall	#dia.09			; /63/ "No"
+200$:	.newline			; /62/
+
+	mov	res.head(r4),r3		; response header
+	beq	290$			; nothing present
+	wrtall	#dia.14			; /63/ "Result strings:"<cr><lf>
+210$:	mov	r3	,r0		; /62/ get the response address
+	beq	290$			; all done
+	add	#4	,r0		; /62/ offset to text
+	call	unfmts			; /62/ convert it
+	wrtall	r0			; /62/ and print it
+	strlen	r0			; /62/ ..more efficient
+	sub	#col.act,r0		; number of blanks needed to pad
+	neg	r0			; make it positive
+	mov	r0	,r5		; save it in a safe place
+	ble	230$			; avoid this please
+	mov	#space	,r0		; load up a space
+220$:	call	writ1ch			; this way is more efficient
+	sob	r5	,220$		; loop until done
+
+230$:	mov	2(r3)	,r0		; what is the message class?
+	bmi	270$			; if < it's failure to connect
+240$:	dec	r0			; if = 1 it's ringing
+	beq	260$			; it was one, because now it's 0
+	wrtall	#dia.15			; /63/ "Success"
+	dec	r0			; if = 2 connect w/o speed check
+	beq	250$			; it wuz 2
+	inc	r0			; restore
+	inc	r0			; r0
+	wrtall	#msg$dte		; "  DTE is forced to "
+	call	L10266			; tag above with speed
+250$:	.newline
+	br	280$
+260$:	wrtall	#dia.16			; /63/ "Rings+1"<cr><lf>
+	br	280$
+270$:	cmp	r0	,#con38400	; /62/ kludge to see if it's 38.4kb
+	beq	240$			; /62/ it is..
+	wrtall	#dia.17			; /63/ "Failure"<cr><lf>
+280$:	mov	(r3)	,r3		; pick up link to..
+	br	210$			; ..next please
+
+290$:	clr	r0			; /62/
+	return
+
+foreff:	tst	2(sp)			; /62/ need to print header?
+	bne	10$			; /62/ nope..
+	wrtall	#msg$fmt		; /62/ ya
+	mov	sp	,2(sp)		; /62/ but not anymore
+10$:	mov	#'%	,r0		; /62/ a percent sign char
+	call	writ1char		; /62/ dump it to the terminal
+	movb	r2	,r0		; /62/ the format effector character
+	call	writ1char		; /62/ now dump it to tt
+	wrtall	#prefix			; /62/ do some display formatting
+	wrtall	r1			; /62/ now display what is inserted
+	wrtall	#tripsp			; /62/ format display
+	return
+
+	des	1 ,mod.string	,<Modem name:         >
+	des	1 ,mod.comment	,<Modem type:         >
+	des	1 ,wake.string	,<Wakeup string:      >
+	des	0 ,wake.rate	,<Wake-rate in ticks: >
+	des	1 ,wake.prompt	,<Response to wakeup: >
+	des	1 ,dial.string	,<Dial FORMAT string: >
+	des	0 ,dial.rate	,<Dial-rate in ticks: >
+	des	1 ,dial.wait	,<Pause character(s): >
+	des	1 ,dial.ack	,<Dial-acknowledge:   >
+	des	1 ,dmod.string	,<"Initiate" string:  >
+	des	1 ,dmod.prompt	,<"Initiate" prompt:  >
+	des	1 ,dial.confirm	,<"Confirm" string:   >
+	des	1 ,dial.go	,<"Confirm" ack:      >
+	des	2 ,dial.echo	,<Echoes dial string: >
+	des	2 ,init.once	,<Redial w/o reinit:  >
+	des	1 ,dial.blind	,<Blind dial string:  >
+	des	1 ,dial.pulse	,<Pulse dial string:  >
+	des	1 ,dial.nopulse	,<Tone dial string:   >
+	des	1 ,dial.xabort	,<Dial abort string:  >
+	des	1 ,dial.idle	,<Reset/idle string:  >
+	des	1 ,ph.answer	,<Enable autoanswer:  >
+	des	1 ,ph.noasnwer	,<Disable autoanswer: >
+	des
+
+	.end

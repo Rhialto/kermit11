@@ -1,0 +1,1329 @@
+	.title	KRTPAK	Packet driver
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	make .TOGO = 16, fixing a (harmless) typo (was 26)..
+;	dump ^A = restart a packet for SET CONTROL UNPREFIX 1 operation
+;	BUFFIL back to root (KRTPAK), for speed and room now available
+;	ERROR: now sends error packet when link is open and xfr in progress
+;	modify BUFFIL to do BUFPAK too, for repeated char encoding
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	move erbfsiz to KRTMAC
+;	patch PRINTM to also write to a logfile, when same is in use
+;	add logfile error handler and provide for logfile errors
+;	write error messages to logfile
+;	include file spec in getnxt error messages
+;	add individual packet exchange duration timer, for debugging
+;	make BUFFIL limit test max-0 (was max-4), allows bigger packets
+;	don't log bogus data for timout
+;	make ERROR send an error packet, use PRINTM elsewhere
+;	don't modify SET time-out value
+;	add/enforce SET SEND PACKET-LEN limit
+;	move bufpak to KRTSER, no one else uses it
+;	move buffil to KRTSEN, ditto..
+;	move bufemp to KRTREC
+;	add passed buffer length to rpack$
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	added lun.ld == 12 for TSX logical disk support
+;	added lun.at == 5 for file attributes support
+;	prefixing error messages with the prompt string moved to KRTERR
+;	waitsoh - ^Z abort changed to ^C abort, thus not killing the pgm
+;
+;	spack$ packet length test fixed to determine the true length of
+;	a packet near or equal to 94 bytes when long packets are used.
+;	it was possible to generate a "normal" packet with an out-of-
+;	range LENGTH character (using all eight bits) when reaching the
+;	the EOF produced a last packet in a long packet series close to
+;	94 bytes, as the routine filling the packet data input buffer
+;	is still looking for enough to make a long packet, with no
+;	consideration for the added SEQ and TYP bytes nor the checksum
+;	size (up to three more bytes with CRC block checking)..
+;
+;	rpakst patched to hose link device whenever the "T" (time-out)
+;	packet count is incremented, or when a NAK xxx NAK series
+;	(indicating resonating packets) occurs.  this is very helpful
+;	when telephone line noise crashes/hangs the handler..
+;
+;	space padding between elements of an error message moved from
+;	error: to the err msgs themselves as printm doesn't do it, and
+;	it's too confusing otherwise..
+;
+;	patched to compensate for crossing midnight, as long as
+;	there's less than 24 hours between calls to it, thus 32-bit
+;	time data from incsta are thought to be sufficient here
+;	note: the display routine in krtsho limits max to 18.2 hours..
+;
+;	patched bufemp to not output the lead-in char to TT under TSX
+;
+;	moved RPACK debug stuff to rawio: as when it was in rpakrd: it
+;	missed the SOH, which is handled by waitsoh: (both call rawio)..
+;	also cleaned up display at the EOL and added display of TIMOUTs
+;
+;	fixed non-init'd repeat count reg bug in bufunpack
+
+;	Brian Nelson	30-Nov-83  10:20:09
+;	13-Oct-84  14:01:32  BDN	moved SENDSW and RECSW out
+;
+;	Change Software, Toledo, Ohio
+;	University of Toledo, Toledo, Ohio
+
+
+;				 PACKET FORMAT
+;
+; The KERMIT protocol is built around exchange of packets of this format:
+;
+;    +------+-----------+-----------+------+- ~ ---- ~ -+-------+-----+
+;    | MARK | char(LEN) | char(SEQ) | TYPE |    DATA    | CHECK | EOL |
+;    +------+-----------+-----------+------+- ~ ---- ~ -+-------+-----+
+;
+; where all fields consist of ASCII characters.  The fields are:
+;
+; MARK  The synchronization character that marks the beginning of the packet.
+;      This is normally ^A, but may be redefined.
+;
+; LEN  The  number  of  ASCII  characters  within  the packet that follow this
+;      field, in other words the packet length minus two.  Since  this  number
+;      is  transformed  to  a single character via the char() function, packet
+;      character  counts  of  0. to 94. are permitted, and  96. is the maximum
+;      total packet length.  The length doesn't include end-of-line or padding
+;      characters, which are outside  the  packet  and  are  strictly  for the
+;      benefit of the operating system,  but  it  does include the block check
+;      characters.
+;
+; SEQ  The packet sequence number modulo 64., ranging from 0. to 63.  Sequence
+;      numbers "wrap around" to 0. after each group of 64. packets.
+;
+; TYPE  The packet type, a single ASCII character.  The following packet types
+;       are used in the Kermit protocol -
+;
+;  A = Attributes                     K = Kermit (remote) command
+;  B = Break transmission (EOT)       N = Negative acknowledgment (NAK)
+;  C = Host (remote) command          R = Receive file init
+;  D = Data packet                    S = Send file init
+;  E = Error                          T = Time out (internal)
+;  F = File header (name)             X = Extended reply
+;  G = Generic (remote) command       Y = Acknowledgment (ACK)
+;  I = Server init                    Z = End of file (EOF)
+;
+; DATA  The contents of the packet,  if any contents are required in the given
+;      type of packet, interpreted according to  the  packet  type.    Control
+;      characters  are  preceded  by a special prefix character, normally "#",
+;      and "uncontrollified" via ctl().  A prefixed sequence may not be broken
+;      across packets.  Logical records in printable files are delimited  with
+;      CR/LFs, suitably prefixed (e.g. "#M#J").  Any prefix characters are in-
+;      cluded in the count.  Optional encoding for  8-bit  data  and  repeated
+;      characters is also available.
+;
+; CHECK  A block check on characters in the packet between,  but not including
+;      ing, the mark and the block check itself.  The check for each packet is
+;      computed by both hosts,  and  must agree if a packet is to be accepted.
+;      A single-character arithmetic checksum is the normal and required block
+;      check.   Only  six  bits  of the arithmetic sum are included.  In order
+;      that all the bits of each data character contribute to  this  quantity,
+;      bits  6  and  7  of the final value are added to the quantity formed by
+;      bits 0-5.  Thus if s is the arithmetic sum  of  the  ASCII  characters,
+;      then
+;
+;	    check = char((s + ((s & 192.)/64.)) & 63.)
+;
+;      This  is  the  default  block check, and all Kermits must be capable of
+;      performing it.  Other optional block check types are also defined.  The
+;      block check  is  based  on  the  ASCII  values of the characters in the
+;      packet.    Non-ASCII  systems must translate to ASCII before performing
+;      the block check calculation.
+;
+; EOL  The End Of Line character, normally a carriage return, marks the end of
+;      the packet.  This particular implementation (Kermit-11) uses the packet
+;      length and ignores the EOL char other than displaying it when debugging
+;      to the terminal.
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+	.include "IN:KRTDEF.MAC"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MAC failed>
+
+	.mcall	.CLOSE			; /63/ drop .GTIM, ,.PURGE
+
+
+	.sbttl	Misc defaults
+
+	BADCHK	==	377		; pseudo packet type for bad checksum
+	DEFCHK	==	 '1		; default block-check-type
+	TIMOUT	==   'T&137		; pseudo packet type for time-out
+
+
+	.sbttl	Local and global read-only data
+
+	.psect	$pdata	; /62/ MUST be non-swapping, in root (SJ) or APR1 (XM)
+aspace::.byte	40 ,0	; /62/ consolidated all this here..
+null::	.byte	 0 ,0
+e$pari:	.asciz	", parity is possibly being introduced"
+e$retr:	.asciz	"Retry limit reached"
+e$sync:	.asciz	"Packet serial numbers are out of sync"
+pak.01:	.asciz	"Kermit: "
+pak.02:	.asciz	"<<< RPACK - "
+pak.03:	.asciz	"<TIMOUT>"
+pak.04:	.asciz	"BAD Checksum: RCV,CALC = "
+pak.05:	.asciz	"<SOH>"
+pak.06:	.ascii	"<EOL>"
+pak.07:	.asciz	<cr><lf>
+pak.08:	.asciz	">>> SPACK - "
+	.even
+
+
+	.psect	$code
+	.sbttl	Read incoming packet
+
+;	R P A C K $
+;
+;	input:	  (r5)	= packet buffer address
+;		 4(r5)	= packet buffer length
+;	output:	 2(r5)	= 3 word data structure returns length, number, type
+
+	O$LEN	=  0		; offset for returned packet length
+	O$SEQ	=  2		; packet number
+	O$TYP	=  4		; packet type
+
+	; /62/	local data allocated on the stack, offsets from r4
+	.TYP	=  0		; packet type
+	.CCHECK	=  2		; computed checksum
+	.RCHECK	=  4		; received checksum
+	.LEN	=  6		; received packet length
+	.TIMEO	= 10		; read time-out
+	.SEQ	= 12		; received packet number
+	.SIZE	= 14		; current size of data portion
+	.TOGO	= 16		; /63/ loop count control for data portion
+	.HDTYPE	= 20		; /62/ header type
+	.CBUFF	= 22		; /62/ checksum buffer address
+	.LSIZE	= 24		; total size of the above local data
+
+;	internal register usage:
+;	r0	= scratch register
+;	r1	= current character just read from remote
+;	r2	= pointer to packet buffer
+;	r3	= pointer to temp buffer on the stack containing the packet
+;		  less the SOH and the checksum, for computing checksum after
+;		  the packet has been read
+;	r4	= pointer to local data on stack, as defined above
+;	r5	= pointer to argument list
+
+rpack$::call	dcdtst			; /62/ check DCD, report any change..
+	save	<r1,r2,r3,r4>
+	clr	recbit			; /43/ clear bit sum out
+	sub	#.lsize	,sp		; allocate space for local data
+	mov	sp	,r4		; and point to it please
+	sub	#$allsiz,sp		; /42/ allocate a HUGE buffer
+	call	waitsoh			; wait for a packet to start
+	tst	r0			; did it work or did we time out?
+	beq	10$			; yes it worked
+	jmp	100$			; we must have timed out then
+
+10$:	mov	sp	,r3		; the packet less SOH and checksum
+	mov	sp	,.cbuff(r4)	; /42/ save start address
+	call	rpakin			; initialize things
+	call	rpakrd			; read the next character from
+	bcs	100$			; packet reader's buffer
+	bisb	r1	,recbit		; /43/ so we can determine parity set
+	bic	#^c<177>,r1		; ensure parity is cleared out
+	movb	r1	,(r3)+		; *checkpacket++ = ch
+	unchar	r1	,r0		; get the length packet next please
+	mov	r0	,.hdtype(r4)	; /42/ save header type
+	cmp	r0	,#2		; /42/ if the length is 0,1 or 2 then
+	ble	20$			; /42/ an extended header instead
+	sub	#2	,r0		; this is NOT an extended header so we
+	sub	chksiz	,r0		; will check to see if the packet can
+	bge	20$			; hold at least SEQ+TYPE+CHECK
+	clr	r0			; /44/ couldn't, "fix" bad length
+20$:	mov	r0	,.len(r4)	; stuff the packet length
+
+	call	rpakrd			; as before, ask for the next char
+	bcs	100$			; and take an error exit if need be
+	bisb	r1	,recbit		; /43/ so we can determine parity set
+	bic	#^c<177>,r1		; ensure parity is cleared out
+	movb	r1	,(r3)+		; insert the sequence number into the
+	unchar	r1	,.seq(r4)	; checksum packet and save the SEQ
+
+	call	rpakrd			; read the TYPE field next, exiting
+	bcs	100$			; on a read error, of course
+	bisb	r1	,recbit		; /43/ so we can determine parity set
+	bic	#^c<177>,r1		; ensure parity is cleared out
+	movb	r1	,(r3)+		; save TYPE field into the checksum
+	mov	r1	,.typ(r4)	; and also into the field for return
+
+	tst	.hdtype(r4)		; /42/ NOW check for extended header
+	bne	30$			; /42/ not extended header
+	call	rdexhd			; /42/ ReaD EXtended HeaDer
+	tst	r0			; /42/ did this work ok?
+	bne	110$			; /63/ no, time-out or checksum error
+
+30$:	mov	.len(r4),.togo(r4)	; loop for the data, if any
+	cmp	.togo(r4),4(r5)		; /62/ ensure we don't overwrite buff
+	blos	40$			; /62/ received length is ok
+	mov	4(r5)	,.togo(r4)	; /62/ bad length, do max possible..
+40$:	mov	@r5	,r2		; point to the buffer now
+
+50$:	tst	.togo(r4)		;   for i := 1 to len do
+	beq	90$			;    begin
+	call	rpakrd			;     read(input,ch)
+	bcs	100$			;     exit if error
+	tst	parity			; /62/ parity set to none?
+	bne	60$			; /62/ no, must be some other type
+	tst	image			; /62/ no parity, image mode today?
+	bne	70$			; /62/ yes, leave things alone please
+60$:	bic	#^c<177>,r1		; /62/ ch := ch and chr(177b)
+70$:	cmp	.size(r4),#maxlng	;     if currentsize < maxpaksize
+	bhis	80$			;       then
+	movb	r1	,(r2)+		;         data[i]  := ch
+	movb	r1	,(r3)+		;         checkpacket++ := ch
+					;	end
+80$:	inc	.size(r4)		;     currentsize:=succ(currentsize)
+	dec	.togo(r4)		;    nchar_left := nchar_left-1
+	br	50$			;    end
+
+90$:	clrb	@r2			;   data[len] := null
+	clrb	@r3			;   checkpacket++ := null
+	mov	sp	,r3		;   reset base address of checkpacket
+	call	rpakck			;   read the checksum now
+	bcs	100$			;   exit on error or time-out
+	call	rpakfi			; /62/ finish the checksum
+	br	120$
+
+100$:	mov	2(r5)	,r1		; time-out error, flag no packet
+	mov	#timout	,o$typ(r1)	; return as pseudo packet type
+	mov	#timout	,.typ(r4)	; ditto for rpakst
+	clr	o$len(r1)		; /62/ time-out has no length
+	clr	.len(r4)		; /62/ don't log bogus data either
+	clr	.seq(r4)		; /62/ time-out has no packet number
+110$:	call	rpakst			; do stats and disk dumping now
+
+120$:	add	#.lsize+$allsiz,sp	; /42/ pop local buffers
+	unsave	<r4,r3,r2,r1>
+	return
+
+
+	.sbttl	RPACK$ wait for a start of packet char (SOH)
+
+;	W A I T S O H
+;
+;	output:	  r0	= if <>, error code
+;		  r1	= the SOH or a null if we timed out
+
+; /BBS/	^Z exit changed to ^C abort (requires two successive ^Cs)
+
+waitsoh:clr	r1			; start with nothing
+	clr	-(sp)			; /56/ hold virgin copy of data
+	mov	#2	,-(sp)		; /BBS/ counter for ^C's
+10$:	cmpb	r1	,recsop		; wait for a packet header please
+	beq	60$			; got one, exit
+	mov	sertim	,r0		; /62/ if waiting for server command
+	bne	20$			; /62/ then use that time-out
+	movb	senpar+p.time,r0	; /62/ else use "normal" time-out
+20$:	calls	binrea	,<r0>		; read with time-out
+	tst	r0			; did the read work?
+	bne	50$			; oops, just exit then
+	mov	r1	,2(sp)		; /56/ save it
+	bic	#^c<177>,r1		; /44/ never want parity here
+	cmpb	r1	,#'C&37		; /BBS/ ^C returned?
+	bne	30$			; /41/ no
+	dec	(sp)			; /44/ should we really exit now?
+	bne	40$			; /44/ no, in case we got some noise
+	mov	cc$max	,cccnt		; /BBS/ force abort thru cptln routine
+	mov	sp	,ccflag		; /BBS/ else .spcps will bomb..
+	mov	#er$nin	,r0		; /BBS/ a fake time-out until
+	br	50$			; /BBS/ the ccast hits (15. ticks max)
+30$:	mov	#2	,(sp)		; /BBS/ need TWO ^C's in a row to exit
+40$:	call	rawio			; all's not well, perhaps dump packets
+	br	10$			; loop back for finding a packet start
+50$:	clr	r1			; time-out, return a null
+	br	70$			; /56/
+60$:	tstb	2(sp)			; /62/ parity perhaps?
+	bpl	70$			; /62/ no
+	tst	parity			; /BBS/ 8-bit channel?
+	bne	70$			; /56/ no
+	tst	incpar			; /62/ warning already done?
+	bne	70$			; /62/ ya, avoid rollover to zero..
+	inc	incpar			; /56/ ya, also want message only once
+70$:	cmp	(sp)+	,(sp)+		; /BBS/ pop ^C counter, data buffer
+	return
+
+
+	.sbttl	RPACK$ initialization
+
+rpakin:	mov	r4	,r0		; /62/ copy local buffer pointer
+	mov	#11	,r1		; /62/ need to clear this many words
+10$:	clr	(r0)+			; /62/ do it
+	sob	r1	,10$		; /62/ one word at a time
+	bisb	senpar+p.time,.timeo(r4) ; /62/ time-out := SET TIME-OUT value
+	mov	2(r5)	,r0
+	clr	(r0)+			; packet.length := 0
+	clr	(r0)+			; packet.number := 0
+	clr	(r0)+			; packet.type   := 0
+	return
+
+
+	.sbttl	RPACK$ read with time-out
+
+rpakrd:	calls	binrea	,<.timeo(r4)>	; read input char
+	tst	r0			; did it work?
+	bne	10$			; no
+	call	rawio			; perhaps raw I/O logging
+	clr	r0			; no errors, also clears carry
+	return
+10$:	sec				; flag the time-out
+	return
+
+
+	.sbttl	RPACK$ extended header type 0 for long packets
+
+rdexhd:	mov	r2	,-(sp)		; /42/ added 08-Jan-86 Brian Nelson
+	mov	r5	,-(sp)		; need an odd register for mul
+	call	rpakrd			; extended header, read the lenx1
+	bcs	20$			; field, exiting on read errors
+	bic	#^c<177>,r1		; ensure parity is cleared out
+	movb	r1	,(r3)+		; save into checksum buffer
+	unchar	r1	,r5		; get the high order of length
+	mul	#95.	,r5		; shift over please
+	call	rpakrd			; extended header, read the lenx2
+	bcs	20$			; field, exiting on read errors
+	bic	#^c<177>,r1		; ensure parity is cleared out
+	movb	r1	,(r3)+		; save into checksum buffer
+	unchar	r1	,r1		; get the next one
+	add	r1	,r5		; now we have the extended length
+	sub	chksiz	,r5		; drop it by checksum size
+	mov	r5	,.len(r4)	; save it here, of course
+
+	mov	.cbuff(r4),r5		; now, at last, get the extended
+	mov	#5	,r1		; header checksum data
+	clr	-(sp)			; accumulate in stack
+10$:	clr	r0			; use the normal safe way to add
+	bisb	(r5)+	,r0		; bytes even though we know that
+	add	r0	,(sp)		; no sign extends will happen
+	sob	r1	,10$		; next please
+	mov	(sp)+	,r0		; pop the checksum please
+	mov	r0	,r2		; save it
+	bic	#^c<300>,r2		; compute it as in:
+	ash	#-6	,r2		; chk=char((s+((s&0300)/0100))&77)
+	add	r0	,r2
+	bic	#^c<77>	,r2		; got it now
+
+	call	rpakrd			; extended header - read the hcheck
+	bcs	20$			; field, exiting on read errors
+	clr	r0			; /63/ preset no error
+	bic	#^c<177>,r1		; ensure parity is cleared out
+	movb	r1	,(r3)+		; save into checksum buffer
+	unchar	r1	,r1		; convert to actual checksum now
+	cmpb	r1	,r2		; do the checksums match?
+	beq	40$			; /63/ yes
+	mov	#badchk	,r0		; header checksum error
+	br	30$			; stuff the error
+20$:	mov	#timout	,r0		; return time-out error
+	clr	.len(r4)		; /62/ don't log bogus data on timout
+30$:	mov	2(sp)	,r5		; /BBS/ restore r5 to as entering
+	mov	2(r5)	,r1		; get address of result block
+	clr	o$len(r1)		; clear packet length
+	mov	r0	,o$typ(r1)	; return the error
+	mov	r0	,.typ(r4)	; here also please
+	mov	#-1	,r0		; fatal error
+40$:	mov	(sp)+	,r5
+	mov	(sp)+	,r2
+	return
+
+
+	.sbttl	RPACK$ get and convert the checksum
+
+rpakck:	save	<r3>			; use r3 for accumulating check
+	clr	r3			; assume zero for now
+	call	rpakrd			; read(input,ch)
+	bcs	20$			; exit if timed out
+	bisb	r1	,recbit		; recbit |= ch
+	bic	#^c<177>,r1		; ch := ch and 177b
+	unchar	r1	,r3		; received_check := ch
+	cmpb	chktyp	,#defchk	; if len(checksum) > 8 bits
+	blos	10$			;  then begin
+	 ash	#6	,r3		;   check := check * 64
+	 call	rpakrd			;   read(input,ch)
+	 bcs	20$			;   exit if timed out
+	 bic	#^c<177>,r1		;   ch := ch and 177b
+	 unchar	r1	,r1		;   ch := unchar(ch)
+	 bisb	r1	,r3		;   rcheck := rcheck + ch
+	 cmpb	chktyp	,#'3		;   if checktype = crc16
+	 bne	10$			;    then
+	 ash	#6	,r3		;     begin
+	 call	rpakrd			;      check := check * 64
+	 bcs	20$			;      check := check + ch
+	 bic	#^c<177>,r1		;      ch := ch and 177b
+	 unchar	r1	,r1
+	 bisb	r1	,r3		;      end
+10$:	clc
+20$:	mov	r3	,.rcheck(r4)	; return the checksum
+	unsave	<r3>
+	return
+
+
+	.sbttl	RPACK$ end of packet housekeeping
+
+rpakfi:	mov	r3	,-(sp)		; compute correct checksum type
+	call	checks			; simple
+	mov	(sp)+	,.ccheck(r4)	; and stuff it in please
+	cmpb	.ccheck(r4),.rcheck(r4)	; compare computed, actual checksums
+	beq	10$			; they are the same
+	mov	#badchk	,.typ(r4)	; they're different, flag the error
+10$:	mov	2(r5)	,r1		; where to return some things
+	mov	.len(r4),(r1)+		; /62/ O$LEN packet length
+	mov	.seq(r4),(r1)+		; /62/ O$SEQ packet number
+	mov	.typ(r4),(r1)		; /62/ O$TYP packet type
+	call	rpakst			; do stats and logging now
+	jmp	rpaklo			; /62/ possibly log checksum errors?
+
+
+	.sbttl	RPACK$ statistics, logging, resonating packets fix
+
+rpakst:	cmpb	.typ(r4),#'A&137	; count the packet types for stats
+	blo	40$			; bad packet type
+	cmpb	.typ(r4),#'Z&137	; must in the range A..Z
+	bhi	40$			; definitely a bad packet
+
+	; /BBS/ check for resonating packets or hung driver
+	asr	nakrec			; shift prior tests down the line
+	cmpb	.typ(r4),#'N&137	; a NAK?
+	bne	10$			; nope..
+	bis	#4	,nakrec		; ya, mark shift reg at 1st position
+10$:	cmp	nakrec	,#4+1		; looking for NAK xxx NAK series as
+	bge	20$			; when resonating, go clear it
+	cmpb	.typ(r4),#timout	; timed out?
+	bne	30$			; nope..
+20$:	call	hose			; ya, try harder to make it go
+	clr	nakrec			; start over after hose
+	bit	#log$rp	,trace		; /BBS/ RPACK to TT?
+	beq	30$			; /BBS/ no
+	wrtall	#pak.03			; /62/ ya, display time out
+
+30$:	 movb	.typ(r4),r1		; packet is ok, add it to the stats
+	 sub	#100	,r1		; convert to 1..26
+	 asl	r1			; to word offsets
+	 asl	r1			; /43/ double word offsets
+	 add	#1	,pcnt.r+2(r1)	; /43/ 32-bit addition today
+	 adc	pcnt.r+0(r1)		; /43/ the high order part of it
+	 add	#1	,pcnt.r+2	; /43/ add it in here also
+	 adc	pcnt.r+0		; /43/ high order part
+
+40$:	bit	#log$rp	,trace		; /BBS/ RPACK to TT?
+	beq	50$			; /BBS/ no
+	.newline			; /BBS/ ya, format display
+50$:	bit	#log$pa	,trace		; tracing today?
+	bne	60$			; /BBS/ ya
+	bit	#log$de	,trace		; /62/ TT debugging?
+	beq	70$			; /BBS/ no
+60$:	calls	dskdmp	,<#pak.02,.seq(r4),.typ(r4),.len(r4),@r5> ; /62/
+70$:	return
+
+
+	.sbttl	RPACK$ packet logging
+
+rpaklo:	cmp	.rcheck(r4),.ccheck(r4)	; checksums match?
+	beq	40$			; /62/ yes, do nothing then
+	save	<r0,r1>			; /62/
+	mov	trace	,r0		; /62/ copy of debug status word
+	bic	#^c<log$pa!log$de>,r0	; /62/ need to do this?
+	beq	30$			; /62/ nope
+	sub	#100.	,sp		; /63/ ya, make buffer for err message
+	mov	sp	,r1		; point to the buffer
+	strcpy	r1	,#pak.04	; /62/ a header
+	strlen	r1			; length so far
+	add	r0	,r1		; point to the end of it
+	deccvt	.rcheck(r4),r1		; convert to decimal
+	add	#6	,r1		; move along please
+	movb	#comma	,(r1)+		; /62/ insert delimiter
+	deccvt	.ccheck(r4),r1		; the calculated checksum
+	add	#6	,r1		; make it .asciz
+	clrb	@r1			; simple
+	mov	sp	,r1		; point back to the buffer
+	bit	#log$pa	,trace		; /62/ is packet debugging on?
+	beq	10$			; /62/ no
+	strlen	r1			; ya, get the length
+	calls	putrec	,<r1,r0,#lun.lo> ; dump buffer to disk
+	tst	r0			; /62/ did it work?
+	beq	10$			; /62/ ya
+	call	logerr			; /62/ no, handle the error
+10$:	tst	remote			; /62/ running locally?
+	bne	20$			; /62/ no
+	bit	#log$de	,trace		; /62/ ya, is terminal debugging on?
+	beq	20$			; /62/ no
+	wrtall	r1			; /62/ ya, print it
+	.newline			; /62/
+20$:	add	#100.	,sp		; /63/ pop buffer
+30$:	unsave	<r1,r0>			; /62/
+40$:	return
+
+
+	.sbttl	RPACK$ raw I/O logging, chars to RPACK debug display
+
+rawio:	save	<r0,r1>
+	bit	#log$io	,trace		; dumping all I/O today?
+	beq	20$			; /BBS/ no
+	save	<r1>
+	clr	r0			; avoid sxt
+	bisb	r1	,r0		; and setup call to putcr0
+	mov	#lun.lo	,r1		; write to this channel
+	call	putcr0			; simple
+	tst	r0			; /62/ did it work?
+	beq	10$			; /62/ ya
+	call	logerr			; /62/ no, handle the error
+10$:	unsave	<r1>			; /62/
+
+20$:	bit	#log$rp	,trace		; /BBS/ dump to a local terminal?
+	beq	60$			; no
+	cmpb	r1	,recsop		; start of a packet?
+	beq	50$			; yes
+	cmpb	r1	,conpar+p.eol	; /BBS/ no, is this the end of line?
+	bne	30$			; /BBS/ no
+	wrtall	#pak.06			; /62/ yes, finish up the display
+	br	60$
+
+30$:	tst	tsxsav			; /BBS/ running under TSX?
+	beq	40$			; /BBS/ nope
+	cmpb	r1	,m.tsxr		; /62/ ya, is this the TSLICH?
+	beq	60$			; /BBS/ ya, don't type it to TT
+40$:	movb	r1	,r0		; /BBS/ get a byte
+	call	writ1char		; /BBS/ send it to TT
+	br	60$
+
+50$:	wrtall	#pak.05			; /62/ start of a packet
+60$:	unsave	<r1,r0>
+	return
+
+
+	.sbttl	Send a packet
+
+;	S P A C K $
+;
+;	input:	  (r5)	= type of packet
+;		 2(r5)	= packet number
+;		 4(r5)	= length of the data to send
+;		 6(r5)	= location of the data to send
+;	output:	   r0	= error status
+
+spack$::save	<r1,r2,r3,r4>
+	call	dcdtst			; /62/ check DCD, report any change..
+	tstb	handch			; /62/ any particular handshake today?
+	beq	10$			; no
+	call	spakwa			; ya, do handshaking
+10$:	call	spakin			; logging, padding, packet type stats
+	sub	#$allsiz,sp		; /42/ allocate a LONG buffer
+	mov	sp	,r4		; point to the buffer
+	clr	-(sp)			; count the total length
+	tst	prexon			; /53/ prefix all packets with an XON?
+	beq	20$			; /53/ no
+	movb	#xon	,(r4)+		; /53/ yes, insert one
+	inc	@sp			; /53/ write_length++
+20$:	setpar	sensop	,(r4)+		; start all packets with the SOH
+	mov	r4	,r2		; get address for checksum compute
+	inc	@sp			; packetlength := succ(packetlength)
+	mov	4(r5)	,r0		; the length of the packet
+	mov	#maxpak	,r1		; /BBS/ preset for compare
+	cmp	senlng	,r1		; /BBS/ long packets this time?
+	blos	30$			; /BBS/ nope..
+	sub	chksiz	,r1		; /BBS/ ya, be sure checksum will fit
+	sub	#2	,r1		; /BBS/ SEQ + TYP have to fit too..
+30$:	cmp	r0	,r1		; /BBS/ packet too large?
+	blos	50$			; no
+	tst	senlng			; /42/ receiver said it can do long
+	beq	40$			; /42/ packets?  if eq, no
+					; /42/ otherwise build extended header
+	mov	r2	,-(sp)		; /42/ save address of start of packet
+	mov	#space	,-(sp)		; /42/ accumulate header checksum
+	setpar	#space	,(r4)+		; /42/ length is a space, of course
+	tochar	2(r5)	,r1		; /42/ packet sequence please
+	add	r1	,(sp)		; /42/ add into header checksum now
+	setpar	r1	,(r4)+		; /42/ insert it
+	movb	(r5)	,r1		; /42/ the packet type is next
+	bicb	#40	,r1		; /42/ ensure always upper case
+	add	r1	,(sp)		; /42/ add in the checksum
+	setpar	r1	,(r4)+		; /42/ and insert that also
+	mov	r0	,r3		; /42/ insert the total packet size
+	clr	r2			; /42/ first byte is size/95
+	add	chksiz	,r3		; /42/ must include checksum size
+	div	#95.	,r2		; /42/ second byte is size mod 95
+	tochar	r2	,r2		; /42/ convert to character rep
+	tochar	r3	,r3		; /42/ convert to character rep
+	setpar	r2	,(r4)+		; /42/ insert high bits into packet
+	add	r2	,(sp)		; /42/ add into checksum
+	setpar	r3	,(r4)+		; /42/ insert low bits into packet
+	add	r3	,(sp)		; /42/ add into checksum
+	mov	(sp)+	,r0		; /42/ pop the checksum please
+	mov	r0	,r2		; /42/ save it
+	bic	#^c<300>,r2		; /42/ compute it as in:
+	ash	#-6	,r2		; /42/ checksum=
+	add	r0	,r2		; /42/ char((s+((s&300)/100))&77)
+	bic	#^c<77>	,r2		; /42/ got it now
+	tochar	r2	,r2		; /42/ convert checksum to character
+	setpar	r2	,(r4)+		; /42/ and insert into packet
+	mov	(sp)+	,r2		; /42/ start checksum for rest here
+	add	#7	,(sp)		; /BBS/ add, in case of prexon, above
+	br	60$			; /42/ add off we go
+
+40$:	mov	#maxpak-3,r0		; yes, reset packet size please
+50$:	add	#2	,r0		; + two for number and type
+	add	chksiz	,r0		; + the length of the checksum please
+	clr	r1			; accumulated checksum
+	tochar	r0	,r1		; start the checksum out right
+	setpar	r1	,(r4)+		; and stuff length into the packet
+	inc	@sp			; packetlength := succ(packetlength)
+	tochar	2(r5)	,r0		; convert the packet number now
+	setpar	r0	,(r4)+		; and stuff it into the packet
+	inc	@sp			; packetlength := succ(packetlength)
+	movb	@r5	,r0		; get the packet type now
+	bicb	#40	,r0		; ensure UPPER CASE packet type
+	setpar	r0	,(r4)+		; insert the packet type into buffer
+	inc	@sp			; packetlength := succ(packetlength)
+
+60$:	mov	4(r5)	,r1		; get the data length
+	beq	80$			; nothing to do
+	mov	6(r5)	,r3		; address of the data to send
+
+70$:	clr	r0			; get the next character
+	bisb	(r3)+	,r0		; next char
+	setpar	r0	,(r4)+		; now move the data byte into the buff
+	inc	@sp			; packetlength := succ(packetlength)
+	sob	r1	,70$		; next please
+
+80$:	clrb	@r4			; set .asciz for call to checks
+	mov	r2	,-(sp)		; starting address for checksum field
+	call	checks			; simple
+	mov	(sp)+	,r2		; get the computed checksum now
+	call	spakck			; stuff checksum into buffer now
+	add	r0	,@sp		; and the length of the checksum
+	setpar	conpar+p.eol,(r4)+	; end of line
+	inc	@sp			; packetlength := succ(packetlength)
+	mov	(sp)+	,r1		; packet length
+	mov	sp	,r4		; address(buffer)
+	calls	binwri	,<r4,r1>	; and dump the buffer out now
+	call	spakfi			; log to disk
+	add	#$allsiz,sp		; pop the buffer
+	unsave	<r4,r3,r2,r1>
+	return
+
+
+	.sbttl	SPACK$ handshaking
+
+spakwa:	scan	@r5	,#han.no	; if packet type is in this list..
+	tst	r0
+	bne	30$			; ..then skip the handshaking stuff
+	save	<r2>
+	mov	4(r5)	,r2		; /62/ limit looping to packet length
+	add	#14	,r2		; /62/ plus header, trailer, etc..
+	movb	senpar+p.time,r0	; /62/ use "normal" time-out
+10$:	calls	binrea	,<r0>		; /62/ wait for handshake char
+	tst	r0			; did the read time out?
+	bne	20$			; /62/ if so, exit
+	bicb	#200	,r1		; ensure no parity is set
+	cmpb	r1	,handch		; is this the handshake character?
+	beq	20$			; /62/ ya
+	sob	r2	,10$		; no, try again but not forever please
+20$:	unsave	<r2>
+30$:	return
+
+	.save				; these packet types must NOT
+	.psect	$pdata			; be processed with handshaking
+han.no:	.byte	msg$snd	,msg$ser ,msg$rcv ,msg$command ,msg$generic
+	.byte	0
+	.even
+	.restore
+
+
+	.sbttl	SPACK$ logging, padding, packet type stats
+
+spakin:	bit	#log$pa	,trace		; packet debugging today?
+	bne	10$			; /BBS/ ya
+	bit	#log$de	,trace		; /62/ no, maybe TT debugging?
+	beq	20$			; /BBS/ no
+10$:	calls	dskdmp	,<#pak.08,2(r5),@r5,4(r5),6(r5)> ; /62/ ya
+
+20$:	tst	pauset			; wait a moment?
+	beq	30$			; no
+	calls	suspend	,<pauset>	; yes
+30$:	clr	r1			; avoid sign extension
+	bisb	conpar+p.npad,r1	; send some pad characters?
+	beq	50$			; no padding
+	mov	#conpar+p.padc,r2	; /62/ address of the pad character
+40$:	calls	binwri	,<r2,#1>	; send some padding
+	sob	r1	,40$		; next please
+
+50$:	movb	@r5	,r1		; the packet type next
+	cmpb	r1	,#'A&137	; a legitimate packet type?
+	blo	60$			; no
+	cmpb	r1	,#'Z&137	; must be in the range A..Z
+	bhi	60$			; no good
+	 sub	#100	,r1		; convert into range 1..26
+	 asl	r1			; and count the packet type
+	 asl	r1			; /43/ 32. bits
+	 add	#1	,pcnt.s+2(r1)	; /43/ 32. bits, pakcnt(type)++
+	 adc	pcnt.s+0(r1)		; /43/ 32. bits, the high part
+	 add	#1	,pcnt.s+2	; /43/ 32. bits now
+	 adc	pcnt.s+0		; /43/ the high order part
+60$:	return
+
+
+	.sbttl	SPACK$ compute checksum
+
+spakck:	clr	r0		; checksum.len := 0
+	cmpb	chktyp	,#defchk ; if checklength > 6 bits
+	blos	20$		;  then begin
+	cmpb	chktyp	,#'3	;   if checktype = crc16
+	bne	10$		;    then begin
+	mov	r2	,r1	;     checkchar1:=tochar(check[12..15])
+	 ash	#-14	,r1	;     shift over 12 bits
+	 bic	#^c<17>	,r1	;     mask off the high 12  bits
+	 tochar	r1	,@r4
+	 setpar	@r4	,(r4)+
+	 inc	r0		;     packetlength := succ(packetlength)
+				;    end
+10$:	 mov	r2	,r1	;   checkchar1 := tochar(check[6..11])
+	 ash	#-6	,r1	;   shift over 6 bits
+	 bic	#^c<77>	,r1	;   mask off the higher order bits
+	 tochar	r1	,@r4
+	 setpar	@r4	,(r4)+
+	 inc	r0		;   packetlength := succ(packetlength)
+	 bic	#^c<77>	,r2	;   now drop the high bits from checks
+
+20$:	tochar	r2	,@r4	; convert char
+	tst	ranerr		; insert random checksum errors?
+	beq	40$		; no, please don't
+	mov	r0	,-(sp)	;+ test mode  irand uses r0
+	call	irand		;+ test mode  get a random number
+	tst	r0		;+ test mode  is it zero?
+	bne	30$		;+ test mode  no, leave things alone
+	incb	@r4		;+ test mode  ya, create an error
+30$:	mov	(sp)+	,r0	;+ test mode  restore r0
+40$:	setpar	@r4	,(r4)+	; set parity, if in use..
+	inc	r0		; packetlength := succ(packetlength)
+	return
+
+
+	.sbttl	SPACK$ pseudo random number generator for testing
+
+irand:	tst	seed			; has a seed been set?
+	bne	10$			; ya, use that value
+	mov	#1234.	,seed		; no, use this default seed
+10$:	mov	seed	,r0		; make a copy of it
+	mov	r1	,-(sp)		; preserve r1
+	mov	r0	,r1		; copy of seed number to
+	ash	#-4	,r1		; multiply it * 16. and
+	bic	#170000	,r1		; clear its bits 15. - 12. then
+	xor	r1	,r0		; toggle whatever's left in orig seed
+	ash	#13	,r1		; dump bits 11. thru 0.
+	bic	#100000	,r1		; ensure what's left is a positive num
+	xor	r1	,r0		; again, toggle the orig seed with it
+	bic	#100000	,r0		; make sure result remains positive
+	mov	r0	,seed		; save it for the next time around..
+	ash	#-13	,r0		; shift so only 4 hi bits are output
+	mov	(sp)+	,r1		; restore r1
+	return
+
+
+	.sbttl	SPACK$ log to disk
+
+spakfi:	bit	#log$io	,trace		; dumping all I/O out?
+	beq	40$			; no
+	save	<r0,r1,r2,r4>
+	mov	r1	,r2		; anything to do?
+	beq	30$			; no
+10$:	clr	r0			; yes, avoid sign extension
+	bisb	(r4)+	,r0		; get the next ch to dump
+	mov	#lun.lo	,r1		; the lun to write to
+	call	putcr0			; simple
+	tst	r0			; /62/ did it work?
+	beq	20$			; /62/ ya
+	call	logerr			; /62/ no, handle the error
+	br	30$			; /62/ then bail out
+20$:	sob	r2	,10$		; next please
+30$:	unsave	<r4,r2,r1,r0>
+40$:	return
+
+
+	.sbttl	Compute checksum
+
+;	C H E C K S
+;
+;	input:	  (sp)	= address of .asciz string to checksum
+;	output:	  (sp)	= the computed checksum
+
+checks:	save	<r0,r1,r2,r3>
+	mov	10+2(sp),r2		; pointer to the string to check
+	cmpb	chktyp	,#'3		; CRC-CCITT type today?
+	bne	10$			; no
+	strlen	r2			; yes, get the .asciz string length
+	calls	crcclc	,<r2,r0>	; compute the crc16
+	mov	r0	,r2		; stuff the result into r2 for later
+	br	60$			; and exit
+
+10$:	clr	r1			; init the checksum accumulator
+20$:	clr	r3			; get the next ch please
+	bisb	(r2)+	,r3		; got the next ch now
+	beq	40$			; hit the end of the string
+	tst	parity			; /BBS/ did the packet contain parity?
+	beq	30$			; no, leave bit 7 alone
+	bic	#^c<177>,r3		; yes, please clear bit seven
+30$:	bic	#170000	,r1		; /42/ ensure long packet not overflow
+	add	r3	,r1		; check := check + ch
+	br	20$
+
+40$:	mov	r1	,r2		; checksum := ((checksum and 300B)/64)
+	cmpb	chktyp	,#'2		; 12 bit sum type checksum?
+	beq	50$			; yes, just exit
+	bic	#^c<300>,r2		; ((..+checksum) and 77b)
+	ash	#-6	,r2
+	add	r1	,r2
+	bic	#^c<77>	,r2
+	br	60$
+
+50$:	bic	#170000	,r2		; type 2 checksum
+60$:	mov	r2	,10+2(sp)	; return the checksum
+	unsave	<r3,r2,r1,r0>
+	return
+
+
+	.sbttl	CRC calculation
+
+;	This routine will calculate the CRC for a string using the
+;	CRC-CCIT polynomial.
+;
+;	The string should be the fields of the packet between  but
+;	not including the  <mark>  and  the  block check, which is
+;	treated as a string of bits with the low order bit of  the
+;	first  character  first and the high order bit of the last
+;	character last --  this  is  how  the  bits  arrive on the
+;	transmission  line.  The  bit  string  is  divided by  the
+;	polynomial
+;
+;	x^16+x^12+x^5+1
+;
+;	The initial value of the  CRC  is  0.  The  result  is the
+;	remainder  of  this   division,   used   as-is  (i.e.  not
+;	complemented).
+;
+;	From 20KERMIT.MAC, rewritten for  PDP-11  by  Brian Nelson
+;	13-Jan-84 08:50:43
+;
+;	input:	  (r5)	= string address
+;		 2(r5)	= string length
+;	output:	   r0	= CRC
+
+crcclc:	save	<r1,r2,r3,r4,r5>
+	clr	r0			; initialize the CRC to zero
+	mov	@r5	,r3		; get the string address now
+	mov	2(r5)	,r4		; get the string length
+	beq	30$			; oops, nothing to do then
+
+10$:	clr	r1			; get the next character please
+	bisb	(r3)+	,r1		; please avoid PDP-11 sign extend
+	tst	parity			; /BBS/ did the packet have parity?
+	beq	20$			; no, leave bit seven alone
+	bic	#^c<177>,r1		; yes, clear bit seven please
+20$:	ixor	r0	,r1		; add in with the current CRC
+	mov	r1	,r2		; get the high four bits
+	ash	#-4	,r2		; and move them over to 3..0
+	bic	#^c<17>	,r2		; drop any bits left over
+	bic	#^c<17>	,r1		; and the low four bits
+	asl	r1			; times 2 for
+	asl	r2			; word addressing
+	mov	crctb2(r1),r1		; get low portion of CRC factor
+	ixor	crctab(r2),r1		; ixor avoids hardware xor mode limits
+	swab	r0			; shift off a byte from previous CRC
+	bic	#^c<377>,r0		; clear new high byte
+	ixor	r1	,r0		; add in the new value
+	sob	r4	,10$		; next please
+
+30$:	unsave	<r5,r4,r3,r2,r1>
+	return
+
+	.save
+	.psect	$pdata
+crctab:	.word	     0 ,010201 ,020402 ,030603 ,041004 ,051205 ,061406 ,071607
+	.word	102010 ,112211 ,122412 ,132613 ,143014 ,153215 ,163416 ,173617
+crctb2:	.word	     0 ,010611 ,021422 ,031233 ,043044 ,053655 ,062466 ,072277
+	.word	106110 ,116701 ,127532 ,137323 ,145154 ,155745 ,164576 ,174367
+	.restore
+
+
+	.sbttl	Buffer file being sent	; /63/ moved back here for speed..
+
+;	B U F F I L			  /63/ patched to include BUFPAK
+;
+;	input:	 (r5)	= #0 for file or null terminated source buffer address
+;		2(25)	= destination buffer, will be null terminated
+;	output:	  r0	= if <>, RMS error code
+;		  r1	= returned string length, excluding null terminator
+;
+;	Control and 8-bit char prefixing and repeat count encoding done here.
+
+buffil::save	<r2,r3,r4>		; /63/
+	mov	2(r5)	,r4		; destination buffer address
+	mov	 (r5)	,r5		; /63/ source buff addr or 0 if a file
+	clr	r3			; init a string length counter
+	mov	senlng	,r2		; /63/ long_packets on?   or clears r2
+	bne	10$			; /62/ ya..  to avoid sxt on next inst
+	bisb	conpar+p.spsiz,r2	; /63/ get receiver's max size
+10$:	cmp	r2	,senlen		; /63/ rec'd packet_len > SET SEN PAC?
+	ble	20$			; /62/ no
+	mov	senlen	,r2		; /63/ ya, let SET SEN PAC prevail
+20$:	sub	#10	,r2		; /63/ allow for rpt quoting, etc, etc
+
+30$:	tst	dorpt			; are we doing repeat counts?
+	beq	100$			; no
+
+40$:	call	gnc			; get next character
+	bcs	60$			; hit the end of the file
+	tst	rptinit			; if first time through this loop
+	beq	50$			; then
+	clr	rptinit			; flag we've been here now
+	clr	rptcount		; init the repeatt count
+	movb	r1	,rptlast	; save copy of char in rptlast buffer
+50$:	cmpb	r1	,rptlast	; if the current char = rptlast char
+	bne	60$			; then
+	cmp	rptcount,#maxpak	; reached the mex repeat count yet?
+	bge	60$			; ya..
+	inc	rptcount		; no, bump the repeat count
+	br	40$			; and loop
+
+60$:	mov	r1	,rptsave	; save the failed character please
+	tst	rptcount		; this may be EOF on first character
+	beq	120$			; if so, we simply do nothing at all
+	cmp	rptcount,#2		; please don't bother with ONE char
+	bgt	80$			; don't waste the overhead for two
+70$:	clr	r1			; avoid sign extension please
+	bisb	rptlast	,r1		; get the character to write
+	call	140$			; and stuff it into the buffer
+	dec	rptcount		; more to insert?
+	bne	70$			; yes
+	br	90$			; no, exit
+
+80$:	movb	rptquo	,(r4)+		; insert the repeat count quote
+	inc	r3			; count it in the packet size
+	tochar	rptcount,(r4)+		; convert the repeat count to a char
+	inc	r3			; and count in the packet size
+	clr	r1			; avoid sxt
+	bisb	rptlast	,r1		; recover the repeated character
+	call	140$			; and insert it into the buffer
+90$:	movb	rptsave	,rptlast	; make the failing character the one
+	clr	rptcount		; in case of EOF, set this please
+	tst	r0			; was this the end of file?
+	bne	120$			; yes, we had better leave then
+	inc	rptcount		; no, initialize the count please
+	br	110$			; and check for overflow in the buffer
+
+100$:	call	gnc			; get next char
+	bcs	120$			; if (EOF) then break
+	call	140$			; stuff the character w/o repeats
+110$:	cmp	r3	,r2		; /63/ room for more data?
+	blo	30$			; ya
+
+120$:	mov	r3	,r1		; return the length please
+	beq	130$			; nothing there
+	clr	r0			; say read was successful
+130$:	clrb	(r4)			; /63/ null term for non-file usage
+	unsave	<r4,r3,r2>		; /63/ is harmless for file packets
+	return
+
+
+	.sbttl	Actually quote and stuff the char for BUFFIL
+
+140$:	save	<r0,r2>			; /63/ save regs used by caller
+	tst	do8bit			; if doing 8-bit prefixing
+	beq	150$			; and
+	tstb	r1			; bit_test(ch,200) is true
+	bpl	150$			; then
+	movb	ebquot	,(r4)+		; buffer[i] := eight_bit_quote
+	inc	r3			; i := succ(i)
+	bicb	#200	,r1		; ch := bit_clear(ch,200)
+150$:	mov	r1	,r2		; /63/ ch0_7 := ch
+	bic	#^c<177>,r2		; ch0_6 := ch0_7 and 177
+	cmpb	r2	,senpar+p.qctl	; if ch0_6 = quote (ignoring hi bit)
+	beq	190$			; /63/ then quote it
+	tst	do8bit			; if doing 8-bit prefixing
+	beq	160$			; and
+	cmpb	r2	,ebquot		; if ch0_6 == binary_quote
+	beq	190$			; /63/ then quote it
+160$:	tst	dorpt			; if doing repeat compression
+	beq	170$			; /63/ and
+	cmpb	r2	,rptquo		; if ch0_6 == repeat_quote
+	beq	190$			; /63/ then quote it
+170$:	mov	r1	,r0		; /63/ copy to map char into ctlflgs
+	incb	r0			; /63/ wrap 377 to 0, others ch=ch+1
+	cmp	r0	,#41		; /63/ was char 37..0,377 (now 40..0)?
+	blo	180$			; /63/ yes, check for quoting enabled
+	sub	#137	,r0		; /63/ no, bump 240..200 to 101..41
+	cmp	r0	,#41		; /63/ if now < 41 then it's
+	blo	200$			; /63/ not a control char
+	cmp	r0	,#101		; /63/ if now > 101 then it's
+	bhi	200$			; /63/ not a control char
+180$:	tstb	ctlflgs(r0)		; /63/ quote this control char?
+	beq	200$			; /63/ no, pass it as it is..
+	ctl	r1	,r1		; /63/ ch0_7 := ctl(ch0_7)
+	ctl	r2	,r2		; /63/ ch0_6 := ctl(ch0_6)
+190$:	movb	senpar+p.qctl,(r4)+	; /63/ buffer[i] := quote
+	inc	r3			; /63/ length := succ(length)
+200$:	tst	image			; if image_mode
+	beq	210$			; then
+	movb	r1	,(r4)+		; buffer[i] := ch0_7
+	br	220$			; else
+210$:	movb	r2	,(r4)+		; buffer[i] := ch0_6
+220$:	inc	r3			; length := succ(length)
+	unsave	<r2,r0>			; /63/ restore caller's registers
+	return
+
+
+	.sbttl	Get the next char
+
+gnc:	tst	r5			; /63/ where is the next char?
+	beq	10$			; /63/ get it from a file
+	clr	r0			; /63/ preset to return success
+	clr	r1			; /63/ avoid sxt
+	bisb	(r5)+	,r1		; /63/ get next char from input buff
+	bne	30$			; /63/ go add it to stats
+	mov	#er$eof	,r0		; /63/ hit a null, flag end of data
+	br	20$			; /63/ and exit
+
+10$:	mov	#lun.in	,r0		; copy of file channel number
+	call	getcr0			; get next char
+	tst	r0			; did it work?
+	beq	30$			; ya
+20$:	sec				; no, flag an error
+	return
+
+30$:	add	#1	,fileout+2	; /62/ stats on file data
+	adc	fileout+0		; /43/ 32. bits
+	clc				; success  clc here just in case..!
+	return
+
+
+	.sbttl	Error message handler
+
+;	E R R O R
+;
+;	input:	  (r5)	= arg count
+;		 2(r5)	= text for message #1
+;		 4(r5)	= and so on, total length not to exceed erbfsiz
+
+error::	save	<r1,r2,r3,r4,r5>
+	tst	remote			; if not remote then printm(..)
+	bne	10$			; we are the remote, send errors
+	call	printm			; simple
+	tst	linksts			; /63/ was link running?
+	beq	70$			; /63/ nope..
+	tst	inprogress		; /63/ packet exchange in progress?
+	beq	70$			; /63/ nope..  else send error packet
+
+10$:	mov	(r5)+	,r1		; message count
+	beq	70$			; nothing to do
+
+	sub	#erbfsiz+2,sp		; remote, allocate a text buffer
+	mov	sp	,r4		; and point to it please
+	mov	#erbfsiz,r2		; /BBS/ init erbfsiz byte counter
+
+20$:	mov	(r5)+	,r3		; get the next message please
+30$:	movb	(r3)+	,@r4		; now copy it to the buffer until
+	beq	40$			; we get a null
+	inc	r4			; bump buffer pointer to next pos
+	sob	r2	,30$		; or until we run
+	br	50$			; out of space to put it
+40$:	dec	r2			; ensure sufficient space
+	beq	50$			; don't overwrite stack!!
+	sob	r1	,20$		; and get the next message
+50$:	clrb	@r4			; ensure .asciz
+
+	mov	sp	,r4		; all done, send the error packet
+	strlen	r4			; get the length
+	spack	#msg$error,paknum,r0,r4	; and send it
+	bit	#log$pa	,trace		; /62/ logging packets?
+	beq	60$			; /62/ nope
+	strlen	r4			; /62/ ya, get length of it all
+	calls	putrec	,<r4,r0,#lun.lo> ; /62/ and dump buffer to disk
+	tst	r0			; /62/ did it work?
+	beq	60$			; /62/ ya
+	call	logerr			; /62/ no, go say why not
+60$:	add	#erbfsiz+2,sp		; /62/ deallocate the text buffer
+70$:	unsave	<r5,r4,r3,r2,r1>
+	return
+
+
+	.sbttl	Print message if not remote, and copy to logfile
+
+;	P R I N T M			; /62/ major revision
+;
+;	input:	  (r5)	= arg count
+;		 2(r5)	= text for message #1
+;		 4(r5)	= and so on, total length not to exceed erbfsiz
+
+printm::save				; save r0 - r5, inclusive
+	mov	(r5)+	,r1		; get the message count
+	beq	100$			; nothing to do
+
+	sub	#erbfsiz+2,sp		; allocate a local text buffer
+	mov	sp	,r4		; and a pointer to it
+	mov	#erbfsiz,r2		; init byte overflow counter
+
+	cmpb	@(r5)	,#'?		; is this an error message?
+	beq	10$			; ya, skip "Kermit:" prefix
+	cmpb	@(r5)	,#'%		; /62/ is this an error message?
+	beq	10$			; /62/ ya, skip "Kermit:" prefix
+	scan	#':	,@r5		; look for a colon indicating a
+	tst	r0			; prefix string ala "Xyz: "
+	bne	10$			; found one, don't do 2 headers
+	mov	#pak.01	,r3		; stuff in "Kermit: " prefix
+	inc	r1			; by adding it to the arg count
+	br	20$			; and jumping in here..
+
+10$:	mov	(r5)+	,r3		; get the next message please
+	tst	tsxsav			; TSX?
+	beq	20$			; no
+	cmpb	(r3)	,m.tsxr		; is it the TSX lead-in char?
+	bne	20$			; no
+	inc	r3			; ya, skip past it and
+	br	30$			; don't type this to TT
+20$:	movb	(r3)+	,@r4		; now copy it to the buffer until
+	beq	40$			; we get an ascii null
+30$:	inc	r4			; bump buffer pointer to next position
+	sob	r2	,20$		; or until we run
+	br	50$			; out of space to put it
+40$:	dec	r2			; ensure sufficient space
+	beq	50$			; don't overwrite stack!!
+	sob	r1	,10$		; and get the next message
+
+50$:	clrb	(r4)			; ensure .asciz
+	mov	sp	,r4		; all done, restore pointer
+
+	tst	inserv			; skip TT stuff if a server
+	bne	80$			; go check for disk logging
+	tst	remote			; skip if we are the remote
+	bne	80$			; go check for disk logging
+	tst	xmode			; if amidst an extended reply
+	bne	60$			; do a newline for sure..
+	tst	logini			; need a .newline if this is set
+	beq	70$			; no, this line is clean
+60$:	.newline
+70$:	wrtall	r4			; dump local buffer to terminal
+	.newline
+	clr	logini			; may need a logging header
+
+80$:	bit	#log$pa	,trace		; logging packets?
+	beq	90$			; nope
+	strlen	r4			; ya, get length of it all
+	calls	putrec	,<r4,r0,#lun.lo> ; and dump buffer to disk
+	tst	r0			; did it work?
+	beq	90$			; ya
+	call	logerr			; no, go say why not
+90$:	add	#erbfsiz+2,sp		; pop local buffer
+100$:	unsave
+	return
+
+
+	.sbttl	Logfile error handler	; /62/ all new
+
+logerr::calls	syserr	,<r0,#errtxt>	; enter with r0=whatever_the_error_was
+	.close	#lun.lo			; save what did make it to logfile..
+	bic	#<log$op!log$al!log$io>,trace ; kill all disk-based debugging
+	mov	#er$lwe	,r0		; this is some logfile write error..
+	calls	syserr	,<r0,#spare1>	; generate an error message saying so
+	strcat	#spare1	,#pak.07	; /62/ now insert a <cr><lf> after it
+	strcat	#spare1	,#errtxt	; then include the reported error too
+	tst	inserv			; skip TT stuff
+	bne	30$			; if a server
+	tst	remote			; skip if we
+	bne	30$			; are the remote
+10$:	tst	logini			; need a .newline if this is set
+	beq	20$			; no, this line is clean
+	.newline
+20$:	wrtall	#spare1			; dump local buffer to terminal
+	.newline
+	clr	logini			; may need a packet cnt logging header
+	return
+
+30$:	tst	linksts			; got a path for an error packet?
+	beq	10$			; nope, dump it to TT regardless then
+	strlen	#spare1			; ya, get the length of and
+	spack	#msg$error,paknum,r0,#spare1 ; then send the error message
+	movb	#sta.abo,state		; /62/ and force the trasnfer to abort
+	return
+
+
+	.sbttl	Process retry and sync errors
+
+m$retr::save	<r0>			; retry abort
+	bitb	#200	,recbit		; /44/ perhaps parity was going?
+	beq	10$			; /44/ no
+	tst	parity			; /BBS/ do we know about parity?
+	bne	10$			; /44/ yes we do, normal abort
+	calls	error	,<#2,#e$retr,#e$pari> ; /62/ no, mention it now!
+	br	20$			; /44/ exit
+10$:	calls	error	,<#1,#e$retr>	; send/print the error message
+20$:	unsave	<r0>
+	return
+
+m$sync::save	<r0>			; out of sync
+	calls	error	,<#1,#e$sync>	; send/print the error message
+	unsave	<r0>
+	return
+
+
+	.sbttl	Compute parity for an outgoing 8-bit link
+
+;	This is software parity generation as it allows Kermit to control
+;	it even on interfaces which don't support it (by setting them for
+;	8 data bits and no parity).  It was derived from the Pascal RT-11
+;	Kermit by Phil Murton, and does a table lookup to compute parity.
+;	For the sake of speed and because some RT-11 systems lack certain
+;	instructions this method is used at a slight cost in space.
+
+dopari::save	<r0,r1>			; /BBS/	somewhat cleaned up..
+	mov	parity	,r0		; get the current parity setting
+	beq	10$			; nothing to do
+	asl	r0			; word indexing to addresses
+	mov	6(sp)	,r1		; get the character to do it to
+	jsr	pc	,@pardsp(r0)	; and dispatch as desired
+	mov	r1	,6(sp)		; return the character please
+10$:	unsave	<r1,r0>
+	return
+
+	.save
+	.psect	$pdata
+pardsp:	.word	0  ,odd.p  ,even.p  ,mark.p  ,spac.p
+	.restore
+
+mark.p:	bisb	#200	,r1		; mark means we are always HIGH
+	return				; on bit seven
+
+spac.p:	bicb	#200	,r1		; space means we are always LOW
+	return				; on bit seven
+
+odd.p:	bic	#^c<177>,r1		; hose any previous parity
+	tstb	partab(r1)		; if char's entry in table is <>
+	bne	10$			; leave parity bit clear
+	bisb	#200	,r1		; else set parity bit
+10$:	return
+
+even.p:	bic	#^c<177>,r1		; hose any previous parity
+	tstb	partab(r1)		; if char's entry in table is 0
+	beq	10$			; leave parity bit clear
+	bisb	#200	,r1		; else set parity bit
+10$:	return
+
+	.save
+	.psect	$pdata
+partab:	.byte	0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0  ; first 16 ascii characters
+	.byte	1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1
+	.byte	1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1
+	.byte	0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0
+	.byte	1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1
+	.byte	0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0
+	.byte	0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0
+	.byte	1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1  ; last 16 characters (to 177)
+	.restore
+
+	.end

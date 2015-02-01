@@ -1,0 +1,75 @@
+	.sbttl	KRTNHD.MIN  EIS macros for a non-EIS CPU
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+	NONEIS	=	1
+
+	.macro	mul	src,reg
+	.ntype	$$	,reg
+	mov	src	,-(sp)
+	mov	reg	,-(sp)
+	call	p$mul
+	.iif eq <$$-1>	mov	(sp)+	,r1
+	.iif eq <$$-3>	mov	(sp)+	,r3
+	.iif eq <$$-5>	mov	(sp)+	,r5
+	.iif ne <<$$+1>&1> .error      <; bad dst reg for MUL macro>
+	.endm	mul
+
+	.macro	div	src,reg
+	.ntype	$$	,reg
+	mov	src	,-(sp)
+	.if eq $$
+	mov	r1	,-(sp)
+	mov	r0	,-(sp)
+	.endc
+	.if eq $$-2
+	mov	r3	,-(sp)
+	mov	r2	,-(sp)
+	.endc
+	.if eq $$-4
+	mov	r5	,-(sp)
+	mov	r4	,-(sp)
+	.endc
+	call	p$div
+	.if eq $$
+	mov	(sp)+	,r1
+	mov	(sp)+	,r0
+	.endc
+	.if eq $$-2
+	mov	(sp)+	,r3
+	mov	(sp)+	,r2
+	.endc
+	.if eq $$-4
+	mov	(sp)+	,r5
+	mov	(sp)+	,r4
+	.endc
+	.endm	div
+
+	.macro	sob	reg,dst
+	dec	reg
+	bne	dst
+	.endm	sob
+
+	.macro	ash	amount,reg
+	.ntype	$$$0	,amount
+	.iif ne <27-$$$0> .error       <; must be auto pc for ASH macro>
+	$$type	= 1
+	$$size	= 0
+	  .irpc	$a ,<amount>
+	  $c	= ''$a
+	  .iif eq <$c - '-> $$type = -1
+	  .iif eq <$c - '.> .error     <; only use octal in ASH macro please>
+	  .iif eq <$c - '^> .error     <; only use octal in ASH macro please>
+	  $c	= $c - '0
+	    .if ge $c
+	      .if le $c-7
+	      $$size = <$$size*10>+$c
+	      .endc
+	    .endc
+	  .endr
+	.rept	$$size
+	.iif gt <$$type>  asl	reg
+	.iif lt <$$type>  asr	reg
+	.endr
+	.endm

@@ -1,0 +1,679 @@
+	.title	KRTXL	I/O for CL/KM/XC/XL handlers
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	corrected suggested XL BUFSIZ to 256.
+;	keep XL open even for XM, to accommodate RT-11 V5.6
+;	add support for KM handler
+;	add version testing to support RT-11 V4
+;	add DCDTST for status during file transfers
+;	skip .ABTIO for XC/XL under ALL RT-11 V5.6 monitors
+;	to avoid hang/race/?
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	DTR drop sped up to a 0.5 second interval..
+;	dumped waitti as multiple byte reads accomplish the same thing
+;	CLHOSE defined for use in clearing CL handler, uses spfun 265
+;	CLSTAT defined and inqdtr added, for CL lines only..
+;	enhanced set$speed error handling
+;	mapxl now allocates the handler under TSX
+;	added inqcd
+;
+;	mapxl now uses .cstat to get physical name from logical name
+;	one may ASS CL0 PHN then run Kermit and SET LINE PHN within it
+;
+;	dropped TSX hi-eff term mode when data are going thru a handler
+;	allowing use of ^A and etc during transfers under TSX
+;
+;	allow LFOUT operation of CL handler.  under TSX return is made
+;	an activation character, thus no LF is appended..
+
+;	13-Oct-84  11:02:39  Brian Nelson
+;
+;	6-May-85             Basically had to add in checks for XL and TSX
+;                            and then roll in some of the code from k11tsx
+;                            in order to properly use the CL lines under
+;                            TSX.  (Ned W. Rhodes)
+;	04-Nov-85  13:59:39  Mods suggested by Chuck Sadoian for TSX (BDN)
+;	31-Dec-85  04:25:02  Added DTR control for RT-11 5.2 and XC/XL
+;	02-Sep-86  09:31:48  Fix SET SPEED for TSX+, edit /54/
+
+;	Copyright 1984,1985 Change Software, Inc.
+
+
+;			      NOTICE: !!!!!!
+;
+;   To operate properly at high speeds (2400 and up) and with Kermits
+;   not supporting XOFF flow control the XL or XC device handler MUST
+;   be modified to increase the internal buffer size and repress XOFF
+;   transmission within a packet.  This is very easy to do.
+;
+;   First copy XM.MAC, XL.MAC, XM.ANS, SYSGEN.COM and for the PRO/300
+;   XC.MAC from the RT-11 distribution to DK, ASSIGN DK SRC, and then
+;   in the copy of the file XL.MAC change the line:
+;
+;	from:	BUFSIZ	= 64.
+;	to:	BUFSIZ	= 256.
+;
+;   Then IND SYSGEN and tell it to use the saved answer file XM.ANS.
+;   When SYSGEN exits, it  will  have created, among other things, a
+;   file called XM.CND which is needed for the driver assembly.  For
+;   the PRO/300 series substitute XC for XL in the following command
+;   procedure to build the handler:
+;
+;	.COPY SY:XLX.SYS SY:XLX.OLD		! save a copy
+;	.REN/NOPRO SY:XLX.SYS SY:XLX.SYS	! unprotect file
+;	.UNLOAD XL				! unload handler
+;	.REMOVE XL				! and remove it
+;	.MACRO/OBJ:XLX (XM,XM.CND,XL)		! assemble new
+;	.LINK/EXE:SY:XLX.SYS XLX		! RT V4, handler on SY
+;	.LINK/NOBIT/EXE:SY:XLX.SYS XLX		! if RT V5, do this
+;	.INSTALL XL				! install it and
+;	.LOAD XL				! load into memory
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+
+; /62/	.ABTIO bypassed for V4, also expanded to allow assembly under same
+
+	.mcall	.CLOSE	,.CSTAT	,.GVAL	,.LOOKUP,.MRKT
+	.mcall	.PURGE	,.SPFUN	,.TWAIT	,.WRITC
+
+
+	.sbttl	Global and local data
+
+	.psect	xcdata	,rw,d,gbl,rel,con
+alloc:	.byte	0 ,156			; /BBS/ allocate a device emt args
+	.word	dblk			; /BBS/ device name goes here
+xcsts::	.word	0			; /62/ saved from stsdrv
+xcwork:	.word	0 ,0 ,0 ,0 ,0 ,0	; for async calls to the handler
+xcwrite:.word	0			; if <> write is in progress
+
+	.psect	xcrw	,rw,d,lcl,rel,con
+getspd:	.word	0			; /62/ buffer speed until confirmed ok
+rdmode:	.word	0			; read mode "XON if no data" flag..
+setpri:	.byte	0 ,150			; /BBS/ TSX set priority emt
+	.word	0			; /BBS/ raise to this for CL handler
+
+	.psect	$pdata
+third:	.word	0 ,20.			; wait 1/3 second
+wait:	.word	0 ,1			; wait one tick (1/60 second)
+r50tbl:	.asciz  " ABCDEFGHIJKLMNOPQRSTUVWXYZ   0123456789" ; /62/ device only
+xl.01:	.asciz	"%"<bell>"KRTXL-W-Carrier " ;^^a space'll never get this far..
+xl.02:	.asciz	"lost"
+xl.03:	.asciz	"detected"
+	.even
+
+
+	.sbttl	List of supported comm handlers
+
+dev.ok:	.rad50	"CL "		; use rad50 space, not zero
+	.rad50	"CL1"
+	.rad50	"CL2"
+	.rad50	"CL3"
+	.rad50	"CL4"
+	.rad50	"CL5"		; test to set tsxcl flag above requires
+	.rad50	"CL6"		; the first 8 here to be the CL lines!!
+	.rad50	"CL7"		; add handlers below this line only
+	.rad50	"KM "		; /62/
+	.rad50	"XC "
+	.rad50	"XL "
+	.word	0
+
+
+	.sbttl	CL handler options	; /37/
+
+;	0    1	send \014 <FF>		10     400  send \015 <CR>
+;	1    2	send \011 <HT>		11    1000  send CTL chars
+;	2    4	send lower case		12    2000  raise DTR
+;	3   10	send \012 <LF>		13    4000  accept/send 8-bit chars
+;	4   20	accept \012 <LF>	14   10000  undefined
+;	5   40	FF on block 0 write	15   20000      "
+;	6  100	send binary output	16   40000      "
+;	7  200	accept binary input	17  100000      "
+
+cl.set:	.word	1!2!4!10!20!400!1000!2000!4000	; /62/ spell out options
+cl.clr:	.word	40!100!200			; /62/ NOLFOUT dropped
+
+
+	.sbttl	Map speed to set same (50 baud is unsupported here)
+
+splst:	.word	75.	,110.	,134.	,150.	,300.	,600.	; /44/
+	.word	1200.	,1800.	,2000.	,2400.	,3600.	,4800.	; /44/
+	.word	7200.	,9600.	,19200.	,38400.	,0		; /62/
+
+spmap:	.word	1	,2	,3	,4	,5	,6	; /44/
+	.word	7	,10	,11	,12	,13	,14	; /44/
+	.word	15	,16	,17	,20			; /62/
+
+
+	.sbttl	SPFUN codes for the CL/KM/XC/XL drivers
+
+	CLCLR	=	257		; /37/ reset w/o dropping DTR
+	CLHOSE	=	265		; /BBS/ better reset for TSX V6.0 + up
+	CLRDRV	=	201		; undo XOFF, send an XON
+	CLRSET	=	251		; reset CL options for TSX-Plus
+	CLSET	=	250		; set CL options for TSX-Plus
+	CLSPEED	=	256		; /44/ speed control
+	CLSTAT	==	255		; /BBS/ CL modem status
+	DTRDRV	=	206		; RT-11 V5.2 + up, set/clear DTR
+	STSDRV	=	204		; low byte status, high byte version
+
+	XC.CONTROL ==	14		; control channel for the driver
+
+
+	.psect	$code
+	.sbttl	Assign a handler as the link ; /BBS/ substantially changed..
+
+x.assdev::save	<r2,r1>			; mods to stop ANY bad name
+	mov	@r5	,r1		; address of the device name
+	strlen	r1			; how long is it?
+	cmp	r0	,#4		; 4 is max
+	bgt	20$			; too much
+	mov	r0	,r2		; copy of length for testing string
+	dec	r2			; ignore colon at end
+10$:	scan	(r1)+	,#r50tbl	; verify each char is ok
+	tst	r0			; this prevents "XX::" & etc..
+	beq	20$			; found a bad one..
+	sob	r2	,10$		; check next char
+	mov	@r5	,r1		; restore address
+	br	30$
+
+20$:	mov	#er$ukn	,r0		; unknown name
+	sec				; flag error
+	br	90$
+
+30$:	call	mapxl			; do we know about this dev?
+	bcs	90$			; no, return error in r0
+
+	tst	xl.lock			; /62/ need to open?
+	bmi	40$			; /62/ no
+	.lookup	#rtwork,#lun.xk,#r50dev	; /62/ try to open the port up please
+	bcs	70$			; /62/ oops
+	.lookup	#rtwork,#xc.control,#r50dev ; /62/ also open a control channel
+	bcs	70$			; /62/ should never happen, of course
+	tst	xl.lock			; /62/ locking it up?
+	beq	40$			; /62/ no
+	com	xl.lock			; /62/ ya, flag channels are now open
+	.spfun	#rtwork,#xc.control,#stsdrv,#xcsts,#0,#0 ; /62/ init queues
+
+40$:	tst	tsxcl			; is it TSX and CL handler?
+	beq	50$			; /62/ no, can't do this to XL
+	.spfun	#rtwork,#xc.control,#clset ,#cl.set,#1,#0 ; /62/ set some opts
+	.spfun	#rtwork,#xc.control,#clrset,#cl.clr,#1,#1 ; /62/ reset others
+	br	60$			; /62/
+50$:	tst	km.lock			; /62/
+	bne	60$			; /62/ KM is an 8-bit device
+	movb	#par$sp	,parity		; XL is a 7-bit handler
+60$:	clr	tt$io			; /62/ force I/O thru handler
+	call	x.cantyp		; /62/ flush driver and its buffer
+	clr	r0			; /62/ success
+	br	90$
+
+70$:	mov	#xcierr	,r1		; /62/ preset error mapping
+	movb	@#errbyt,r0		; /62/ get RT-11's error code
+	bpl	80$			; /62/ normal error
+	com	r0			; /62/ hard error code
+	mov	#faterr	,r1		; /62/ map into the hard errors
+80$:	asl	r0			; /62/ word addressing
+	add	r0	,r1		; /62/ map the error
+	.purge	#xc.control		; /62/ don't leave
+	.purge	#lun.xk			; /62/ these lingering
+	mov	@r1	,r0		; /62/ restore pre-purge error
+
+90$:	unsave	<r1,r2>
+	return
+
+
+	.sbttl	Init the handler	; /BBS/ enhanced..
+
+;	T T Y I N I
+;
+;	input:	  (r5)	= TSX ^W/^B flag, only used by T.TTYINI
+;	output:	   r0	= is <>, error code
+
+x.ttyini::tst	tsxsav			; running under TSX?
+	beq	10$			; /62/ no
+	mov	cl.pri	,setpri+2	; ya, load priority for using handler
+	mov	#setpri	,r0		; and bump it up,
+	emt	375			; down or reload the default..
+10$:	call	x.inqcd			; carrier present?
+	tst	r0
+	bgt	20$			; ya, don't flush buffer now
+	call	x.cantyp		; no, flush driver and its buffer
+20$:	mov	#2	,cc$max		; make ^C-ing give warning beeps first
+	clr	r0			; all is well today
+	return
+
+
+	.sbttl	Check device by getting its physical name
+
+mapxl:	save	<r1,r2,r3>		; /BBS/ heavily hacked..
+	sub	#50	,sp		; /44/ allocate a buffer for new name
+	mov	sp	,r2		; /44/ and also a pointer to it
+10$:	cmpb	(r1)	,#':		; /44/ while (*devnam != ':')
+	beq	20$			; /44/   {
+	movb	(r1)	,(r2)+		; /44    *newnam++ = *devnam
+	beq	20$			; /44/   if (*devnam == null) break
+	inc	r1			; /44/   devnam++
+	br	10$			; /44/   }
+20$:	clrb	(r2)			; /44/ *newnam = null
+	mov	sp	,r2		; /44/ newnam = newnam_base_address
+
+	call	140$			; get first rad50 char of name
+	mul	#50*50	,r3		; convert to rad50 value
+	mov	r3	,r0		; r0 is the accumulator
+	call	140$			; get next rad50 char in name
+	mul	#50	,r3		; convert to rad50 value
+	beq	30$			; null marks end, don't do junk after
+	add	r3	,r0		; add into the accumulator
+	call	140$			; get possible third char of name
+	add	r3	,r0		; r0 now has rad50 name
+30$:	mov	r0	,dblk		; save it here
+
+	calls	fetch	,<dblk>		; load handler
+	tst	r0			; did it work?
+	bne	120$			; no
+
+	.lookup	#rtwork,#lun.sr,#dblk	; open chan to device
+	bcs	110$			; didn't work..
+	.cstat	#rtwork,#lun.sr,#cstat	; get physical name
+	bcs	110$			; didn't work..
+	mov	cstat+12,r1		; copy dev name
+	movb	cstat+10,r0		; get unit number
+	beq	40$			; if 0, use space, not "0"
+	add	#36	,r0		; convert to rad50
+40$:	add	r0	,r1		; add unit
+	mov	r1	,dblk		; save copy of the rad50 physical name
+
+	clr	r3			; init index
+50$:	tst	dev.ok(r3)		; end of the list?
+	beq	100$			; ya, exit with er$ukn
+	cmp	r1	,dev.ok(r3)	; find it in the list?
+	beq	60$			; ya
+	tst	(r3)+			; no, try next entry
+	br	50$
+
+60$:	clr	tsxcl			; ok device, not sure it's CL yet tho
+	clr	xkspeed			; don't know its speed yet
+	clr	b4speed			; clear possible old fallback speed
+	call	170$			; see if device is ALLOCATE-able
+	tst	r0			; well?
+	bne	120$			; nope, error is in r0
+	cmp	r3	,#2*10		; /62/ ya, is it a CL device?
+	bgt	80$			; /62/ it's XC or XL
+	beq	70$			; /62/ it's KM
+	mov	sp	,tsxcl		; ya, flag it is
+	mov	#16	,xkspeed	; CL defaults to 9600
+	br	90$
+
+70$:	inc	km.lock			; /62/ it's KM, flag for set$speed
+	clr	parity			; /62/ KM is an 8-bit device
+80$:	inc	xl.lock			; /62/ keep it, XC or XL open forever
+
+90$:	mov	r1	,r50dev		; if r50dev <> 0 then device is valid
+	add	#50	,sp		; pop local buffer
+	clr	r0			; no error, also clears carry
+	br	130$
+
+100$:	mov	#er$ukn	,r0		; not in list
+	br	120$
+110$:	mov	#er$dev	,r0		; device not responding
+120$:	add	#50	,sp		; pop local buffer
+	sec				; flag error
+130$:	save	<r0>			; save error
+	rol	-(sp)			; save carry
+	.purge	#lun.sr			; dump channel open for .cstat
+	ror	(sp)+			; pop carry
+	unsave	<r0>			; pop error
+	unsave	<r3,r2,r1>
+	return
+
+
+	.sbttl	Rad50 to ascii (legal device name chars only)
+
+140$:	clr	r3			; the answer
+	movb	(r2)+	,r1		; get a byte
+	beq	160$			; not there
+	mov	#47	,r3		; end of r50tbl
+150$:	cmpb	r50tbl(r3),r1		; is this it?
+	beq	160$			; ya
+	sob	r3	,150$		; no, try next one
+160$:	return
+
+
+	.sbttl	ALLOCATE a device
+
+170$:	tst	tsxsav			; this only works with TSX
+	beq	180$			; can't under RT-11
+	mov	#alloc	,r0		; try to
+	emt	375			; allocate the device
+	bcs	200$			; didn't work
+	tst	r0			; allocated to some other job?
+	beq	220$			; no, it's ok
+	cmp	r0	,tsxsav		; ya, is it this same job?
+	bne	190$			; no, it's some other job
+180$:	clr	r0			; same job = no error
+	br	220$
+
+190$:	movb	#er$137	,r0		; no, load the appropriate error
+	br	220$			; and bail out
+
+200$:	mov	#alloerr,r1		; error mapping for allocate
+	movb	@#errbyt,r0		; get the error code
+	bpl	210$			; normal error
+	com	r0			; hard error code
+	mov	#faterr	,r1		; map into the hard errors
+210$:	asl	r0			; word addressing
+	add	r0	,r1		; get the mapped error
+	mov	(r1)	,r0		; copy and exit
+220$:	return
+
+
+	.sbttl	Close the link		; /BBS/ many changes..
+
+x.ttyfin::.twait #rtwork,#wait		; force at least 1 tick wait
+	tst	cccnt			; ^C abort?
+	beq	10$			; no
+	clr	xcwrite			; ya, ignore any pending output
+10$:	tst	xcwrite			; ensure ack for B packet done
+	bne	x.ttyfin		; it's not done yet
+	call	x.inqcd			; carrier present?
+	tst	r0
+	bgt	20$			; ya, don't flush buffer now
+	call	x.cantyp		; flush driver and its buffer
+20$:	tst	tsxsav			; running under TSX?
+	beq	30$			; no
+	mov	defpri	,setpri+2	; ya, recover start-up priority
+	mov	#setpri	,r0		; and use it to
+	emt	375			; reset current priority
+30$:	clr	r0			; no error is possible
+	return
+
+
+	.sbttl	Binary read
+
+;	B I N R E A
+;
+;	input:	  (r5)	= time-out in secs, 0=max (65535 ticks), -1=one tick
+;	output:    r1	= character just read
+;		   r0	= if <>, error code
+
+; /BBS/ The -1 time-out option's now used to speed up eatjunk in
+;	KRTDIA.MAC's dial/redial routines.   This routine _MUST_
+;	share spfun 203 with CONNECT as a pending read to XL can
+;	only be dumped by exiting Kermit.
+;
+;	For the normal Kermit timed packet read, we post the QIO
+;	and loop waiting for it to complete.  If it doesn't com-
+;	plete  within the specified time, we cancel  the I/O and
+;	reset the driver, except for the -1 time-out option when
+;	no action is taken if no data are present.
+
+x.xbin::mov	sp	,rdmode		; don't XON if no data present
+	br	rdcom
+x.binr::clr	rdmode			; try to reset XOFF if no data show up
+
+rdcom:	save	<r2,r3>
+	cmp	xkpoint	,#xkbuff+xksize	; ensure no buffer overflows
+	bhis	10$			; gone too far, driver is %$#@!
+	tstb	@xkpoint		; anything left in the read buffer?
+	bne	20$			; ya
+10$:	call	xxread			; load buffer with as much as can be..
+	tst	r0			; did this read succeed?
+	bne	30$			; no
+20$:	clr	r1			; avoid sxt
+	bisb	@xkpoint,r1		; to accommodate 8-bit data
+	inc	xkpoint			; point to the next one in the buffer
+	clr	r0			; say it succeeded
+30$:	unsave	<r3,r2>
+	return
+
+xxread:	mov	(r5)	,r3		; time-out in seconds here
+	cmp	r3	,#-1		; no wait?
+	beq	10$			; yes
+	mul	clkflg	,r3		; no, convert time to ticks then
+	br	20$			; and check on the I/O status
+10$:	neg	r3			; /62/ no wait is really one tick
+20$:	call	readxk			; read routine is shared with CONNECT
+30$:	tst	xcdone			; finished already?
+	bne	50$			; /62/ no
+40$:	clr	r0			; /62/ ya, flag no error
+	br	70$
+50$:	.twait	#rtwork,#wait		; no, sleep for one tick
+	sob	r3	,30$		; and see if we should keep waiting
+	tst	xcdone			; /62/ one last check just in case..
+	beq	40$			; /62/ got something
+	inc	(r5)			; /62/ don't XON
+	beq	60$			; if looping without timeout
+	tst	rdmode			; /45/ from CONNECT, DIAL or TRANSMIT?
+	bne	60$			; /45/ yes, please don't XON then
+	call	x.ttxon			; ensure interrupts ok, also send XON
+60$:	mov	#er$nin	,r0		; no data have come in yet
+70$:	return
+
+
+	.sbttl	Binary write
+
+;	B I N W R I
+;
+;	output:	  r0	= if <>, error code
+
+x.binwri::save	<r1,r2,r3,r4>
+	mov	2(r5)	,r4		; byte count for the write
+	beq	20$			; /BBS/ no I/O to do..
+	mov	(r5)	,r3		; copy the data to a local buffer
+	mov	xklgbuf	,r2		; pick up pointer to a buffer
+	mov	r4	,r1		; set byte count for the copy
+10$:	movb	(r3)+	,(r2)+		; for (i=bytecount;i>0;i--)
+	sob	r4	,10$		;   *buffer++ = *source++
+	clrb	(r2)+			; *buffer++ = null
+	inc	r1			; bytecount++
+	asr	r1			; bytecount = bytecount/2
+	mov	sp	,xcwrite	; /BBS/ write is now pending
+	.writc	#xcwork,#lun.xk,xklgbuf,r1,#30$,#1 ; queue the write
+20$:	clr	r0			; success (this is never tested..)
+	unsave	<r4,r3,r2,r1>
+	return
+
+30$:	clr	xcwrite			; /BBS/ .writc completion routine
+	return
+
+
+	.sbttl	Dump all I/O (cancel type_ahead), if possible
+
+x.cantyp::save	<r1,r2>
+	cmp	rt11ver	,#5		; /62/ is this RT-11 V5 or above?
+	blt	20$			; /62/ no, V4 can't abort I/O..
+	cmp	rt11upd	,#6		; /62/ neither can V5.6
+	blt	10$			; /62/
+	tst	km.lock			; /62/ determine handler type
+	bne	10$			; /62/ it's KM
+	tst	tsxcl			; /62/ is it CL?
+	beq	20$			; /62/ not CL, thus must be XC/XL..
+10$:	tst	montyp			; /62/ if SJ monitor
+	blt	20$			; /62/ .abtio = .wait so skip it !!
+; /62/	.abtio	#lun.xk			; reinit the driver
+	MOV	#lun.xk+<11.*^o400>,R0	; /62/ expanded for assy under V4
+	EMT	^o374			; /62/ even though V4 can't run it
+20$:	call	x.ttxon			; /BBS/ make sure it's read-able
+	mov	#$allsiz,r2		; /BBS/ loop for max possible
+30$:	calls	binrea	,<#-1>		; try to get something
+	tst	r0			; did it work?
+	bne	40$			; no, exit
+	sob	r2	,30$		; yes, eat some more characters
+40$:	mov	#xkbuff	,xkpoint	; /BBS/ reset buffer read pointer
+	clrb	xkbuff			; init buffer
+	unsave	<r2,r1>
+	clr	r0			; flag success
+	return
+
+
+	.sbttl	Hose the handler	; /BBS/ routine added
+
+x.hose::save	<r1>			; /62/ add KM support
+	tst	km.lock			; /62/ KM?
+	bne	10$			; /62/ ya, it emulates spfun 257
+	tst	tsxcl			; TSX and CL?
+	beq	30$			; /62/ no
+	mov	#clhose	,r1		; /62/ preset for TSX V6.0 and up
+	cmp	tsxver	,#600.		; is it V6.00 or above?
+	bge	20$			; /62/ ya
+10$:	mov	#clclr	,r1		; /62/ no, do it the old way..
+20$:	.spfun	#rtwork,#xc.control,r1,#0,#0,#1 ; /62/ hose CL handler
+30$:	call	x.cantyp		; /62/ hose XL or XC
+	.twait	#rtwork,#third		; let things settle
+	unsave	<r1>			; /62/
+	clr	r0			; no error possible
+	return
+
+
+	.sbttl XON the handler
+
+x.ttxon::.spfun	#rtwork,#xc.control,#clrdrv,#0,#0,#1 ; clear the driver
+	clr	r0			; flag success
+	return
+
+
+	.sbttl	Drop DTR for 0.5 sec
+
+x.ttyhan::save	<r1>
+	.spfun	#rtwork,#xc.control,#dtrdrv,#0,#0,#1 ;/62/ drop DTR
+	mov	clkflg	,r1		; /62/ number of ticks in one second
+	asr	r1			; /62/ wait 0.5sec here
+10$:	.twait	#rtwork,#wait		; /BBS/ do it one tick at a time
+	sob	r1	,10$		; so it remains abort-able..
+	.spfun	#rtwork,#xc.control,#dtrdrv,#0,#1,#1 ;/62/ then bring DTR up
+	clr	r0			; /41/ assume it worked, and assume
+	clr	mready			; /BBS/ the DTR drop resets the modem
+	unsave	<r1>
+	return
+
+
+	.sbttl	Check status of DTR or DCD  ; /BBS/ added this..
+	.enabl	lsb
+
+;	I N Q C D			; all handlers
+;	I N Q D T R			; CL or KM only
+;
+;	Returns:  r0 =	 4  DTR or DCD is asserted
+;			 0  DTR or DCD is not asserted
+;			-1  status is not available
+
+x.inqcd::save	<r1>
+	tst	mready			; modem must be on-line
+	beq	30$			; no modem = can't do DCD..
+	mov	#stsdrv	,r1		; DCD arg
+	call	50$			; goto common code..
+	tst	r0			; did it work
+	blt	40$			; no
+	tst	tsxcl			; ya, which handler is it
+	bne	20$			; CL uses bit 2
+	asr	r0			; KM or XL uses bit 3, make it 2 here
+	br	20$			; goto common code..
+
+x.inqdtr::save	<r1>
+	tst	tsxcl			; is this TSX and CL handler?
+	bne	10$			; /62/ ya
+	tst	km.lock			; /62/ is it KM?
+	beq	30$			; nope..
+10$:	mov	#clstat	,r1		; DTR argument
+	call	50$			; common code
+	tst	r0			; did it work?
+	blt	40$			; no
+20$:	bic	#^c<4>	,r0		; ya, hose unneeded bits
+	br	40$
+30$:	mov	#-1	,r0		; DTR status not available
+40$:	unsave	<r1>
+	return
+
+50$:	.spfun	#rtwork,#xc.control,r1,#xcsts,#0,#1 ; /62/ get status
+	bcs	60$			; failed..
+	mov	xcsts	,r0		; return the current status
+	return
+60$:	mov	#-1	,r0		; status not available
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	DCD status tester	; /62/ new..
+
+x.dcdtst::save	<r1,r0>
+	mov	xcsts	,r1		; save prior status
+	tst	tsxcl			; which handler is it?
+	bne	10$			; CL uses bit 2
+	asr	r1			; KM, XC and XL use bit 3, make it 2
+10$:	bic	#^c<4>	,r1		; recover the carrier detect bit
+	call	x.inqcd			; now get current DCD status
+	tst	r0			; well?
+	blt	40$			; it's not available, bail out..
+	cmp	r0	,r1		; any change?
+	beq	40$			; no
+	tst	r0			; ya, did we loose it?
+	bne	20$			; no, must have just gotten it
+	mov	#xl.02	,r1		; ya, load "lost" tag
+	call	x.ttxon			; clear the driver just in case
+	br	30$
+20$:	mov	#xl.03	,r1		; load "detected" tag
+30$:	calls	printm	,<#2,#xl.01,r1>	; say what's up
+40$:	unsave	<r0,r1>
+	return
+
+
+	.sbttl	SET SPEED
+
+;	input:  (r5)	= desired speed
+
+x.setspd::save	<r3>
+	tst	tsxcl			; /44/ TSX+ and CL?
+	bne	10$			; /62/ ya
+	tst	km.lock			; /62/ KM uses the CL speed spfun..
+	beq	50$			; /62/ no can do if not
+10$:	clr	r3			; /44/ match passed speed in table
+20$:	tst	splst(r3)		; /44/ end of the speed table?
+	beq	40$			; /44/ yes, exit please
+	cmp	splst(r3),(r5)		; /BBS/ speeds match up?
+	beq	30$			; /44/ yes, exit loop
+	tst	(r3)+			; /44/ no, try next entry then
+	br	20$			; /44/ next please
+30$:	add	#spmap	,r3		; /45/ for the speed
+	.spfun	#rtwork,#xc.control,#clspeed,r3,#1,#1 ; /62/ address NOT value
+	bcs	60$			; /BBS/ oops
+	mov	(r3)	,xkspeed	; /52/ save it please
+	clr	r0			; /BBS/ moved this here, say success
+	br	70$
+
+40$:	mov	#er$spe	,r0		; /44/ return unknown speed
+	br	70$
+50$:	mov	#er$spx	,r0		; /BBS/ speed not settable
+	br	70$
+60$:	mov	#er$wer	,r0		; /BBS/ device write error
+70$:	unsave	<r3>
+	return
+
+
+
+	.sbttl	Fake getting the speed
+
+x.ttsp::tst	tsxcl			; /54/ CL and TSX?
+	bne	30$			; /62/ ya
+	tst	km.lock			; /62/ KM?
+	beq	10$			; /62/ no
+	.spfun	#rtwork,#xc.control,#clspeed,#getspd,#-1,#1 ; /62/ get speed
+	bcc	20$			; /62/ got it
+10$:	clr	r0			; /62/ didn't..
+	br	40$			; /62/ ..work
+20$:	mov	getspd	,xkspeed	; /62/ ok, ensure it's the real thing
+30$:	mov	xkspeed	,r0		; /54/ or get from last SET SPEED
+	asl	r0			; /54/ word indexing
+	mov	splst-2(r0),r0		; /54/ copy and exit
+40$:	return
+
+	.end

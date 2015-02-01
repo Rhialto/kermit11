@@ -1,0 +1,41 @@
+!  27-Sep-97	Link KRT V03.63 for RT-11XB (V05.06 and above)
+!		for separate I&D space using low memory overlays
+r link
+krtoid,krtoid=/j/n/t//
+krtsj
+krtpak
+krtdat
+krtrms
+krtdsp
+krtcmd
+krtsub
+krterm/o:1
+krtxl/o:1
+krtcm1/o:2
+krtosi/o:2
+krtsen/o:2
+krtrec/o:2
+krthlp/o:2
+krtdia/o:3
+krtst0/o:3
+krtxmo
+krtst1/o:3
+krtcon
+krttra
+krtsho/o:3
+krtidx/o:3
+krtser/o:3
+krtdeb
+krtini/o:4
+krtatr/o:4
+krtstd
+krtdir/o:4
+krtedi/o:4
+krtcom
+krtutl/o:4
+krtcvt
+krterr/o:4
+krtmdm/o:4
+//
+fbstart
+^C

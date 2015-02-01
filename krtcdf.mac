@@ -1,0 +1,73 @@
+	.sbttl	KRTCDF	Define command macro
+;	.ident	"V03.63"		; this is an .include file
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	modify optional prompt arg to use address of prompt string
+;	allows longer strings to be used and eliminates redundancy
+;	drop $CMGLOBAL
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	$$trip hack to avoid "ndf/df" tests blowing up .LST output
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	dump unused argtyp
+
+
+;	usage example:
+;
+;	command	cmdlst	SEND ,3 ,c$send ,optional_prompt_addr
+;
+;	Would define the SEND command with a minimum length of
+;	three characters, and dispatch it to c$send.  Use of a
+;	prompt will cause  same  to appear when the command is
+;	given without argument(s).  cmdlst is the listhead for
+;	all commands and is  only  used once, but must be used
+;	in all entries to keep other arguments in place.
+
+
+	KRTCDF	=  1			; used to detect an .include error
+	$LISTL	== 4			; number of args stuffed in list here
+	$$TRIP	=  0			; /62/ init trip counter
+
+	.macro	command	list ,name ,min ,address ,arg
+	.list me
+	.save
+	.nlist me
+	.if b <name>			; command name supplied this time?
+	.list me
+	.psect	cmddsp	,ro,d,lcl,rel,con ; no, at end of list
+	.nlist me
+	.word	0			; /62/ mark it with a null
+	.list me			; /63/
+	.psect	cmdtxt	,ro,d,lcl,rel,con ; /63/ save a few bytes by only
+	.even				; /63/ doing this at the end of a list
+	.nlist me			; /63/
+	$$trip	= 0			; /62/ reset trip counter for next cmd
+	.iff	; b <name>		; ya, process args into command data
+	.list me
+	.psect	cmdtxt	,ro,d,lcl,rel,con
+	.nlist me
+	$$name	= .
+	.asciz	#name#			; store the command name
+	.psect	cmddsp	,ro,d,lcl,rel,con
+	.nlist me
+	  .if eq $$trip			; /62/ if first pass label listhead
+'list:					; global flag was not set
+	  $$trip = 1			; /62/ not first time through anymore
+	  .endc				; no
+	.word	$$name			; store address of command name text
+	.word	min			; min number of chars to match
+	.word	address			; the command routine's address
+	  .if b <arg>			; /63/ optional_prompt address given?
+	  .word	0			; /63/ no, say so with a null here
+	  .iff
+	  .word	arg			; /63/ ya, stuff in its location
+	  .endc
+	.endc	; b <name>
+	.list me
+	.restore
+	.nlist me
+	.endm

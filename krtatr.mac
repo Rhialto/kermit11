@@ -1,0 +1,647 @@
+	.title	KRTATR	Process attribute packets
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	add 25% to rec'd length for text files from non RT-11/TSX systems
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	modified rx.cdt,sn.cdt to do the "#" date/time attribute
+;	hosed unused stuff, added rx.pro,sn.pro for protected file attribute
+;
+;	added support for date/time/prot file attributes
+;	patched open, close and I/O data table to support it..
+;
+;	modified w$attr to send all attributes in a single packet
+;	rx.xle result in at$len no longer overwritten by rx.len
+;	added send exact file length in bytes
+;	call binary files "BINARY" not "IMAGE" so MS-Kermit is happy
+
+;	Copyright 1984 Change Software, Inc.
+;
+;	18-Apr-84  11:20:59 Brian Nelson
+;	24-Mar-86  12:00:56 BDN	Major revision which has some rather
+;				unpleasant compatibility problems with
+;				older Kermit-11's.
+;	12-Sep-86  10:37:04 BDN Convert for I/D space
+
+;	 This module is intended to be placed into an overlay
+;	which MUST be the "ERROR" cotree as the server, which
+;	is overlaid in the  "UTILTY"  cotree  can  indirectly
+;	call the module through the packet control routines.
+
+;	 The receiving Kermit should ALWAYS get the SYSTEM and
+;	EXECUTIVE type attribute packet first so it can decide
+;	if it should use the data being sent.
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+
+	.mcall	.DATE	,.GTIM		; /BBS/
+
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+atrctx::.word	0			; /E64/ send attrs context (index)
+curatr:	.blkb	200			; current attribute scratch buffer
+day.x:	.word	0			; /BBS/ integer file create day
+day.y:	.byte	0 ,0 ,0 ,0		; /BBS/ ascii file create day
+mon.x:	.word	0			; /BBS/ integer file create month
+mon.y:	.byte	0 ,0 ,0 ,0		; /BBS/ ascii file create month
+sizbuf:	.byte	0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ; /BBS/ sn.xle ascii size
+xblock:	.word	0 ,0			; /BBS/ buffer for sn.xle, .gtim
+yr.x:	.word	0			; /BBS/ integer file create year
+yr.y:	.byte	0 ,0 ,0 ,0 ,0 ,0	; /BBS/ ascii file create year
+
+
+	.psect	$code
+	.sbttl	Send all attributes in a single packet	; /BBS/ modified to..
+
+;	W $ A T T R
+;
+;	input:	 (r5)	= file lun
+;		2(r5)	= output packet buffer address
+;	output:	  r1	> 0 is packet length, 0 = receiver can't do attributes
+
+w$attr::save	<r2,r3,r4>
+	clr	r1			; preset in case other system
+	bitb	#capa.a	,conpar+p.capas	; can't handle attributes
+	beq	40$			; it can't
+	bit	#at.on	,doattr		; /63/ are attributes enabled?
+	beq	40$			; /63/ no
+	mov	2(r5)	,r4		; point to the packet
+	clr	atrctx			; init index
+
+10$:	mov	atrctx	,r0		; dispatch on what to send next
+	asl	r0			; word indexing
+	tst	watt(r0)		; all done?
+	beq	30$			; yes, finish up
+	bit	at.tx(r0),doattr	; /62/ is this attribute enabled?
+	beq	20$			; /62/ no
+	jsr	pc	,@watt(r0)	; do it
+20$:	inc	atrctx			; index to next subroutine
+	br	10$			; loop back for it
+
+30$:	strlen	2(r5)			; get the length and return it
+	mov	r0	,r1		; and say that this packet is for real
+40$:	clr	r0			; no error possible
+	unsave	<r4,r3,r2>
+	return
+
+	.save
+	.psect	$pdata
+watt:	.word	sn.sys	,sn.typ	,sn.pro	,sn.len	,sn.inf	,sn.cdt	,sn.xle
+at.rx:	.word	0			; /62/ also terminates watt
+at.tx:	.word	at.sys	,at.typ	,at.pro	,at.len	,at.inf	,at.cdt	,at.xle
+	.restore
+
+
+	.sbttl	Send system type
+
+sn.sys:	movb	#'.	,(r4)+		; the system id attribute
+	movb	#42	,(r4)+		; /49/ length of what follows
+	movb	#'D&137	,(r4)+		; return the vendor code (DEC)
+	movb	#'B&137	,(r4)+		; /BBS/ it's RT-11 for sure here
+	br	sn.end			; /63/ go make it .asciz
+
+
+	.sbttl	Send generic file type
+
+sn.typ:	movb	#42	,(r4)+		; file type attribute
+	movb	#41	,(r4)+		; /49/ length of what follows
+	movb	#'A&137	,r0		; /BBS/ assume ascii
+	cmpb	image	,#binary	; is it binary or 8-bit text?
+	blt	10$			; /63/ no
+	movb	#'B&137	,r0		; /BBS/ yes, indicate it is..
+10$:	movb	r0	,(r4)+		; /BBS/ put file type in packet
+	br	sn.end			; /63/ go make it .asciz
+
+
+	.sbttl	Send file protection	; /BBS/ fixed for RT-11
+
+sn.pro:					;	bit_0	=  read
+					;	bit_1	=  write
+; protection codes from "Kermit, A		bit_2	=  execute
+; File Transfer Protocol," 1987, for		bit_3	=  append
+; the "-" (octal 55) attribute			bit_4	=  delete
+					;	bit_5	=  directory
+	movb	#55	,(r4)+		; public file protection
+	movb	#41	,(r4)+		; length of what follows
+	mov	(r5)	,r0		; get lun
+	asl	r0			; word indexing
+	tst	prot.a(r0)		; is it protected?
+	bne	10$			; ya
+	mov	#<1!2!4!10!20!40>,r0	; no, set bits 0 thru 5
+	br	20$			; continue
+10$:	mov	#<1!4!40>,r0		; protected, set bits 0,2,5 only
+20$:	add	#40	,r0		; tochar r0
+	movb	r0	,(r4)+		; put it into packet
+sn.end:	clrb	@r4			; .asciz
+	return
+
+
+	.sbttl	Send file length	; /BBS/
+
+sn.len:	mov	(r5)	,r1		; lun open to the file
+	asl	r1			; word indexing
+	mov	sizof(r1),r1		; get file size
+	inc	r1			; accommodate rounding to
+	asr	r1			; 1024. byte blocks, not 512.
+	bne	10$			; /BBS/ something is left of size..
+	inc	r1			; /BBS/ no, make it at least one block
+10$:	movb	#41	,(r4)+		; attribute type (file size)
+	movb	#45	,(r4)+		; length of the number
+	deccvt	r1	,r4	,#5	; convert to ascii
+	mov	#5	,r0		; for 5 chars
+20$:	cmpb	@r4	,#space		; if a space, then make it a "0"
+	bne	30$			; not a space
+	movb	#'0	,@r4		; it was a space
+30$:	inc	r4			; next
+	sob	r0	,20$		; please
+40$:	br	sn.end			; /63/ go make it .asciz
+
+
+	.sbttl	Send system specific info	; /52/ added /BBS/ cleaned up
+
+sn.inf:	movb	#'0	,(r4)+		; DEC-specific file type
+	movb	#42	,(r4)+		; length of data to follow
+	movb	#42	,(r4)+		; sending extended file type
+	mov	image	,r0		; use this to index to it
+	movb	sn$inf(r0),(r4)+	; /63/ insert it
+	br	sn.end			; /63/ go make it .asciz
+
+	.save
+	.psect	$pdata
+sn$inf:	.byte	'A&137	,'I&137	,'N&137
+	.even
+	.restore
+
+
+	.sbttl	Get file creation date/time	; /BBS/ added this..
+
+sn.cdt:	save	<r4>			; pointer to current position in buff
+	mov	(r5)	,r4		; channel
+	asl	r4			; word offsets
+	mov	date.a(r4),r0		; recover current file's date
+	mov	#curatr	,r1		; the result address
+
+	mov	r0	,r3		; copy the date to extract
+	bic	#^c<37>	,r3		; the year
+	add	#1972.	,r3		; plus the bias please
+	mov	r0	,r2		; copy the date
+	bic	#^c<140000>,r2		; extend max year w/two hi bits
+	swab	r2			; two hi bits now are bits 7,6
+	asr	r2			; shift to bits 6,5 (true value)
+	add	r2	,r3		; add to total years
+	call	i4toa			; do all 4 digits of year
+
+	mov	r0	,r3		; copy to extract months
+	swab	r3			; get the month to bits 7..2
+	asr	r3			; now bits 6..1
+	asr	r3			; now bits 5..0
+	bic	#^c<37>	,r3		; hose everything else
+	call	i2toa			; write ascii to out buff
+
+	mov	r0	,r3		; copy to extract day of month
+	ash	#3	,r3		; /62/ shift left 3 places
+	swab	r3			; then swap bytes to get
+	bic	#^c<37>	,r3		; the date
+	call	i2toa			; write ascii to out buff
+
+	tst	tsxsav			; only do file time under TSX
+	beq	10$			; it's not TSX
+	movb	#space	,(r1)+		; a space delimiter between date,time
+
+	mov	time.a(r4),r3		; recover current file's time
+	clr	r2			; clear hi word for upcoming divide
+	div	#20.	,r2		; get # of 3-sec units since midnight
+	mov	r3	,-(sp)		; put on stack
+	asl	r3			; 2x secs
+	add	r3	,(sp)		; plus 1x = 3x = number_of_seconds
+	mov	r2	,r3		; get rest of time
+	clr	r2			; set up for next divide
+	div	#60.	,r2		; get number of minutes
+	mov	r3	,-(sp)		; and save on stack
+	mov	r2	,r3		; this is the number of hours
+	call	i2toa			; write ascii to out buff
+	movb	#':	,(r1)+		; a colon into the buffer
+	mov	(sp)+	,r3		; recover minutes
+	call	i2toa			; write ascii to out buff
+	movb	#':	,(r1)+		; a colon into the buffer
+	mov	(sp)+	,r3		; recover secs
+	call	i2toa			; write ascii to out buff
+
+10$:	clrb	@r1			; .asciz
+	unsave	<r4>			; recover packet buffer pointer
+	mov	#curatr	,r1		; pointer to string just built
+	strlen	r1			; get length of string
+	add	#40	,r0		; encode length (tochar..)
+	movb	#'#	,(r4)+		; file create time/date data
+	movb	r0	,(r4)+		; put length into packet buffer
+20$:	movb	(r1)+	,(r4)+		; then copy data into it
+	bne	20$			; until null
+	dec	r4			; bump pointer back to the null
+	return
+
+
+	.sbttl	Send file length in bytes  ; /BBS/ all new
+
+sn.xle:	mov	(r5)	,r3		; file open on this chan
+	asl	r3			; word indexing
+	clr	r2			; double precision, init high word
+	mov	sizof(r3),r3		; size in the accumulator low word
+	bne	10$			; something is there
+	inc	r3			; make it at least one block
+10$:	mov	#512.	,r0		; setup call to $dmul, size*512.
+	call	$dmul			; double precision multiply
+	mov	r0	,xblock		; save hi word
+	mov	r1	,xblock+2	; save low word
+	clr	r2			; suppress leading zeros in output
+	mov	#xblock	,r1		; address of 32-bit number
+	mov	#sizbuf	,r0		; address of out buff for ascii
+	call	$cddmg			; convert 32-bit integer to ascii
+	clrb	@r0			; null terminate the string
+	cmpb	#'*	,sizbuf		; did $cddmg overflow?
+	beq	30$			; ya, bail out..
+	strlen	#sizbuf			; get its length
+	movb	#61	,(r4)+		; attribute type (exact size in bytes)
+	add	#40	,r0		; tochar the string length
+	movb	r0	,(r4)+		; stuff into the attribute string
+	mov	#sizbuf	,r0		; get pointer to the length string
+20$:	movb	(r0)+	,(r4)+		; then copy ascii'd length into attr$
+	bne	20$			; until hitting the null terminator
+30$:	return
+
+
+	.sbttl	Received attribute packet processing
+
+;	R $ A T T R
+;
+;	input:	 (r5)	= packet buffer address
+;	output:	  r0	= if <>, error code
+
+r$attr::save	<r1,r2,r5>		; /BBS/ cleaned this up a bit..
+	bit	#at.on	,doattr		; /63/ attribute processing enabled?
+	beq	70$			; /62/ nope
+	mov	@r5	,r5		; /49/ get packet data address
+
+10$:	movb	(r5)+	,r0		; /49/ attribute type code
+	beq	60$			; /49/ nothing there..
+	movb	(r5)+	,r1		; /49/ get length field next
+	beq	60$			; /49/ nothing there..
+	cmpb	r0	,#'.		; /49/ if this is an OLD Kermit-11
+	bne	20$			; /49/ with the invalid system type
+	cmpb	r1	,#'D&137	; /49/ format then we have to fix it
+	bne	20$			; /49/ it is not..
+	dec	r5			; /49/ it is, we'd been forgetting to
+	mov	#42	,r1		; /49/ include the length field
+
+20$:	sub	#40	,r1		; /49/ convert length to integer
+	ble	60$			; /BBS/ nothing there
+	mov	#curatr	,r2		; /49/ copy current attribute argument
+30$:	movb	(r5)+	,(r2)+		; /49/ over to a save area now
+	sob	r1	,30$		; /49/ next please
+	clrb	(r2)+			; /49/ ensure .asciz please
+	mov	r5	,-(sp)		; /49/ make sure the r5 context saved
+	scan	r0	,#attrty	; look for the attribute packet type?
+	asl	r0			; simple to do
+	bit	at.rx(r0),doattr	; /62/ is this attribute enabled?
+	bne	40$			; /62/ ya
+	clr	r0			; /62/ no, check for
+	br	50$			; /62/ more attributes
+40$:	jsr	pc	,@attrds(r0)	; process the attribute packet now
+50$:	mov	(sp)+	,r5		; /49/ restore the r5 context now
+	tst	r0			; success?
+	beq	10$			; yes
+	br	80$			; no, exit with error in r0
+
+60$:	call	ispdp			; /62/ if other end is RT-11 or TSX..
+	cmp	r0	,#4		; /62/ well?
+	beq	70$			; /62/ it is, so file sizes are exact
+	cmp	image	,#binary	; /62/ then if file type isn't binary
+	beq	70$			; /62/ it is, image size is always ok
+	mov	at$len	,r0		; /62/ otherwise save the passed size
+	beq	80$			; /62/ nothing was there, r0 is clear
+	asr	r0			; /62/ divide by two
+	asr	r0			; /62/ now it's by four, 25% of total
+	inc	r0			; /62/ bump one more block to be sure
+	add	r0	,at$len		; /62/ now bump requested space by 25%
+	bcc	70$			; /62/ result didn't overflow
+	mov	#65497.	,at$len		; /62/ it did, try the max possible..
+70$:	clr	r0			; packet format error or end of data
+80$:	unsave	<r5,r2,r1>
+	return
+
+	.save
+	.psect	$pdata
+attrty:	.byte	56	,42	,55	,41	,60	,43	,61
+	.byte	0
+	.even
+attrds:	.word	rx.$$			; /62/ must conform to at.rx
+	.word	rx.sys	,rx.typ	,rx.pro	,rx.len	,rx.inf	,rx.cdt	,rx.xle
+	.restore
+
+
+	.sbttl	Null attribute handler
+
+rx.$$:	clr	r0			; /49/ ignore unknown attribute types
+	return
+
+
+	.sbttl	Process received length specified in 1024. byte blocks
+
+rx.len:	tst	at$len			; /BBS/ size from rx.xle already here?
+	bne	40$			; /BBS/ ya, use it instead of this
+	mov	#curatr	,r2		; /49/ where we saved attributes
+	clr	r1			; init the accumulator
+10$:	tstb	@r2			; EOL?
+	beq	30$			; yep
+	cmpb	@r2	,#space		; ignore leading spaces please
+	beq	20$			; yes, a space
+	clr	-(sp)			; avoid sxt
+	bisb	@r2	,@sp		; get the next digit please
+	sub	#'0	,@sp		; and convert to decimal
+	mul	#12	,r1		; shift accum over 10.
+	add	(sp)+	,r1		; add in the current digit
+20$:	inc	r2			; next ch please
+	br	10$			; /49/ Next please
+30$:	asl	r1			; convert 1024. blocks to 512. blocks
+	mov	r1	,at$len		; save it please
+40$:	clr	r0			; success
+	return
+
+
+	.sbttl	Received file type
+
+rx.typ:	tst	doauto			; /BBS/ auto file type enabled?
+	bne	10$			; /BBS/ ya
+	mov	$image	,image		; /BBS/ no, use what's SET
+	br	30$
+10$:	cmpb	curatr	,#'B&137	; binary?
+	beq	20$			; yes
+	cmpb	curatr	,#'I&137	; image?
+	bne	30$			; no
+20$:	mov	#binary	,image		; flag for image mode
+30$:	clr	r0			; success
+	return
+
+
+	.sbttl	Put create date/time where close can get them later ; /BBS/
+
+rx.cdt:	clr	-(sp)			; init 2 digit year flag
+	scan	#space	,#curatr	; find the space between date and time
+	tst	r0			; get it?
+	bne	10$			; ya..
+	strlen	#curatr			; no time is there
+	cmp	r0	,#7		; 2 or 4 digit year?
+	bgt	20$			; it's 4
+	br	30$			; it's 2
+
+10$:	cmp	r0	,#10		; 2 or 4 digit year?
+	blt	30$			; 2 digits
+20$:	mov	sp	,(sp)		; 4 digits, set flag
+30$:	mov	#curatr	,r1		; pointer to date/time packet data
+	mov	#yr.y	,r0		; extract the ascii year here
+	call	mov2b			; copy two bytes
+	tst	(sp)+			; two or four digit year string?
+	beq	40$			; just two
+	call	mov2b			; copy two bytes
+40$:	mov	#mon.y	,r0		; extract the ascii month here
+	call	mov2b			; copy two bytes
+	mov	#day.y	,r0		; extract the ascii day here
+	call	mov2b			; copy two bytes
+
+	save	<r1>			; save pointer to time string
+
+	mov	#yr.y	,r3		; recover ascii year
+	call	gnum			; make it an integer
+	mov	r1	,yr.x		; and save it here
+	mov	#mon.y	,r3		; recover ascii month
+	call	gnum			; make it an integer
+	mov	r1	,mon.x		; and save it here
+	mov	#day.y	,r3		; recover ascii day
+	call	gnum			; make it an integer
+	mov	r1	,day.x		; and save it here
+
+	;  2_bits<year_ext> ,4_bits<mon> ,5_bits<day> ,5_bits<year-1972>
+	mov	mon.x	,r1		; recover month
+	ash	#5	,r1		; partial shift towards final location
+	add	day.x	,r1		; recover days
+	ash	#5	,r1		; shift days/months to final positions
+	mov	yr.x	,-(sp)		; recover year
+	cmp	(sp)	,#100.		; is it two digits only?
+	bge	60$			; no
+	cmp	(sp)	,#71.		; ya but ambiguity impossible 'til '72
+	ble	50$			; it has to be 21st century
+
+	; if two-digit year extend to four-digits based on the current century
+	.gtim	#rtwork	,#xblock	; ensure clock rollover..
+	.date				; ya, which century is it now?
+	mov	r0	,r3		; copy the date
+	bic	#^c<37>	,r3		; the year
+	add	#1972.	,r3		; plus the bias
+	bic	#^c<140000>,r0		; extend max year w/two hi bits
+	swab	r0			; two hi bits now are bits 7,6
+	asr	r0			; shift to bits 6,5 (true value)
+	add	r0	,r3		; now it's the total years
+	cmp	r3	,#1999.		; well?
+	bgt	50$			; it's 2000 A.D. or above
+	add	#1900.	,(sp)		; not 2000 A.D. yet ..
+	br	60$			; and continue
+50$:	add	#2000.	,(sp)		; default to current century
+
+60$:	sub	#1972.	,(sp)		; RT-11 dates begin at 1972..
+	bge	70$			; an ok date for RT-11
+	clr	r1			; a bad date, so hose it
+	br	80$			; and continue..
+
+70$:	mov	(sp)	,r0		; copy to..
+	bic	#^c<100!40>,r0		; ..extract bits 6,5
+	asl	r0			; shift them to bits 7,6
+	swab	r0			; now they are the two hi bits
+	bic	#^c<37>	,(sp)		; hose possible hi bits in here
+	add	(sp)	,r1		; and add it into the date word
+	bis	r0	,r1		; then insert year extension bits
+
+80$:	tst	(sp)+			; pop buffer
+	mov	#lun.ou	,r0		; assume it's the output file
+	asl	r0			; word indexing
+	mov	r1	,date.a(r0)	; save date for use when closing file
+
+	unsave	<r1>			; recover pointer to time string
+	tstb	(r1)+			; bump past space delimiter
+	beq	100$			; no time supplied
+
+	mov	r1	,r3		; now do time..  copy pointer
+	call	gnum			; convert hours to integer
+	mul	#<60.*20.>,r1		; and to 3-sec intervals
+	mov	r1	,-(sp)		; save them
+	inc	r3			; bump past colon
+	call	gnum			; convert mins to integer
+	mul	#20.	,r1		; and to 3-sec intervals
+	mov	r1	,-(sp)		; save them
+	clr	r1			; preset in case no seconds supplied
+	cmpb	(r3)+	,#':		; if not a colon, there's no secs
+	bne	90$			; done
+	call	gnum			; convert secs to integer
+	clr	r0			; prep for divide
+	div	#3	,r0		; and to 3-sec intervals
+90$:	add	(sp)+	,r0		; add in minutes data
+	add	(sp)+	,r0		; add in hours data
+	mov	#lun.ou	,r1		; assume it's the output file
+	asl	r1			; word indexing
+	mov	r0	,time.a(r1)	; save time for use when closing file
+100$:	clr	r0			; success
+	return
+
+mov2b:	movb	(r1)+	,(r0)+		; move two bytes
+	movb	(r1)+	,(r0)+
+	clrb	(r0)			; null terminate
+	return
+
+gnum:	clr	r1			; the answer  ; return the next number
+110$:	movb	(r3)+	,r0		; next char
+	sub	#'9+1	,r0		; convert ascii byte
+	add	#9.+1	,r0		; to an integer
+	bcc	120$			; not a number
+	mul	#10.	,r1		; bump accumulator by 10s
+	add	r0	,r1		; add in result from this pass
+	br	110$			; then try the next byte
+120$:	tstb	-(r3)			; park on first non-numeric byte
+	return
+
+
+	.sbttl	Put file protection code where close can get it later ; /BBS/
+
+rx.pro:	mov	#lun.ou	,r1		; assume output file
+	asl	r1			; word indexing
+	bicb	#<1!4!40!100!200>,curatr ; hose bits 0,2,5 and unused bits 6,7
+	beq	10$
+	clr	prot.a(r1)		; it's read-write
+	br	20$
+10$:	mov	sp	,prot.a(r1)	; it's read-only
+20$:	clr	r0			; success
+	return
+
+
+	.sbttl	Received system type
+
+rx.sys:	movb	curatr	,at$sys		; save major vendor type
+	movb	curatr+1,at$sys+1	; save the operating system type
+	clr	r0			; success
+	return
+
+
+	.sbttl	Receive system specific info
+
+rx.inf:	call	ispdp			; are we
+	tst	r0			; compatible today?
+	beq	10$			; no, ignore the system dep attr's
+	mov	#curatr	,r0		; /BBS/ current attribute data
+	cmpb	(r0)+	,#42		; /53/ file type subfunction?
+	bne	10$			; /53/ no, ignore for now
+	tst	doauto			; /BBS/ auto file type enabled?
+	beq	10$			; /BBS/ no, ignore this stuff..
+	scan	(r0)	,#rx$in0	; /63/ get IFAB file attributes data
+	asl	r0			; /53/ word addressing
+	mov	rx$in1(r0),image	; /63/ set it
+10$:	clr	r0
+	return
+
+	.save
+	.psect	$pdata
+rx$in0:	.byte	'A&137	,'B&137	,'I&137	,'N&137	; /63/ add "B" type
+	.byte	0
+	.even
+rx$in1:	.word	TEXT			; if not in this list call it text
+	.word	TEXT	,BINARY	,BINARY	,DECNAT
+	.restore
+
+
+	.sbttl	Exact file size in bytes (type "1")
+
+rx.xle:	mov	#curatr	,r5		; /49/ point to attribute save area
+	clr	r3			; /49/ init the accumulator (low word)
+	clr	r2			; /49/ double precision (high word)
+10$:	tstb	@r5			; /49/ EOL?
+	beq	30$			; /49/ yep
+	cmpb	@r5	,#space		; /49/ ignore leading spaces please
+	beq	20$			; /49/ yes, a space
+	mov	#12	,r0		; /49/ setup for call to $dmul
+	call	$dmul			; /49/ do it please
+	mov	r0	,r2		; /49/ restore accumulator values now
+	mov	r1	,r3		; /49/ ditto...
+	clr	-(sp)			; /49/ get the next digit please
+	bisb	@r5	,@sp		; /BBS/ convert to decimal
+	sub	#'0	,@sp		; /49/ got it
+	add	(sp)+	,r3		; /49/ add in the current digit
+	adc	r2			; /49/ add carry bit in also please
+20$:	inc	r5			; /49/ next ch please
+	br	10$			; /49/ next please
+30$:	div	#1000	,r2		; /BBS/ convert to 512 byte blocks now
+	mov	r2	,at$len		; /49/ save it please
+	tst	r3			; /BBS/ was there a remainder?
+	beq	40$			; /49/ no, exit
+	inc	at$len			; /49/ yes, len++
+40$:	clr	r0			; success
+	return
+
+
+	.sbttl	Determine if other system is a PDP-11
+
+;	I S P D P
+;
+;	output:	r0 = 5	other system running POS
+;		     4	RT-11 or TSX+
+;		     3	RSTS
+;		     2	IAS
+;		     1	RSX
+;		     0	it's something else..
+
+	PD$RSX	= '8
+	PD$IAS	= '9
+	PD$RSTS	= 'A&137
+	PD$RT	= 'B&137		; includes TSX
+	PD$POS	= 'C&137
+
+ispdp:	clr	r0			; presume failure
+	cmpb	at$sys	,#'D&137	; a DEC system?
+	bne	10$			; no, exit
+	scan	<at$sys+1>,#pdplst	; ya, determine operating system type
+10$:	return
+
+	.save
+	.psect	$pdata
+pdplst:	.byte	pd$rsx	,pd$ias	,pd$rsts,pd$rt	,pd$pos	,0
+	.even
+	.restore
+
+
+	.sbttl	Clear attributes
+
+clratr::clr	at$len			; clear the file length
+	clr	at$sys			; clear the system type
+	return
+
+	.sbttl	32-bit multiply from RSX SYSLIB.OLB
+
+$DMUL:	MOV	R0	,-(SP)
+	CLR	R0
+	CLR	R1
+10$:	TST	(SP)
+	BEQ	30$
+	ROR	(SP)
+	BCC	20$
+	ADD	R3	,R1
+	ADC	R0
+	ADD	R2	,R0
+20$:	ASL	R3
+	ROL	R2
+	BR	10$
+30$:	TST	(SP)+
+	RETURN
+
+	.end

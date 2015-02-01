@@ -1,0 +1,29 @@
+	.sbttl	KRTTSX	Build KM for TSX-Plus
+
+;	27-Sep-97  Billy Youdelman  V03.63
+
+	tsx$p	= 1	; if <> support TSX-Plus
+	tim$it	= 1	; TSX includes time out support
+	erl$g	= 0	; but it doesn't do error logging
+
+;	If the interface supports programmable speed selection,
+;	enable it by making its type = 1 here.  Otherwise, make
+;	the following three = 0.  These are mutually exclusive,
+;	up to one and only one may be used at a time:
+
+	km$dve	= 0	; if <> DL(V)-11/E interface
+	km$pro	= 0	; if <> PRO-series modem interface
+	km$sbc	= 0	; if <> Falcon interface
+
+	km$csr = 176500	; if not PRO-series, desired CSR
+	km$vec = 300	; and interrupt vector (PRO defaults are in KRTKM.MAC)
+
+;	Speed default, select one of the following:
+
+;	km$spd = 300.
+;	km$spd = 1200.
+; 	km$spd = 2400.
+;	km$spd = 4800.
+	km$spd = 9600.		; <default>
+;	km$spd = 19200.
+;	km$spd = 38400.		; Falcon ONLY

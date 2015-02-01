@@ -1,0 +1,278 @@
+.; KRT.IND, 27-Jul-93, from Bob Schor's KERMIT.IND command file
+.;
+.; Build a custom KRT.INI init file, use it to run Kermit for some
+.; specific purpose, then clean up..
+.;
+.; N O T E:  This file _requires_ your own customization before use!
+.; It is a general guide from which site-specific procedeures may be
+.; developed.
+
+.;******************************************************************;
+.;								    ;
+.;   Copyright 1990,1991,1992,1993 Bob Schor			    ;
+.;				   Eye and Ear Institute	    ;
+.;				   203 Lothrop Street		    ;
+.;				   Pittsburgh, PA  15213	    ;
+.;								    ;
+.; All rights reserved.  May not be copied without this notice.     ;
+.; This is being provided to all DECUS members, who can freely use, ;
+.; adapt, or modify this code for their own non-profit purposes.    ;
+.;								    ;
+.;******************************************************************;
+
+.; Version 10.1 -- first incarnation
+.; Version 10.4 -- allow multiple destinations (including modem)
+.; Version 10.5 -- build KER:KERMIT.INI (requires patched Kermit)
+.; Version 10.6 -- site variable added
+.; Version 10.6 -- set modem, dial timeout to 40 seconds
+.; Version 10.6 -- increased flexibility in site-specific options
+.; Version 10.10 -- some sites are default "remote" Kermits
+.; Version 10.10 -- optional exchange/extension, access for some numbers
+.; Version 11.1 -- define prefixes for internal, external extensions
+.; Version 12.1 -- comments and changes for greater flexibility, systems
+.;			not configured as we do our TSX systems
+.; Version 12.1 -- Host, Remote, and Server options
+.; Version 12.7 -- 11/93 option
+
+.; KRT V03.62-8 -- Patched for KRT vs. Kermit-11 T3.60 differences
+.;		   Renamed to KRT.IND	Billy Y..  27-Jul-93
+
+
+.; Initialization
+
+	.enable		quiet
+	.enable		substitution
+	.disable	suffix
+	.disable	prefix
+
+	.sets	versn	"KRT.IND V03.62-8"
+
+.; The use of a named site allows much customization to be in subroutines
+.; at the end of this procedure.  Alternatively, in-line code here could
+.; be employed.  If so, remove routine "destin" and define "dest" as the
+.; device to be logically assigned to XL:
+
+	.sets	site	"Pgh"
+
+.; Set up site-specific parameters (most customization out there)
+
+	.if	site = "Pgh"	.gosub	setpgh
+	.if	site = "RU"	.gosub	setru
+	.if	site = "BS-73"	.gosub	setbs
+
+.; Set up baud rate for modem
+
+	.sets	mbaud	"9600"
+
+.; Sign-on display and mode selection
+
+	;
+	;'versn'
+	;
+
+	;Kermit may be run in Host, Remote, or Server mode.
+	;
+	;Host mode     This Kermit can "dial out" to another computer.
+	;Remote mode   This computer has been called by another (Host) Kermit.
+	;Server mode   Used for file transfers controlled by calling computer.
+	;
+
+.choose:.gosub	setmod
+	.if	mode	= "H"	.goto	host
+	.if	mode	= "R"	.goto	remote
+	.if	mode	= "S"	.goto	server
+	;?KRTIND-W-Only H, R, or S acceptable; use ^C to abort
+	.goto	choose
+
+
+.; Run Kermit in Host mode, allowing access to phone lines
+
+.host:	.gosub	destin
+	.if	dest = "phn"	.goto	phone
+	.; if not "phone" fall through to the direct connection below
+
+.; Direct connection to another computer
+
+.conect:assign vm krt
+	.open	krt:krt.ini
+	.data	set long_packets on
+	.data	set eof exit		! in case of command file error
+	.data	set line km		! or handler of your choice
+	.data	set speed 'mbaud'
+	.data	set terminal vt100
+	.data	set sl on,ked
+	.data	set prompt Kermit-11/'site'>
+.; May want to include other lines, such as
+.;	.data	set file type binary	! for PC transfers
+	.close
+
+	r krt
+	delete krt:krt.ini
+	deassign krt
+	.exit
+
+
+.; Connection via modem
+
+.phone:	.sets	BSpref	"'BSacc''BSac''BSexch'" ;prefix for BS extensions
+	.sets	VWpref	"'VWacc''VWac''VWexch'" ;prefix for VW extensions
+	.sets	outsid	"9"			;prefix for outside calls
+
+	assign vm krt
+	.open	krt:krt.ini
+	.data	set long_packets on
+	.data	set eof exit		! in case of command file error
+	.data	set line km		! or handler of your choice
+	.data	set speed 'mbaud'
+	.data	set modem hayes_mnp	! or modem of your choice, etc..
+	.data	set phone tone
+	.data	set phone number victor 'VWpref'7773
+	.data	set phone number bschor 'BSpref'2118
+	.data	set phone number pittvms 'outsid''BSac'6215954
+	.data	set phone number dcs 'outsid'18002477003
+	.data	set phone number ruvax 'VWpref'8716
+	.data	set terminal vt100
+	.data	set sl on,ked
+	.data	set prompt Kermit-11/'site'>
+.; May want to include other lines, such as
+.;	.data	set file type binary	! for PC transfers
+	.close
+
+	r krt
+	delete krt:krt.ini
+	deassign krt
+	.exit
+
+
+.; Run Kermit in Remote mode, no access to phone lines
+
+.remote:assign vm krt
+	.open	krt:krt.ini
+	.data	set long_packets on
+	.data	set eof exit		! in case of command file error
+	.data	set terminal vt100
+	.data	set sl on,ked
+	.data	set prompt Kermit-11/'site'>
+.; May want to include other lines, such as
+.;	.data	set file type binary	! for PC transfers
+	.close
+
+	r krt
+	delete krt:krt.ini
+	deassign krt
+	.exit
+
+
+.; Run Kermit in Server mode, no access to phone lines
+
+.server:assign vm krt
+	.open	krt:krt.ini
+	.data	set long_packets on
+	.data	set eof exit		! in case of command file error
+	.data	set terminal vt100
+	.data	set sl on,ked
+	.data	set prompt Kermit-11/'site'>
+.; May want to include other lines, such as
+.;	.data	set file type binary	! for PC transfers
+	.data	set tt noquiet		! display all of server init message
+	.data	server
+	.data	exit			! exit Kermit after server is stopped
+	.close
+
+	r krt
+	delete krt:krt.ini
+	deassign krt
+	.exit
+
+
+.; Subroutines to set site-specific phone parameters
+
+.; Host is 11/73 in Pittsburgh
+
+.setpgh:.sets	BSacc	""		;access code
+	.sets	BSac	""		;area code
+	.sets	BSexch	""		;exchange
+
+	.sets	VWacc	"9"
+	.sets	VWac	"1212"
+	.sets	VWexch	"327"
+
+	.sets	dest	"phn"		;default destination
+	.sets	mode	"R"		;default host/remote/server
+	.return
+
+.; Host is 11/44 at Rockefeller
+
+.setru:	.sets	BSacc	"9"		;access code
+	.sets	BSac	"1412"		;area code
+	.sets	BSexch	"647"		;exchange
+
+	.sets	VWacc	""
+	.sets	VWac	""
+	.sets	VWexch	""
+
+	.sets	mode	"S"		;default host/remote/server
+	.return
+
+.; Host is Bob's other 11/73
+
+.setbs:	.sets	BSacc	"9"		;access code
+	.sets	BSac	"1412"		;area code
+	.sets	BSexch	"647"		;exchange
+
+	.sets	VWacc	""
+	.sets	VWac	""
+	.sets	VWexch	""
+
+	.sets	dest	"l44"		;default destination
+	.sets	mode	"R"		;default host/remote/server
+	.return
+
+
+.; Subroutine to choose a destination:	modem, 11/23, 11/73, 11/44, or 11/93
+
+.destin:.if	site = "Pgh"	.goto	despgh	;set Pgh destinations
+	.if	site = "RU"	.goto	desru	;set RU destinations
+	.return					;other sites set by default
+
+.despgh:.sets	dest	"M"
+	.disable	lowercase
+	.asks	[1:1:"'dest'"]	dest	M(odem) or 9(3) ['dest'] --
+	.enable		lowercase
+
+	.if	dest = "M"	.goto	setdes
+	.if	dest = "9"	.goto	setdes
+
+	;?KRTIND-W-Only M or 9 acceptable; use ^C to abort
+	.goto	destin
+
+.; RU destinations
+
+.desru:	.sets	dest	"M"
+	.disable	lowercase
+	.asks	[1:1:"'dest'"]	dest	M(odem), 2(3), or 7(3) ['dest'] --
+	.enable		lowercase
+
+	.if	dest = "M"	.goto	setdes
+	.if	dest = "2"	.goto	setdes
+	.if	dest = "7"	.goto	setdes
+
+	;?KRTIND-W-Only M, 2, or 7 acceptable; use ^C to abort
+	.goto	destin
+
+.; Pgh destinations
+
+.setdes:.if	dest = "M"	.sets	dest	"phn"
+	.if	dest = "2"	.sets	dest	"l23"
+	.if	dest = "7"	.sets	dest	"l73"
+	.if	dest = "9"	.sets	dest	"l93
+	.if	dest = "4"	.sets	dest	"l44"
+	.return
+
+
+.; Subroutine to choose default host/remote/server, site-dependent
+
+.setmod:.disable	lowercase
+	.asks	[1:1:"'mode'"]	mode	H(ost), R(emote), or S(erver) ['mode'] --
+	.enable		lowercase
+	.return

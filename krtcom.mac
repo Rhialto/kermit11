@@ -1,0 +1,123 @@
+	.title	KRTCOM	Main_loop and REMOTE command lists overlay
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	consolidate local data..
+;	add DAYTIME
+;	allow CD, CWD and REMOTE CD, CWD to operate without an argument
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	modify SHOW to work with null arg, as RT-11 does for devices
+;	pull unused argtyp stuff
+
+;	08-Mar-84  10:48:20  Brian Nelson
+;	23-Oct-85  09:44:20  BDN	Break LOASET out for new overlay.
+;
+;	Copyright 1984 Change Software, Inc.
+;
+;	 Place the main command list in an overlay.
+;	Call  LOACMD  to get the overlay loaded and
+;	return the command list address in r0.  The
+;	same thing is done for REMOTE commands by a
+;	call to LOAREM.
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+	.include "IN:KRTCDF.MAC"
+	.iif ndf  KRTCDF  .error	<; .include for IN:KRTCDF.MAC failed>
+
+
+	.sbttl	Local data		; /63/ consolidate data here..
+
+	.psect	$pdata
+com.01:	.asciz	"File: "
+com.02:	.asciz	"From: "
+com.03:	.asciz	"Number: "
+com.04:	.asciz	"Symbol or address: "
+com.05:	.asciz	"Files: "
+com.06:	.asciz	"Command: "
+com.07:	.asciz	"What: "
+com.08:	.asciz	"Username Password: "
+	.even
+
+
+	.psect	$code
+	.sbttl	Define the main_loop commands
+
+loacmd::mov	#cmdlst	,r0		; calling this also loads this overlay
+	return
+
+	command	cmdlst	,@		,1	,c$take  ,com.01
+	command	cmdlst	,ASSIGN		,1	,c$assign
+	command	cmdlst	,BUG		,2	,c$bug
+	command	cmdlst	,BYE		,2	,c$bye
+	command	cmdlst	,CD		,2	,c$cwd   ; /63/ allow no dir
+	command	cmdlst	,CLS		,3	,c$cls
+	command	cmdlst	,CLX		,3	,c$clx
+	command	cmdlst	,CONNECT	,1	,c$conn
+	command	cmdlst	,COPY		,3	,c$copy  ,com.02
+	command	cmdlst	,CWD		,2	,c$cwd   ; /63/ allow no dir
+	command	cmdlst	,DATE		,2	,sho$da
+	command	cmdlst	,DAYTIME	,3	,sho$dy	; /63/
+	command	cmdlst	,DELETE		,6	,c$del   ,com.01
+	command	cmdlst	,DIAL		,3	,c$dial  ,com.03
+	command	cmdlst	,DIRECTORY	,3	,c$dir
+	command	cmdlst	,DISCONNECT	,4	,c$hang
+	command	cmdlst	,DISMOUNT	,3	,c$dismou
+	command	cmdlst	,EXAMINE	,3	,c$exam  ,com.04 ; /63/
+	command	cmdlst	,EXIT		,2	,c$exit
+	command	cmdlst	,FINISH		,1	,c$fin
+	command	cmdlst	,GET		,1	,c$get   ,com.05
+	command	cmdlst	,HANGUP		,2	,c$hang
+	command	cmdlst	,HELP		,1	,c$help
+	command	cmdlst	,HOME		,2	,c$home
+	command	cmdlst	,HPRINT		,2	,c$phlp
+	command	cmdlst	,LOGFILE	,3	,c$logf
+	command	cmdlst	,LOGOUT		,4	,c$bye
+	command	cmdlst	,MOUNT		,1	,c$mount
+	command	cmdlst	,PRINT		,2	,c$print ,com.01
+	command	cmdlst	,PWD		,2	,c$pwd
+	command	cmdlst	,QUIT		,1	,c$exit
+	command	cmdlst	,RECEIVE	,1	,c$rec
+	command	cmdlst	,REDIAL		,3	,c$redi
+	command	cmdlst	,REMOTE		,3	,c$rem   ,com.06
+	command	cmdlst	,RENAME		,3	,c$rena  ,com.02
+	command	cmdlst	,SEND		,1	,c$send  ,com.05
+	command	cmdlst	,SERVER		,3	,c$serv
+	command	cmdlst	,SET		,3	,c$set   ,com.07
+	command	cmdlst	,SHOW		,2	,c$show
+	command	cmdlst	,SPACE		,2	,c$spac
+	command	cmdlst	,STATUS		,2	,c$stat
+	command	cmdlst	,TAKE		,2	,c$take  ,com.01
+	command	cmdlst	,TIME		,2	,sho$ti
+	command	cmdlst	,TRANSMIT	,2	,c$tran  ,com.01
+	command	cmdlst	,TYPE		,2	,c$type  ,com.05
+	command	cmdlst	,XMODEM		,1	,c$xmodem,com.01
+	command	cmdlst
+
+
+	.sbttl	Define the REMOTE commands
+
+loarem::mov	#remlst	,r0		; calling this also loads this overlay
+	return
+
+	command	remlst	,CD		,2	,remcwd	 ; /63/ allow no dir
+	command	remlst	,COPY		,2	,rmtcop  ,com.02
+	command	remlst	,CWD		,2	,remcwd  ; /63/ allow no dir
+	command	remlst	,DELETE		,6	,remdel  ,com.01
+	command	remlst	,DIRECTORY	,2	,remdir
+	command	remlst	,HELP		,1	,remhlp
+	command	remlst	,HOST		,2	,remhos  ,com.06
+	command	remlst	,LOGIN		,1	,remlgi  ,com.08
+	command	remlst	,RENAME		,1	,rmtren  ,com.02
+	command	remlst	,SPACE		,1	,remspa
+	command	remlst	,TYPE		,1	,remtyp  ,com.01
+	command	remlst	,WHO		,1	,remwho
+	command	remlst
+
+	.end

@@ -1,0 +1,291 @@
+	.title	KRTHEX	Create .SAV file from its .HEX equivalent
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	This is a spiffed up K11HEX.MAC
+
+;	25-Oct-84  11:14:41  Brian Nelson
+
+; This program is meant to be used when no better means exist (such as a
+; floppy disk drive, removable media drive, etc) to copy Kermit on to the
+; target system.  Instead, any convenient local system, such as a pc, may
+; be used by connecting it to the PDP-11 console port and then talking to
+; the RT-11 system via a comm program with which files may be copied over
+; to the PDP-11.  The process works like this:
+;
+; 1.  Get this file (KRTHEX.MAC) and at least one of KRT.HEX or KRTTSX.HEX
+; on to the local (pc) system.  You can also include as much as you want,
+; or later after Kermit is up on the PDP-11, connect to the source and get
+; the rest direct.  The only binary (8-bit) material in the entire KRT
+; distribution are the .SAV files - anything else may be transfered using
+; this method (the stock RT-11 terminal handler strips the hi bit).
+;
+; 2.  Connect the appropriate pc comm port to the PDP-11 console terminal
+; line.  If you have a 25-pin "D" connector on this line where it attaches
+; to the VT-terminal, it can be removed and plugged directly into a pc comm
+; 1 or 2 port (when that also has a 25-pin "D" connector).  The speed and
+; etc (usually 9600, 8 data bits, no parity) of the PDP-11 port must be
+; matched in the pc comm program, along with XOFF flow control, after which
+; you should be able to talk to the PDP-11.
+;
+; 3.  Run PIP on the PDP-11, then give it a file name to create and tell
+; it to take its input from the terminal.  Example:
+;
+; .PIP
+; *KRT.HEX=TT:			! or file name of your choice
+; ^				! PIP prints a ^ when it's ready for input
+;
+; You then use the comm program's ASCII transfer function to simply send
+; the file across.  Note that you may have to insert delays between chars
+; or lines (or both) to avoid overrunning the PDP-11, which will return a
+; bell for each char thus lost.  When done, reconnect to the PDP-11 and
+; type a control-Z to close the file:
+;
+; ^Z
+; *
+;
+; When you've transfered all that you need, exit PIP with a control-C.
+;
+; 4.  This program (KRTHEX) needs to be assembled on the PDP-11 system.
+;
+; .macro krthex
+; .link krthex
+;
+; This produces an executable program named KRTHEX.SAV which is then used
+; to decode the .HEX files:
+;
+; .run krthex
+; *KRT=KRT				! here it's OUTPUT_file=INPUT_file
+; *KRTTSX=KRTTSX
+; *KRTMIN=KRTMIN			! if using the floppies-only Kermit
+; *^C					! type control-C to exit
+;
+; or
+;
+; .RUN KRTHEX KRT KRT			! here it's INPUT_file OUTPUT_file
+; .RUN KRTHEX KRTTSX KRTTSX
+; .RUN KRTHEX KRTMIN KRTMIN		! if using the floppies-only Kermit
+;
+; The default input file type is .HEX and .SAV is the output type default.
+;
+; 5.  After conversion it's a good idea to correct the creation dates:
+;
+; .RENAME/SETDAT:27:SEP:97 KRT*.SAV *	! for the now current V03.63
+; .RENAME/SETDAT:31:MAY:93 KRTMIN.SAV *	! for KRTMIN V03.62-5_min
+;
+; You now have a runnable Kermit which may be used to get the rest of its
+; own distribution.
+
+
+	.sbttl	Macros and misc constants
+
+	.macro	mapch	reg		; ascii to integer for HEX chars only
+	movb	map(reg),reg
+	.endm	mapch
+
+	.macro	sob	reg	,dst	; subtract one and branch if <>
+	dec	reg
+	bne	dst
+	.endm	sob
+
+	.MCALL	.CLOSE	,.CSIGEN ,.EXIT	,.GVAL	,.PRINT	,.READW	,.WRITW
+	.ENABL	LC
+
+	ERRBYT	= 52			; emt error status byte
+	STATWD	= 366			; indirect file status word
+		IFACTV	= 400		; indirect file active bit
+
+
+	.sbttl	Data
+	.psect	$pdata	,ro,d,lcl,rel,con
+
+map:	.rept	48.			; table returns integer value of ascii
+	.byte	377			; HEX digit or -1 for any non-HEX char
+	.endr
+	.byte	0   ,1   ,2   ,3   ,4   ,5   ,6   ,7   ,8.  ,9.
+	.byte	377 ,377 ,377 ,377 ,377 ,377 ,377 ; skip past :;<=>?@
+	.byte	10. ,11. ,12. ,13. ,14. ,15. ; mapping "A" to "F" here..
+	.rept	256.-70.
+	.byte	377
+	.endr
+	.byte	0			; .even
+
+csierr:	.word	csier0	,csier1	,csier2	,csier3	,csier4
+.fatal:	.ascii	"?KRTHEX-F-"<200>
+alldone:.asciz	"%KRTHEX-I-Conversion completed"
+badch:	.asciz	"Non HEX data in input file"
+badchk:	.asciz	"Input file checksum error"
+csibad:	.ascii	"?CSIGEN-F-"<200>
+csier0:	.asciz	"Command line is invalid"
+csier1:	.asciz	"Device not found"
+csier2:	.asciz	"Protected file already exists"
+csier3:	.asciz	"Not enough room to open output file"
+csier4:	.asciz	"Input file not found"
+rderr:	.asciz	"Input file .READW error"
+version:.asciz	"KRTHEX V03.63  7-Sep-93"
+wrerr:	.asciz	"Output file .WRITW error"
+	.even
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+cmdbuf:	.blkb	82.			; command line buffer
+defext:	.rad50	"HEXSAV      "		; CSIGEN default extents
+handld:	.blkw	1000			; handler loading done here
+inblk:	.word	0			; input file current block number
+inbuff:	.blkw	400			; the input file buffer
+inpnt:	.word	0			; and pointer into it
+jobtyp:	.word	0			; if <> params passed when pgm was run
+outblk:	.word	0			; output file current block number
+outbuf:	.blkw	400			; and same for the output file
+outpnt:	.word	0			; and its pointer
+rtwork:	.blkw	10			; read/write work area
+
+
+	.sbttl	Main program loop
+	.psect	$code	,ro,i,lcl,rel,con
+
+convert:.csigen	#handld	,#defext ,#0 ,#cmdbuf ; get and process a command
+	bcc	10$			; ok
+	movb	@#errbyt,r0		; didn't work, get the error code
+	.print	#csibad			; error message prefix
+	mov	#csierr	 ,r1		; mapping for CSIGEN errors
+	asl	r0			; word addressing
+	add	r0	,r1		; get address of address of text
+	.print	(r1)			; and dump message to the terminal
+	br	130$
+
+10$:	tstb	cmdbuf			; was anything actually input?
+	bne	20$			; ya
+	.print	#version		; no, print version data
+	br	convert			; and loop for input
+
+20$:	.gval	#rtwork	,#statwd	; indirect file status word
+	bit	#ifactv	,r0		; indirect file running this pgm?
+	beq	30$			; no
+	inc	jobtype			; ya, flag it for error handling
+30$:	mov	#77777	,inpnt		; ensure first getc call gets a block
+	clr	inblk			; input file current block number
+	clr	outblk			; output file current block number
+	clr	outpnt			; and its pointer
+
+40$:	mov	#40	,r5		; loop for the data record please
+	clr	r4			; clear checksum if we use it
+50$:	call	getc			; get a character
+	bcs	100$			; most likely all done
+	mov	r0	,r3		; save it
+	mapch	r3			; check against table of HEX chars
+	bpl	60$			; char was ok
+	.print	#.fatal			; fatal error message prefix
+	.print	#badch			; not ok
+	br	130$
+
+60$:	asl	r3			; avoid
+	asl	r3			; mul for
+	asl	r3			; systems
+	asl	r3			; w/o EIS
+	call	getc			; get the next one please
+	bcs	90$			; exit on I/O error please
+	mapch	r0			; convert it to an integer
+	bpl	70$			; it was ok
+	.print	#.fatal			; fatal error message prefix
+	.print	#badch			; say what went wrong
+	br	130$
+
+70$:	add	r3	,r0		; add it in and copy the byte
+	add	r0	,r4		; add into simpleminded checksum
+	call	putc			; write it out
+	bcs	80$			; I/O error on write
+	sob	r5	,50$		; finished with the read
+	call	getchk			; read the checksum
+	cmp	r0	,r4		; do they match?
+	beq	40$			; yes, read the next record now
+	.print	#.fatal			; no, fatal error message prefix
+	.print	#badchk			; print error and exit
+	br	130$
+
+80$:	.print	#.fatal			; fatal error message prefix
+	.print	#wrerr			; write error
+	br	130$
+
+90$:	.print	#.fatal			; fatal error message prefix
+	.print	#rderr			; read error
+	br	130$
+
+100$:	tst	outpnt			; anything to dump out?
+	beq	120$			; no (this should never happen..)
+	mov	outblk	,r2		; save current output block number
+110$:	cmp	r2	,outblk		; did putc dump its buffer?
+	bne	120$			; yes
+	clr	r0			; no, dump a bunch of nulls out
+	call	putc			; until putc flushes to disk
+	bcs	80$			; I/O error on write
+	br	110$
+
+120$:	.close	#0			; close the input file now
+	.close	#3			; output also please
+	.print	#alldone		; say conversion is completed
+	tst	jobtyp			; params passed w/cmd to run program?
+	bne	130$			; ya, so exit now
+	jmp	convert			; no, back to where we started
+
+130$:	clr	r0			; ensure any leftovers are cleaned up
+	.exit
+
+
+	.sbttl	Read the checksum
+
+getchk:	clr	r3			; init an accumulator
+	call	getc			; skip past the ":"
+	bcs	20$			; read error
+	call	getc			; skip past the first byte
+	bcs	20$			; read error
+	call	getc			; skip the second byte too
+	bcs	20$			; read error
+	mov	#4	,r2		; loop for the remaining four bytes
+10$:	call	getc			; get a char
+	bcs	20$			; read error
+	asl	r3			; avoid
+	asl	r3			; mul for
+	asl	r3			; systems
+	asl	r3			; w/o EIS
+	mapch	r0			; convert acsii to integer
+	add	r0	,r3		; add to accumulated total
+	sob	r2	,10$		; go do the next digit
+20$:	mov	r3	,r0		; return result
+	return
+
+
+	.sbttl	Get the next character
+
+getc:	cmp	inpnt	,#1000		; used up all previously read chars?
+	blo	10$			; not yet
+	clr	inpnt			; ya, reset the buffer read pointer
+	.readw	#rtwork	,#3 ,#inbuff ,#400 ,inblk ; read in another block
+	bcs	20$			; hit the end of file
+	inc	inblk			; next time read the next block please
+10$:	mov	inpnt	,r0		; get the current buffer offset
+	inc	inpnt			; +1 for the char about to be returned
+	movb	inbuff(r0) ,r0		; and return the character
+	bic	#^c<177>,r0		; ensure it's 7-bit data
+	cmpb	r0	,#15		; a CR or less?  if not carry cleared
+	blos	getc			; yes, skip it, go get the next char
+20$:	return				; exit with error status in carry bit
+
+
+	.sbttl	Put the next character
+
+putc:	cmp	outpnt	,#1000		; is the output buffer full yet?
+	blo	10$			; no
+	clr	outpnt			; ya, reset its output pointer
+	mov	r0	,-(sp)		; save the character being put
+	.writw	#rtwork	,#0 ,#outbuff ,#400 ,outblk ; dump the buffer to disk
+	mov	(sp)+	,r0		; restore that character please
+	bcs	20$			; hit end of file, else carry is clear
+	inc	outblk			; next time write the next block
+10$:	mov	outpnt	,r1		; get the current buffer offset
+	inc	outpnt			; +1 for char about to be stored
+	movb	r0	,outbuff(r1)	; and store the character
+	clc				; ..must do due to branch at top
+20$:	return				; exit with error status in carry bit
+
+	.end	convert

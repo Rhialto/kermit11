@@ -1,0 +1,1202 @@
+	.title	KRTRMS	RT-11 file I/O
+	.ident	"V03.63"
+
+; /63/	27-Sep-97  Billy Youdelman  V03.63
+;
+;	add support for SET WILDCARDS
+;	add support for specifying file size as in "file.nam[siz]"
+;	use er$wpe instead of er$eof for .writw error reporting
+;	move getnxt, getcr0, tgetcr here from KRTPAK
+;	add REWIND routine
+
+; /62/	27-Jul-93  Billy Youdelman  V03.62
+;
+;	save created (.enter) file size in sizeof entry in data table
+;	make filtyp entry in same global
+;	reset SET FILE CREATE-SIZE on successful file open
+;	moved LOGFIL name buffer here
+;	dropped NONAME.TMP for a nfs .enter, return "bad file name" error
+;	move most of ccast to mainline code in KRTCMD.MAC
+;	add version testing to support RT-11 V4
+;	moved GETREC here, so HELP via PF2 can't ever crash..
+
+; /BBS/	 1-Dec-91  Billy Youdelman  V03.61
+;
+;	getrec patched to accept passed buffer_length
+;	iswild modified to catch implicit wildcarding
+;	error mapping tables augmented to accommodate new routines
+;	.rctrlo added to file close routine
+;	chkdev added, used for bbs device access restriction
+;	limits: (activation char list for TSX) lives here, also vlflag
+;	added prewind routine for faking RMS stuff when reading help text
+;	add er$dev at end of faterr table to catch non-init'd device lookup
+;
+;	suspend: patched to wait in one tick increments, allowing ^C to
+;	abort - also now uses clkflg to accommodate 50 or 60 Hz..
+;
+;	fixed fparse handling of device name, also disallow a leading
+;	comma in the arg string, as this will do a nfs lookup..
+;
+;	ccast - now does trouble-free aborts from anywhere you'd need it
+;	when talking to the handler or when something is running which
+;	if aborted would leave virtual addressing in a mess, the bell
+;	will be rung acknowledging the abort, at which point it's best
+;	to wait for the program to do it, which it will as soon as it
+;	can.  further ^C's will ring the bell up to CC$MAX times, then
+;	a complete abort and return to the main command line via .spcps
+;	occurs.  if necessary an error packet will be sent, however this
+;	may not be as effective as using ^E, which waits for the packet
+;	in progress to complete first..
+;
+;	added getmcr routine to get arg(s) from KMON passed to chain
+;	area when Kermit is started.  owing to the way RT-11/TSX+ parse
+;	the "@" (causes KMON to try to open the file and read the
+;	first line of it into the command buffer, including the chain
+;	area) the syntax "KERMIT @TAKEFILE" is not usable under RT/TSX.
+;	"KERMIT TAKE TAKEFILE" is a poor but functional substitute..
+;	any other command and args may be passed, ie; .kermit dial tommy
+;
+;	add fixwild, translates "?" to "%" in file names
+;	fixed error handling in file close routine
+;	added getdk, gets physical name of "DK"
+;
+;	moved direr$ here, moved error messages from various modules to
+;	krterr, and added calls to them via direrr..
+
+;	08-Mar-84  09:18:25  Brian Nelson
+;
+;	Copyright 1984,1986 Change Software, Inc.
+;
+;	This is the RT-11 version of K11RMS.MAC.  It simply tries
+;	to emulate, as much as is reasonable, what the RMS-11 I/O
+;	routines do for RSX and RSTS.   Since Kermit-11 was built
+;	around RMS I/O we map RT-11 errors into RMS codes.   Note
+;	that for RT-11, of course, all files are considered to be
+;	image files.
+;
+;	This module (KRTRMS.MAC) must NEVER be swapped out!
+;
+;	The use of %loc and %val are from VMS Pascal and Fortran.
+;	%loc means ADDRESS, whereas %val means literal.  All call
+;	formats assume the first argument is at 0(r5), the next
+;	at 2(r5) and so on, as in:
+;
+;	mov	#-1	,-(sp)		; do today's date
+;	mov	#datebf	,-(sp)		; where to put the converted string
+;	mov	sp	,r5		; pointer to above data
+;	call	ascdat			; simple
+;	cmp	(sp)+	,(sp)+		; all done, pop buffer
+;
+;	or by using the CALLS macro (defined in KRTMAC.MAC)
+;
+;	calls	ascdat	,<#datebf,#-1>
+;
+;	Disk I/O entry points:
+;
+;	CLOSE	(%val channel_number)
+;	CREATE	(%loc filename ,%val channel_number, %val type)
+;	GETC	(%val channel_number)
+;	GETREC	(%loc buffer ,%val ch_number ,%val buf_siz) {rtns RSZ in r1}
+;	LOOKUP	(%val unused ,%loc in_filespec ,%val index ,%loc out_filename)
+;	OPEN	(%loc filename ,%val channel_number ,%val type)
+;	PUTC	(%val char ,%val channel_number)
+;	PUTREC	(%loc buffer ,%val record_size ,%val channel_number)
+;
+;	Non-disk I/O entry points:
+;
+;	In most cases, r0 will return an error code or zero for success
+;	For KBREAD and READ, r1 will have the size of the read
+;	For BINREAD, r1 will have the character just read
+;
+;	ASCDAT	(%loc buffer ,%val date_value)
+;	ASCTIM	(%loc buffer ,%loc time_value)	; /62/
+;	ASSDEV	(%loc device_name)
+;	BINREA	(%val time_out)
+;	BINWRI	(%loc buffer ,%val byte_count)
+;	CANTYP	()
+;	CHKABO	()
+;	CLOSTT	()
+;	DODIR	(%loc directory_string)
+;	EXIT	()
+;	KBREAD	(%loc buffer)
+;	L$NOLF	()
+;	L$PCRL	()
+;	L$TTYO	(%loc buffer ,%val byte_count)
+;	LOGOUT	()
+;	NAMCVT	(%loc source_filename ,%loc returned_normal_name)
+;	OPENTT	()
+;	PRINTM	(%val #_args ,%loc arg_1 ,%loc arg_2 ,... ,%loc arg_n)
+;	SETCC	()
+;	SETSPD	(%val speed)
+;	SUSPEN	(%val seconds ,%val ticks)
+;	SYSERR	(%val error_number ,%loc error_text_buffer)
+;	TTSPEE	()
+;	TTYFIN	()
+;	TTYHAN	()
+;	TTYRST	(%loc terminal_name)
+;	XINIT	()
+
+
+	.include "IN:KRTMAC.MAC"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MAC failed>
+	.include "IN:KRTDEF.MAC"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MAC failed>
+
+; /62/	.FPROT,.SFDAT bypassed for V4, also expanded to allow assy under same
+
+	.MCALL	.CLOSE	,.CMKT	,.CSISPC,.DSTAT	,.ENTER	,.EXIT
+	.MCALL	.FETCH	,.GTIM	,.GTLIN	,.HRESET,.LOOKUP,.MRKT
+	.MCALL	.PURGE	,.RCTRLO,.READW	,.SCCA	,.SPCPS	,.TWAIT
+	.MCALL	.WRITW
+
+
+	.sbttl	I/O database
+
+	LUN.KB	==      0	; the local terminal
+	LUN.IN	==      1	; input file channel
+	LUN.OU	==      2	; output file channel
+	LUN.LO	==      3	; packet and file logging channel
+	LUN.TA	==      4	; TAKE command file channel
+	LUN.AT	==      5	; /BBS/ get/set RT-11 file attributes
+	LUN.SR	==      6	; directory lookup channel
+	LUN.XK	==      7	; comm handler data channel
+	LUN.LD	==     12	; /BBS/ TSX LD assign channel
+
+	NRTQUE	==     16	; /62/ KRT needs 14. queue elements
+	PROT	=  100000	; /BBS/ protected file bit in dir status word
+	TTBSIZ	==     40	; terminal output buffer size
+
+	.psect	$rtque	,rw,d,gbl,rel,con
+rtque::	.blkw	10.*nrtque		; buffers for extra queue elements
+
+; /51/	the IN, OUT, TAKE and LOG file I/O buffers are allocated
+;	by xinit after the initial .settop and swap with the USR
+
+	.psect	rtioda	,rw,d,gbl,rel,con
+;  channel #:	lun.kb	,lun.in	,lun.out,lun.log,lun.take
+blknum::.word	0	,0	,0	,0	,0	; current block number
+buflst::.word	ttbuf	,0	,0	,0	,0	; data I/O buffer addr
+bufsiz::.word	ttbsiz	,maxsiz	,maxsiz	,maxsiz	,maxsiz	; size of buffer
+bufp::	.word	0	,0	,0	,0	,0	; current byte pointer
+bufs::	.word	0	,0	,0	,0	,0	; size (end) of data
+date.a::.word	0	,0	,0	,0	,0	; /BBS/ date attribute
+filtyp::.word	terminal,text	,text	,text	,text	; term, text, bin, dec
+mode::	.word	1	,0	,0	,0	,0	; if <> writing to buf
+prot.a::.word	0	,0	,0	,0	,0	; /BBS/ prot attribute
+sizof::	.word	0	,0	,0	,0	,0	; size of file, blocks
+time.a::.word	0	,0	,0	,0	,0	; /BBS/ time attribute
+
+; special buffers
+status::.word	0			; this is Kermit-11's error status reg
+totp.s::.word	0			; send packet stats buffer address
+totp.r::.word	0			; and same for rec packet stats
+ttbuf::	.blkb	ttbsiz+2		; TT out buffer for writing via lun.kb
+xklgbu::.word	0			; /51/ pointer to handler write buffer
+
+; device and file data
+asname::.blkb	ln$max			; /62/ for GET or SEND file asfile
+bintyp::.word	0			; addr of BINARY-TYPE list in hi mem
+context::.word	0			; /62/ offset into current dir segment
+cstat::	.word	0 ,0 ,0 ,0 ,0 ,0	; /BBS/ .cstat device physical name
+dblk::	.rad50	"   "			; ..getdk puts DK at start-up here
+	.word	0 ,0 ,0			; (unused) file name and extent
+defdir::.blkb	4+2			; /62/ the default directory
+defext:	.word	0 ,0 ,0 ,0		; default extents for .csispc
+dirbfr::.word	0			; /62/ ptr to DIR output to TT buffer
+dirflg::.word	0			; /62/ if <> keep blanks in file name
+dirnam::.word	0			; /62/ ptr to DIR input name buffer
+dkblk::	.rad50	"DK "			; /62/ used to get DK's physical name
+	.word	0 ,0 ,0			; (unused) file name and extent
+dkname::.asciz	"DK:"			; /BBS/ home here (len=4 3bytes+.even)
+	.byte	0 ,0			; /BBS/ leave room for a unit number
+en$siz::.word	0			; file create size, 0=let RT-11 do it
+filnam::.blkb	ln$max			; /62/ output name from dir lookup
+indnam::.blkb	16+2			; /62/ current take or init file name
+ininam::.blkb	16+2			; /62/ init file name for show file
+logfil::.blkb	26+2			; /63/ log file name
+lokdate::.word	0			; /62/ file date from lookup
+loklen::.word	0			; /62/ file length
+lokstat::.word	0			; /62/ file status
+loktime::.word	0			; /62/ TSX+ file create time
+r50out::.word	0 ,0 ,0 ,0		; /BBS/ last output file opened name
+rtwork::.word	0 ,0 ,0 ,0 ,0 ,0 ,0 ,0	; /62/ must be in a non-swapping psect
+sftim:	.byte	lun.at	,146		; /BBS/ TSX set file create time emt
+	.word	r50out			; /BBS/ pointer to out file name
+tim.sf:	.word	0			; /BBS/ put desired time here
+srcnam::.blkb	ln$max			; /62/ in file name as typed by user..
+
+; operating system data
+jobsts::.word	0 ,0 ,0 ,0 ,0 ,0 ,0 ,0	; /51/ from .gtjb
+montyp::.word	0			; /51/ <0 -> SJ,  0 -> FB, >0 -> XM
+rt11up::.word	0			; /62/ RT-11 monitor release level
+rt11ve::.word	0			; /62/ and monitor version number
+tsxsav::.word	0			; /BBS/ if TSX, this contains line #
+tsxver::.word	0			; /BBS/ and this the version number
+vbgexe::.word	0			; /62/ if <> running under VBGEXE
+
+; memory allocation data
+fetpt::	.word	0			; /51/ pointer for the next .fetch
+fetptm::.word	0			; /51/ max address for fetching
+freept::.word	0			; /51/ for the next general allocation
+hilimi::.word	50			; /51/ it's 50 for FB, $limit+2 for XM
+maxtop::.word	0			; /51/ size after .settop
+xmfetp::.word	0			; /51/ base of area for XM fetching
+
+; TSX terminal options
+m.tsxs::.byte	35 ,'Y&137 ,0		; don't echo LF after CR is typed
+m.tsxr::.byte	35 ,'Z&137 ,0		; do echo LF after CR
+limits::.byte	35 ,'D&137 ,3		; /BBS/ kill ^C special handling
+	.byte	35 ,'D&137 ,12		; LF
+	.byte	35 ,'D&137 ,15		; RET
+	.byte	35 ,'D&137 ,17		; ^O
+	.byte	35 ,'D&137 ,22		; ^R
+	.byte	35 ,'D&137 ,24		; ^T
+	.byte	35 ,'D&137 ,25		; ^U
+	.byte	35 ,'D&137 ,33		; ESC
+	.byte	35 ,'D&137 ,177		; DEL
+vl$chr::.byte	35 ,'D&137 ,27		; ^W  here to allow on/off select
+	.byte	35 ,'D&137 ,2		; ^B  and this should track ^W..
+	.byte	0			; null terminator
+vlflag::.byte	0			; /BBS/ ^W local/remote flag..
+	.even
+
+
+	.sbttl	Error mapping, codes are defined in KRTERR.MAC
+
+	.psect	$pdata
+alloer::.word	er$sys	,er$120	,er$121	,er$122	,er$120	,er$123
+atterr::.word	er$sys	,er$124	,er$121	,er$125	,er$126	,er$127	,er$120
+cloerr:	.word	er$sy1	,er$sy1	,er$sys	,er$prv
+csierr::.word	er$fnm	,er$dev	,er$sy2
+drderr::.word	fa$dio	,er$rer	,er$nop	,er$sys	; /BBS/ add for TSX dir errs
+dsterr:	.word	fa$nhd				; /62/
+enterr:	.word	er$lby	,er$ful	,er$sy3	,er$prv	,er$sy3
+faterr::.word	fa$imp	,fa$nhd	,fa$dio	,fa$fet	,fa$ovr	,fa$dfl	,fa$adr
+	.word	fa$lun	,fa$imp	,fa$imp	,fa$imp	,fa$idr	,fa$imp	,fa$imp
+	.word	fa$imp	,fa$imp	,fa$imp	,fa$imp	,fa$dio	; /62/
+feterr:	.word	er$dev	,er$sy4
+lokerr::.word	er$lby	,er$fnf	,er$sys
+mnterr::.word	er$lby	,er$ld1	,er$sys	,er$lby	,er$fnm	,er$ld5	,er$fnf
+	.word	er$ld1				; /BBS/ logical disk errors
+reaerr::.word	er$eof	,er$rer	,er$nop	,er$sys
+renerr::.word	er$lby	,er$fnf	,er$iop	,er$prv
+wrierr:	.word	er$wpe	,er$wer	,er$nop	,er$sys	; /63/
+xcierr::.word	er$lby	,er$xco	,er$sys		; /62/
+
+
+;	.sbttl	Allowable device assignments for the BBS
+;
+;devlst::.ascii	"DU2:"			; /BBS/ table of allowed devices
+;	.ascii	"LD0:"			; /BBS/ fparse will insert missing "0"
+;	.ascii	"LD1:"
+;	.ascii	"LD2:"			; /63/ append trailing blanks to
+;	.ascii	"LD3:"			; /63/ any device name less than
+;	.ascii	"LD4:"			; /63/ 4 characters long, so that
+;	.ascii	"LD5:"			; /63/ its entry here is 4 bytes
+;	.ascii	"LD6:"
+;	.ascii	"LD7:"
+;	.byte	0			; /BBS/ end of it all
+
+
+	.sbttl	Local data
+
+kp.res:	.byte	33 ,'> ,0		; type this out to reset keypad
+	.even
+
+
+	.psect	$code
+	.sbttl	Get KMON command line args and pass to Kermit  ; /BBS/ added
+
+;	G E T M C R		(only used ONCE at start-up)
+;
+;	output:	 (r5)	= command line less the task name, .asciz
+;		  r0	= length of whats left
+
+getmcr::save	<r1,r2,r3>
+	mov	sp	,mcrcmd	; flag to only come here and try this once
+	mov	#510	,r1	; get address of # of bytes in chain area
+	mov	@r1	,r2	; save a copy of number of bytes
+	dec	@r1		; anything there?  (byte count includes null)
+	ble	20$		; nope..
+	clr	(r1)+		; hose location 510 and bump to location 512
+	mov	@r5	,r3	; point at where to put command line
+10$:	movb	(r1)+	,(r3)+	; copy contents of chain area to input buffer
+	bne	10$		; until hitting the null terminator
+	sub	#ln$max+2,sp	; /63/ a temporary buffer on the stack
+	mov	sp	,r0	; point to buffer  must do this to hose KMON's
+	.gtlin	r0		; buffer or args are passed to KMON on exit,
+	add	#ln$max+2,sp	; /63/ generating error msg.. dump temp buffer
+	mov	r2	,r0	; put length where calling routine needs it
+	br	30$
+20$:	mov	@r5	,r0	; address of command string buffer
+	clrb	@r0		; clear it
+	clr	r0		; and return a length of zero
+30$:	unsave	<r3,r2,r1>
+	return
+
+
+	.sbttl	Load a handler if not already resident (BG only)
+
+;	F E T C H
+;
+;	input:	 (r5)	= rad50 device name to fetch
+;		  r0	= if <>, the error code
+
+fetch::	.dstat	#rtwork,r5		; get handler status
+	bcs	40$			; no such handler present
+	tst	rtwork+4		; is this handler resident?
+	bne	10$			; yes
+	tst	jobsts			; no, we must be job zero to be in
+	bne	20$			; the background, else error return
+	mov	fetptmax,-(sp)		; check for space to load it
+	sub	@fetpt	,@sp		; simple to do
+	cmp	rtwork+2,(sp)+		; is there sufficient space?
+	bhi	30$			; no, error and exit
+	.fetch	@fetpt	,r5		; try hard to load the thing
+	bcs	50$			; no way, map the error code please
+	mov	r0	,@fetpt		; update the free pointer and exit
+10$:	clr	r0			; no errors
+	br	80$
+
+20$:	mov	#er$fgf	,r0		; can't fetch if running in FG
+	br	80$
+30$:	mov	#er$fet	,r0		; return no room for the handler
+	br	80$
+40$:	mov	#dsterr	,-(sp)		; map a .dstat error
+	br	60$			; and do it
+50$:	mov	#feterr	,-(sp)		; map a .fetch error
+60$:	movb	@#errbyt,r0		; get the error code
+	bpl	70$			; normal error code here
+	com	r0			; fatal error from .serr
+	mov	#faterr	,(sp)		; map to fatal error message
+70$:	asl	r0			; word offsets
+	add	(sp)+	,r0		; the actual address
+	mov	@r0	,r0		; get it and exit
+80$:	return
+
+
+	.sbttl	Parse file name and fill in with defaults ; /BBS/ all new
+
+;	F P A R S E
+;
+;	input:	  (r5)	= input file name, .asciz
+;		 defdir	= the default directory name string to use
+;	output:	 2(r5)	= expanded file name, .asciz, max len is ln$max bytes
+;		   r0	= if <>, error code
+
+; /BBS/	For the BBS, be sure there is an authorized device in the file spec
+
+fparse::save	<r3,r2,r1>
+	mov	2(r5)	,r2		; output pointer
+	mov	@r5	,r1		; input pointer
+	mov	#er$fnm	,r0		; preset error reg in case
+	cmpb	@r1	,#comma		; a leading comma will do a nfs
+	beq	80$			; open, which is disallowed here
+	cmpb	@r1	,#'D
+	bne	10$			; if it's "DK:"
+	cmpb	1(r1)	,#'K		; then use Kermit's default
+	bne	10$
+	cmpb	2(r1)	,#':		; not the op system's DK !!
+	beq	40$			; it is "DK:" so use defdir
+
+10$:	scan	#':	,r1		; any device name specified?
+	mov	r0	,r3		; save copy whilst testing..
+	beq	50$			; no, so use the defdir
+
+20$:	movb	(r1)+	,(r2)+		; borrow output buff for temp
+	sob	r0	,20$		; copy of dev name to check
+;	cmp	r3	,#3		; is there a unit num here?
+;	bgt	30$			; most likely ya..
+;	movb	#'0	,-(r2)		; no, stick a zero in it, and..
+;	tstb	(r2)+			; ..bump back past it, then..
+;	movb	#':	,(r2)+		; ..replace just zapped colon
+30$:	clrb	@r2			; null terminate
+;x	calls	chkdev	,<2(r5)>	; check for a valid device
+;x	tst	r0			; well?
+;x	bne	80$			; nope..
+	br	70$			; take the whole input string
+
+40$:	add	#3	,r1		; bump past "DK:"
+50$:	mov	#defdir	,r0		; copy in default dir
+60$:	movb	(r0)+	,(r2)+		; one byte at a time
+	bne	60$			; until hitting the null terminator
+	dec	r2			; back up over null
+70$:	copyz	r1	,r2 ,#ln$max-4	; /62/ copy in file name, if any..
+	clr	r0			; success
+80$:	unsave	<r1,r2,r3>
+	return
+
+
+;	.sbttl	Ensure the device called is authorized for access  ; /BBS/
+;
+; /BBS/ if you want access restrictions uncomment the code below,
+;	along with filling in the device list as appropriate, then
+;	uncomment the sho$dv routine in KRTSHO
+;
+;chkdev::save	<r1,r2,r3,r4>
+;	sub	#6	,sp		; allocate a temp buffer for the
+;	mov	sp	,r1		; incoming device and point to it
+;	copyz	@r5	,r1,#5		; dev name has four chars max + null
+;	strlen	r1			; how much is left?
+;	tst	r0			; if nothing..
+;	beq	50$			; nothing to do, error exit
+;	strlen	r1			; get length of device name
+;	mov	#4	,r3		; need result in a reg
+;	sub	r0	,r3		; must be 4 chars or less
+;	beq	20$			; it's exactly 4, on to testing
+;	blt	50$			; it's greater than 4, bail out
+;	mov	r1	,r2		; save copy of pointer
+;	add	r0	,r2		; point to last char
+;10$:	movb	#space	,(r2)+		; space pad
+;	sob	r3	,10$		; until total length is 4
+;	clrb	@r2			; null terminate padded string
+;
+;20$:	mov	#devlst	,r2		; ok, get listhead of device types
+;30$:	mov	r2	,r3		; get next device type address
+;	tstb	@r3			; end of the list?
+;	beq	50$			; if null, then all done
+;	mov	r1	,r4		; not done, get pointer to passed type
+;	cmpb	(r4)+	,(r3)+		; look for match on device type
+;	bne	40$			; not today
+;	cmpb	(r4)+	,(r3)+		; again please
+;	bne	40$			; not bloody likely
+;	cmpb	(R4)+	,(r3)+		; and so on
+;	bne	40$			; you know
+;	cmpb	(r4)+	,(r3)+		; one more time
+;	beq	60$			; a match, success
+;40$:	add	#4	,r2		; get the next one please
+;	br	30$			; no match, try the next one
+;
+;50$:	mov	#fa$idr	,r0		; return access error
+;	br	70$			; and exit
+;60$:	clr	r0			; no error
+;70$:	add	#6	,sp		; pop local buffer
+;	unsave	<r4,r3,r2,r1>
+;	return
+
+
+	.sbttl	Is it wild?	; /BBS/ heavily hacked
+
+iswild::save	<r1>
+	mov	@r5	,r1	; address of string to check
+	scan	#comma	,r1	; /62/ always call a comma delimiter wild
+	tst	r0		; /62/ find one?
+	bne	40$		; /62/ ya..
+
+	tst	dowild		; /63/ EXPLICIT wildcarding enabled?
+	bne	10$		; /63/ no
+	scan	#'*	,r1	; /63/ ya, look for an asterisk
+	tst	r0		; /63/ well?
+	bne	40$		; /63/ found one, call it wild
+	scan	#'%	,r1	; /63/ look for a percent-sign
+	tst	r0		; /63/ well?
+	bne	40$		; /63/ found one, call it wild
+	br	50$		; /63/ no wildcards found, r0 is cleared
+
+10$:	scan	#'.	,r1	; IMPLICIT wildcarding - look for a dot
+	tst	r0		; find one?
+	beq	40$		; no dot implies extent is wild
+	clr	r0		; init as not wild
+20$:	cmpb	@r1	,#'.	; leading dot ala implicit wildcards?
+	beq	40$		; ya, so flag it as wildcarded file_spec
+30$:	tstb	@r1		; is it a null?
+	beq	50$		; ya, done
+	cmpb	@r1	,#'%	; is it a percent sign?
+	beq	40$		; ya, return it's wild
+	cmpb	@r1	,#'*	; is it a star?
+	beq	40$		; ya, return it's wild
+	cmpb	(r1)+	,#':	; also disallow  DU5:.MAC  wildcarding
+	bne	30$		; this isn't that..
+	tstb	@r1		; a null?
+	bne	20$		; and bomb "DU5:" just a device, no file
+40$:	mov	#er$wld	,r0	; return wildcards not supported error
+50$:	unsave	<r1>
+	return
+
+
+	.sbttl	Open a file		; MTB$OP  20-Nov-86 14:56:59  BDN
+	.enabl	lsb
+
+;	C R E A T E	(write to a file)
+;	O P E N		(read from a file)
+;
+;	input:	  (r5)	= address of .asciz file spec
+;		 2(r5)	= logical unit number
+;		 4(r5)	= 0 to .lookup, <> to .enter
+;	output:	   r0	= if <>, error code
+
+create::mov	#1	,r0		; say we want to create
+	br	10$			; and off to common code
+
+open::	clr	r0			; force .lookup for this ept
+10$:	save	<r1,r2,r3,r4,r5>	; /62/ condensed mtb$op into this..
+	mov	r0	,r2		; r2 saved, make it enter/lookup flag
+	mov	(r5)	,r1		; filespec address, .asciz
+	mov	2(r5)	,r4		; /62/ recover the lun to use
+	mov	r4	,r3		; /62/ save a copy of it
+	asl	r4			; word indexing into data table
+	bne	20$			; non-zero lun means disk I/O
+	mov	sp	,mode+0		; zero, implies terminal always
+	clr	bufp+0			; clear this out also
+	clr	r0			; no errors
+	jmp	140$			; /62/ done
+
+20$:	sub	#ln$max+2,sp		; /63/ allocate a buffer for .csispc
+	clr	sizof(r4)		; clear I/O subsystem tables
+	clr	bufp(r4)		; clear buffer pointer out
+	clr	bufs(r4)		; clear data in buffer size out
+	clr	mode(r4)		; assume reading
+	clr	blknum(r4)		; to keep track of current vbn
+	mov	4(r5)	,filtyp(r4)	; /62/ binary or text flag
+	mov	buflst(r4),r0		; /62/ buffer address
+	mov	bufsiz(r4),r5		; /62/ the buffer size
+30$:	clrb	(r0)+			; clear it out
+	sob	r5	,30$		; next please
+	mov	sp	,r5		; point to save area
+40$:	movb	(r1)+	,(r5)+		; copy the file name over now
+	bne	40$			; next please
+	dec	r5			; back up to the null
+	movb	#'=	,(r5)+		; setup dummy input spec for csispc
+	clrb	@r5			; .asciz
+	mov	sp	,r5		; point back to save area
+	mov	#csierr	,r1		; assume CSI error mapping
+	.csispc	r5,#defext,r5		; do it
+	mov	r5	,sp		; restore the stack pointer
+	bcs	110$			; file name parse error
+	call	fetch			; ensure that handlers are loaded
+	tst	r0			; well?
+	bne	130$			; error code is already mapped
+	tst	r2			; .enter this time?
+	bne	70$			; ya..
+	mov	#lokerr	,r1		; .lookup error mapping
+	.lookup	#rtwork,r3,r5		; do it
+	bcs	110$			; it failed
+	mov	r0	,sizof(r4)	; success, return the file's size
+	mov	#-1	,bufp(r4)	; force a disk read on first call
+	call	clr.at			; /BBS/ init attribute words
+	mov	lokdate	,date.a(r4)	; /BBS/ file create date from lookup
+	beq	50$			; /BBS/ nothing there
+	mov	loktime	,time.a(r4)	; /BBS/ lookup's file create time
+50$:	bit	#prot	,lokstat	; /BBS/ protected file?
+	beq	60$			; /BBS/ nope..
+	inc	prot.a(r4)		; /BBS/ ya, set file protection
+60$:	clr	r0			; success
+	br	130$			; done
+
+70$:	tst	2(r5)			; never allow nfs writes to a disk
+	bne	80$			; it's ok
+	mov	#csierr	,r1		; /62/ use CSI error mapping to force
+	br	110$			; /62/ a "bad file name" error return
+80$:	mov	#enterr	,r1		; assume .enter error code mapping
+	mov	10(r5)	,r2		; /63/ "file.nam[siz]" has priority
+	bne	90$			; /63/ if user specified it, that is
+	mov	en$siz	,r2		; did user SET FILE CREATE-SIZE?
+	bne	90$			; yes
+	mov	at$len	,r2		; no, use passed attribute value
+90$:	.enter	#rtwork,r3,r5,r2	; try hard to create the file
+	bcs	110$			; no way
+	clr	en$siz			; /62/ reset on successful file open
+	mov	r0	,sizof(r4)	; /62/ return the created size
+	mov	sp	,mode(r4)	; we are writing today
+	cmp	r3	,#lun.ou	; /BBS/ is this the output file?
+	bne	100$			; /BBS/ no
+	clr	skipfile		; /62/ ya, be sure this is reset
+	mov	r5	,r0		; /BBS/ ptr to current file rad50 name
+	mov	#r50out	,r1		; /BBS/ where to save it
+	mov	(r0)+	,(r1)+		; /BBS/ copy
+	mov	(r0)+	,(r1)+		; /BBS/ the
+	mov	(r0)+	,(r1)+		; /BBS/ file
+	mov	(r0)	,(r1)		; /BBS/ name
+100$:	clr	r0			; success
+	br	130$			; done
+
+110$:	movb	@#errbyt,r0		; get the error code
+	bpl	120$			; normal error
+	com	r0			; hard error code
+	mov	#faterr	,r1		; map into the hard errors
+120$:	asl	r0			; word addressing
+	add	r0	,r1		; get the mapped error
+	call	clr.at			; /BBS/ don't leave anything lingering
+	asr	r4			; recover actual channel number
+	.purge	r4			; ensure the channel is released
+	mov	(r1)	,r0		; copy and exit
+130$:	add	#ln$max+2,sp		; /63/ pop stack
+140$:	unsave	<r5,r4,r3,r2,r1>	; /62/
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Clear attributes
+
+;	input:	  r4	= lun*2 (word indexing)
+
+clr.at:	clr	date.a(r4)		; /BBS/ creation date
+	clr	time.a(r4)		; /BBS/ creation time
+	clr	prot.a(r4)		; /BBS/ protected file
+	return
+
+
+	.sbttl	Preset a file I/O channel to desired block and offset ; /BBS/
+
+;	P R E W I N D
+;
+;	input:	  (r5)	= lun
+;		 2(r5)	= block number
+;		 4(r5)	= byte offset in above block
+
+prewind::save	<r2,r3>
+	mov	@r5	,r2		; channel number please
+	asl	r2			; word indexing
+	mov	2(r5)	,blknum(r2)	; req'd block of the disk file
+	mov	bufsiz(r2),r3		; we need buffer size in words
+	asr	r3			; convert bytes to words
+	.readw	#rtwork,@r5,buflst(r2),r3,blknum(r2) ; read in the block
+	bcs	10$			; it failed, bye
+	inc	blknum(r2)		; next time read the next block
+	mov	4(r5)	,r3		; get a copy of required offset
+	mov	r3	,bufp(r2)	; now preset offset in block
+	asl	r0			; convert words read to bytes
+	sub	r3	,r0		; don't count unused bytes..
+	mov	r0	,bufs(r2)	; save the record size
+10$:	unsave	<r3,r2>
+	return
+
+
+	.sbttl	Reset a file I/O channel to the top	; /63/
+
+;	R E W I N D
+;
+;	input:	  (r5)	= lun
+
+rewind::mov	@r5	,r0		; get the channel number (LUN)
+	beq	10$			; for the terminal, a no-op
+	asl	r0			; word indexing is used here
+	mov	#-1	,bufp(r0)	; flag a buffer reload is needed
+	clr	bufs(r0)		; nothing is in the buffer (size=0)
+	clr	blknum(r0)		; first block of the disk file
+10$:	clr	r0			; no errors are possible
+	return				; bye
+
+
+	.sbttl	Close a file		; /BBS/	merged flush(lun) into this
+
+;	C L O S E
+;
+;	input:	 (r5)	= channel number to close
+;	output:	  r0	= if <>, mapped error code
+
+close::	save	<r4,r2>			; use r4, for calling clr.at
+	cmp	@r5	,#lun.ou	; is it the output file?
+	bne	10$			; nope
+	tst	skipfile		; ya, skipping this one?
+	beq	10$			; no, save it
+	.purge	@r5			; ya, hose it
+	clr	skipfile		; just this one tho
+	br	60$			; then go clean up buffer
+
+10$:	mov	@r5	,r4		; get the internal channel number
+	asl	r4			; word indexing
+	tst	bufp(r4)		; anything in the buffer
+	beq	30$			; no
+	tst	mode(r4)		; writing today?
+	beq	30$			; no
+	tst	r4			; terminal today?
+	bne	20$			; no
+	mov	buflst(r4),r0		; yes, get start of buffer
+	add	bufp(r4),r0		; point to next byte AFTER data
+	clrb	(r0)			; null terminate for wrtall
+	wrtall	buflst(r4)		; dump last buffer of data to TT
+	br	60$			; go finish up
+
+20$:	mov	bufsiz(r4),r2		; buffer is this size
+	asr	r2			; RT-11 likes to have word counts
+	.writw	#rtwork,@r5,buflst(r4),r2,blknum(r4) ; write last buff to disk
+	bcc	30$			; it wuz ok
+	movb	@#errbyt,r0		; it failed, get the error code
+	asl	r0			; word indexing
+	mov	wrierr(r0),r0		; map it into a global error code
+	save	<r0>			; save error
+	.close	@r5			; save what there is of it
+	unsave	<r0>			; restore error
+	br	70$			; and go map it
+
+30$:	mov	@r5	,r4		; channel number
+	beq	60$			; terminal
+	.close	r4			; close the file
+	bcc	40$			; it worked
+	movb	@#errbyt,r0		; it failed, map the error
+	asl	r0			; to something more descriptive
+	mov	cloerr(r0),r0		; simple
+	br	70$			; map the error please
+
+	; /BBS/ this stuff handles passed attributes, such as they are w/RT-11
+40$:	cmp	rt11ver	,#5		; /62/ is this RT-11 V5 or above?
+	blt	60$			; /62/ no, V4 can't .sfdat or .fprot
+	cmp	r4	,#lun.ou	; is it the output file?
+	bne	60$			; nope
+	asl	r4			; word indexing
+	tst	date.a(r4)		; anything there?
+	beq	50$			; no date was passed
+; /62/	.sfdat	#rtwork	,#lun.at,#r50out,date.a(r4) ; set the date
+	MOV	#rtwork	,R0		; /62/ expanded to assemble under V4
+	MOV	#lun.at+<34.*^o400>,@R0	; /62/ even though V4 can't run it
+	MOV	#r50out	,2.(R0)		; /62/
+	MOV	date.a(r4),4.(R0)	; /62/
+	EMT	^o375			; /62/
+	tst	tsxsav			; running under TSX?
+	beq	50$			; no
+	mov	time.a(r4),tim.sf	; load desired time
+	mov	#sftim	,r0		; load set file time emt args
+	emt	375			; do it
+50$:	tst	prot.a(r4)		; protected?
+	beq	60$			; nope..
+; /62/	.fprot	#rtwork	,#lun.at,#r50out,#1 ; ya, set the protection
+	MOV	#rtwork	,R0		; /62/ expanded to assemble under V4
+	MOV	#lun.at+<35.*^o400>,@R0	; /62/ even though V4 can't run it
+	MOV	#r50out	,2.(R0)		; /62/
+	MOVB	#1	,4.(R0)		; /62/
+	EMT	^o375			; /62/
+60$:	clr	r0			; no errors
+
+70$:	mov	@r5	,r4		; restore pointer
+	asl	r4			; word indexing
+	clr	bufp(r4)		; buffer_pointer[lun] := 0
+	clr	sizof(r4)		; no size please
+	call	clr.at			; clean out just used attributes
+	save	<r0>			; /62/ save error
+	.rctrlo				; make sure TT output is on
+	unsave	<r0>			; /62/ restore error
+	unsave	<r2,r4>			; and exit with error in r0
+	return
+
+
+	.sbttl	Get next file to send	; /63/ moved here from KRTPAK
+
+;	G E T N X T
+;
+;	input:	srcnam	= possibly wildcarded file name
+;		index	= 0 if this is the first time through
+;	output:	filnam	= next file to do
+;		 r0	= if <>, error code
+
+getnxt::save	<r1>
+	calls	lookup	,<#srcnam,#filnam> ; /62/
+	tst	r0			; did it work?
+	beq	30$			; yes
+	cmp	r0	,#er$nmf	; no more files matching name?
+	beq	10$			; yes, we are all done then
+	cmp	r0	,#er$fnf	; how about file not found?
+	bne	20$			; no, print the error message out
+10$:	tst	index			; ya, but did any files match yet?
+	bne	30$			; yes, that's ok then
+	mov	#er$fnf	,r0		; no, convert er$nmf to er$fnf
+20$:	mov	r0	,-(sp)		; save lookup error
+	calls	syserr	,<r0,#errtxt>	; get the error text
+	calls	error	,<#3,#errtxt,#aspace,#filnam> ; /62/ include file name
+	.purge	#lun.sr			; /62/ dump search channel
+	mov	(sp)+	,r0		; restore saved error code from lookup
+30$:	unsave	<r1>
+	return
+
+
+	.sbttl	Get one character from a file
+
+;	G E T C
+;
+;	input:	 (r5)	= channel number
+;	output:	  r1	= character just read
+;		  r0	= RMS error status
+
+getc::	mov	@r5	,r0		; channel to use
+	.br	getcr0			; /63/ dispatch to desired routine
+
+
+	.sbttl	Decide where to get the next character	; /63/ was in KRTPAK
+
+;	G E T C R 0			; /38/ 06-Nov-85 11:22:14 BDN
+;	T G E T C R
+;
+;	Passed:	  r0	= lun
+;	Return:	  r0	= if <>, error code (generally er$eof)
+;		  r1	= character just read
+;
+;	GETCR0  is  the lowest level entry point called in Kermit to
+;	obtain the next character for a  send  function  (even  GETC
+;	calls  it),  where  that  may  be a normal file transfer, or
+;	a server extended response.  The main idea in altering it is
+;	so   that   a   server   dispatch  routine  can  change  the
+;	default  (get from a file)  to,  say,  get  from  an  .asciz
+;	string   in   memory   or  switch  to  some  other  kind  of
+;	get_next_character routine.  This requires that  the service
+;	routine  insert  its  get_next_char routine address into the
+;	global  GETCROUTINE  and  also  reset  it when the action is
+;	complete (by use of the textsrc macro sans an argument).
+
+getcr0::tst	getcroutine		; /38/ is there a routine address set?
+	beq	fgetcr0			; /63/ no, default to file reading
+	jmp	@getcroutine		; /63/ goto currently defined routine
+
+tgetcr::tst	tgetaddr		; /38/ have we ever been initted?
+	beq	10$			; /38/ no, return er$eof
+	clr	r1			; /63/   avoid sign extension
+	bisb	@tgetaddr,r1		; /63/ yes, get next character please
+	beq	10$			; /38/ nothing is left to do
+	inc	tgetaddr		; /38/ text_address++
+	clr	r0			; /38/ return(no_error)
+	br	20$
+10$:	mov	#er$eof	,r0		; /38/ return(end_of_file)
+	clr	getcroutine		; /62/ reset to file reading please
+20$:	return
+
+fgetcr0:save	<r3>
+10$:	mov	r0	,r3		; save the channel number please
+	call	.getc			; get the next char please
+	tst	r0			; did the read work?
+	bne	20$			; no, exit
+	asl	r3			; word indexing
+	cmp	filtyp(r3),#text	; if file_type[lun] = text
+	bne	20$			;  then
+	tstb	r1			;   if char = null
+	bne	20$			;    then try_again
+	asr	r3			; get original channel back
+	mov	r3	,r0		; setup the correct call format
+	br	10$
+20$:	unsave	<r3>
+	return
+
+.getc:	save	<r2,r3>
+	mov	r0	,r2		; channel number please
+	mov	r0	,r1		; for the .readw please
+	asl	r2			; word indexing
+	tst	bufs(r2)		; anything in the buffer?
+	beq	10$			; no, please load it
+	cmp	bufp(r2),#-1		; need to initialize the buffer?
+	bne	40$			; no
+10$:	mov	bufsiz(r2),r3		; we need buffer size in words
+	asr	r3			; convert bytes to words
+	.readw	#rtwork,r1,buflst(r2),r3,blknum(r2)
+	bcs	50$			; it failed, bye
+	inc	blknum(r2)		; next time read the next block
+	clr	bufp(r2)		; it worked, clear current pointer
+	asl	r0			; convert words read to bytes
+	mov	r0	,bufs(r2)	; and save the record size
+
+20$:	add	#1	,rdrate+4	; /BBS/ extracted from K11E80.MAC
+	bcs	30$			; overflowed
+	add	r0	,rdrate+2	; count the data
+	adc	rdrate+0		; 32. bits worth
+	bcc	40$			; continue if not overflowed
+30$:	clr	rdrate+0		; overflow, so reset
+	clr	rdrate+2
+	clr	rdrate+4
+	br	20$			; and start over
+
+40$:	mov	buflst(r2),r3		; get the address of the buffer
+	add	bufp(r2),r3		; and point to the next character
+	clr	r1			; to be returned in r1
+	bisb	@r3	,r1		; avoid byte sign extension
+	inc	bufp(r2)		; bufp := succ(bufp)
+	dec	bufs(r2)		; amount_left := pred(amount_left)
+	clr	r0			; no errors please
+	br	60$
+
+50$:	movb	@#errbyt,r0		; get the error code
+	asl	r0			; word indexing
+	mov	reaerr(r0),r0		; map it
+60$:	unsave	<r3,r2>
+	return
+
+
+	.sbttl	Read a record from a sequential file
+
+;	G E T R E C
+;
+;	input:	  (r5)	= address of user buffer
+;		 2(r5)	= channel number
+;		 4(r5)	= buffer length in bytes	; /BBS/ added this..
+;	output:	   r1	= record size
+;		   r0	= RMS status
+;
+;	Read the next record from a disk file, up to 4(r5) bytes
+;	in length.  GETREC assumes text (stream	ascii) file only.
+
+getrec::save	<r2,r3,r4>
+	clr	r4			; recordsize := 0
+	mov	@r5	,r3		; the recordbuffer address
+	mov	4(r5)	,r2		; the recordbuffer size
+	clr	r1			; nothing read as of yet
+
+10$:	cmpb	r1	,#ff		; if char = form_feed
+	beq	20$			; then exit, with it in the buffer
+	mov	2(r5)	,r0		; the channel number (lun) to use
+	call	getcr0			; read the next character now
+	tst	r0			; did it work?
+	bne	40$			; no, reason why is in r0
+	cmpb	r1	,#cr		; if char = return
+	beq	20$			; then exit
+	cmpb	r1	,#'z&37		; if char = ^Z
+	beq	20$			; then exit
+	cmpb	r1	,#lf		; if a line feed
+	beq	10$			; ignore it
+	inc	r4			; length := succ(length)
+	movb	r1	,(r3)+		; yes, stuff the char in
+	sob	r2	,10$		; up until maxrec size
+	mov	#er$rtb	,r0		; error, record too big for buffer
+	br	40$
+
+20$:	cmpb	r1	,#'z&37		; record terminators come here
+	bne	30$			; it's not ^Z
+	mov	#er$eof	,r0		; ^Z means end of file
+	clr	r1			; say no data are there at all
+	br	40$
+30$:	mov	r4	,r1		; return the record length
+40$:	unsave	<r4,r3,r2>
+	return
+
+
+	.sbttl	Put a single character to a file
+
+;	P U T C
+;
+;	input:	  (r5)	= character to put
+;		 2(r5)	= channel number to use
+;
+;	Buffer single character I/O to internal disk buffer or terminal.
+;	Buffer is allocated by CREATE and dumped to disk when it becomes full.
+
+putc::	save	<r1>			; simply save r1 and call putcr0
+	mov	2(r5)	,r1		; putcr0 will be somewhat faster
+	clr	r0			; to call directly due to the
+	bisb	@r5	,r0		; overhead involved in setting
+	call	putcr0			; up an argument list
+	unsave	<r1>
+	return
+
+putcr0::save	<r1,r2,r3,r4>		; r0 = input_char, r1 = lun
+	mov	r1	,r2		; channel number
+	asl	r2			; word indexing
+	cmp	bufp(r2),bufsiz(r2)	; is the buffer full?
+	blo	50$			; no, store this char in it
+	movb	r0	,r3		; yes, save a copy of the input char
+	mov	bufsiz(r2),r4		; and setup for a .writw
+	asr	r4			; RT-11 needs word not byte count
+	tst	r1			; channel zero is always terminal
+	beq	10$			; simple
+	cmp	filtyp(r2),#terminal	; check for being a terminal today?
+	bne	20$			; not a terminal
+10$:	mov	buflst(r2),r0		; a terminal, get start of buffer
+	add	bufsiz(r2),r0		; point to next byte AFTER data
+	clrb	(r0)			; null terminate for wrtall
+	wrtall	buflst(r2)		; dump buffer to TT
+	br	30$			; and reinit the buffer now
+20$:	.writw	#rtwork,r1,buflst(r2),r4,blknum(r2) ; dump this block to disk
+	bcs	60$			; it failed for some reason
+30$:	inc	blknum(r2)		; next time do next block
+	clr	bufp(r2)		; pointer := 0
+	mov	buflst(r2),r4		; it worked, zero the buffer now
+	mov	bufsiz(r2),r0		; get the buffer address and size
+40$:	clrb	(r4)+			; for i := 1 to bufsiz
+	sob	r0	,40$		;   do buffer[i] := char(0)
+	movb	r3	,r0		; ok, now restore the old character
+50$:	mov	bufp(r2),r1		; get the current buffer pointer
+	add	buflst(r2),r1		; and point to a new home for the
+	movb	r0	,@r1		; the input character is in r0
+	inc	bufp(r2)		; pointer := succ(pointer)
+	clr	r0			; success
+	br	70$
+
+60$:	movb	@#errbyt,r0		; get the error code
+	asl	r0			; word indexing
+	mov	wrierr(r0),r0		; map it
+70$:	unsave	<r4,r3,r2,r1>
+	return
+
+
+	.sbttl	Put a record to a sequential file
+
+;	P U T R E C
+;
+;	input:	  (r5)	= address of user buffer
+;		 2(r5)	= record size
+;		 4(r5)	= channel number
+;	output:	   r0	= RMS error status
+;
+;	assumes:    the record written will have a CR/LF appended unless
+;		    the file type is not text or if writing to a terminal
+
+putrec::save	<r1,r2,r3>
+	mov	2(r5)	,r2		; the size of the I/O
+	mov	@r5	,r3		; the buffer address
+	mov	4(r5)	,r1		; the channel number please
+	bne	10$			; it's a real disk file
+
+	tst	r2			; faking output to a terminal
+	beq	40$			; nothing to do
+	mov	r3	,r0		; get start of buffer
+	add	r2	,r0		; point to next byte AFTER data
+	clrb	(r0)			; null terminate for wrtall
+	wrtall	r3			; dump buffer to TT
+	clr	r0			; no error
+	br	40$
+
+10$:	tst	r2			; the size of the I/O to do
+	beq	30$			; nothing to do, add carriage control
+
+20$:	clr	r0			; avoid sign extension
+	bisb	(r3)+	,r0		; the character to write out
+	call	putcr0			; channel is passed in r1
+	tst	r0			; did the write fail?
+	bne	40$			; yes, exit asap
+	sob	r2	,20$		; next char please
+
+30$:	asl	r1			; word indexing
+	cmp	filtyp(r1),#text	; is this a text file?
+	bne	40$			; no, don't add carriage control in
+	asr	r1			; get the channel number back
+	mov	#cr	,r0		; and tag with a newline
+	call	putcr0			; simple
+	tst	r0			; /62/ did the write fail?
+	bne	40$			; /62/ yes, exit asap
+	mov	#lf	,r0		; and at last the line feed
+	call	putcr0			; /62/ error here falls thru anyway..
+40$:	unsave	<r3,r2,r1>
+	return
+
+
+	.sbttl	Suspend the mainline program	; /62/ cleaned up..
+
+suspen::save	<r2,r1>
+	clr	r0			; start with no error in case no wait
+	mov	@r5	,r1		; sleep time in seconds
+	beq	10$			; nothing, must be fractional
+	mul	clkflg	,r1		; don't forget 50Hz users..
+	br	20$			; ignore the fractional part
+10$:	mov	2(r5)	,r1		; sleep < 1 second?
+	beq	60$			; no wait, skip looping..
+20$:	mov	#1	,-(sp)		; wait just one tick per loop
+	clr	-(sp)			; clear hi word of wait time
+	mov	sp	,r2		; point to it
+30$:	.twait	#rtwork,r2		; do the wait one tick at a time..
+	bcs	40$			; (the wait failed)
+	sob	r1	,30$		; ..^C can only abort between ticks!
+	clr	r0			; return success
+	br	50$
+40$:	mov	#er$que	,r0		; only error possible
+50$:	cmp	(sp)+	,(sp)+		; pop twait time buffer
+60$:	unsave	<r1,r2>
+	return
+
+
+	.sbttl	Reset the keypad	; /BBS/ added
+
+kp.clr::wrtall	#kp.res			; dump reset string to terminal
+	return
+
+
+	.sbttl	Logout
+
+logout::tst	tsxsav			; /45/ does this make sense?
+	beq	exit			; /BBS/ not really, so just exit
+	mov	#510	,r0		; /45/ address of chain command
+	mov	#4	,(r0)+		; /45/ number of bytes (inc. null)
+	movb	#'B&137	,(r0)+		; /45/ then insert BYE
+	movb	#'Y&137	,(r0)+		; /45/  ...
+	movb	#'E&137	,(r0)+		; /45/   ...
+	clrb	(r0)			; /45/ make it .asciz please
+	bis	#4000	,@#jsw		; /45/ pass to KMON
+	clr	r0			; /45/ must be zero
+	.exit				; /45/ try to logout on TSX+
+
+
+	.sbttl	Exit to KMON
+
+exit::	tst	sl.on			; is SL on?
+	beq	10$			; no
+	tst	sl.ked			; ya, but is it in KED mode?
+	beq	10$			; no
+	call	kp.clr			; ya, reset the keypad
+10$:	mov	#cr	,r0		; return here to kill newline for
+	call	writ1char		; an unterminated line by hreset..
+	.hreset				; MUST DO to dump the comm handler
+	clr	r0			; do a hard .exit
+	.exit				; bye..
+
+
+	.sbttl	Control C AST
+
+	.save
+	.psect	sccada	,rw,d,lcl,rel,con
+sccwork:.word	0 ,0			; /51/ .scca work area
+ccflag::.word	0			; /51/ ^C flag
+mkw:	.word	0 ,0 ,0 ,0		; /51/ mark time work area
+mktime:	.word	0 ,15.			; /51/ check for ^C every 15 ticks
+spcwork:.word	0 ,0			; /51/ for the .spcps directive
+spcarg:	.word	cmdloop ,0 ,0		; /51/ where to alter flow
+
+	.psect	sccain	,ro,i,lcl,rel,con
+setcc::	clr	ccflag			; /51/ no ^C as of yet
+	clr	cc$max			; init what_to_do register
+	.cmkt	#mkw	,#40		; /51/ clear previous mark time
+	.scca	#sccwork,#ccflag	; /51/ set the address for flag word
+	.mrkt	#mkw,#mktime,#ccast,#40 ; /51/ schedule a checkup for ^C
+	return
+
+ccast:	tst	ccflag			; /51/ was there a ^C typed?
+	beq	20$			; /62/ no, just reschedule
+	clr	ccflag			; /51/ clear the flag
+	inc	cccnt			; /51/ bump the global ^C count
+	cmp	cccnt	,cc$max		; try to abort nicely first?
+	bge	10$			; no, bail out then..
+	mov	#bell	,r0		; ya, load a bell
+	emt	341			; ring it, if possible..
+	clc				; ignore errors here and
+	br	20$			; go wait for program to abort
+
+10$:	.spcps	#spcwork,#spcarg	; /51/ get RT-11 to jump to spcarg
+	bcc	30$			; /51/ success
+	jmp	exit			; failure
+20$:	.mrkt	#mkw,#mktime,#ccast,#40 ; /51/ reschedule ^C timed watch
+30$:	return
+
+	.restore
+
+
+	.sbttl	Main error handler	; /BBS/ somewhat modified
+
+; /BBS/ moved this to the root, so it can be called from anywhere,
+;	as it is now the entire program's error handler.. 4-Jan-91
+
+direr$::mov	r0	,-(sp)		; don't destroy r0
+	mov	4(sp)	,r0		; recover error code
+	beq	30$			; error 0 is a nop
+	calls	syserr	,<r0,#errtxt>	; get appropriate error message
+	tst	cmdlun			; indirect command file running?
+	beq	10$			; nope..
+	mov	r0	,tk.err		; ya, flag and save the error
+	br	30$			; it will be dumped at readcmd
+10$:	tst	logini			; need a newline?
+	beq	20$			; no
+	.newline			; ya
+20$:	wrtall	#errtxt			; dump the err msg
+	.newline
+	clr	logini			; now on a new line
+30$:	mov	(sp)+	,r0		; restore r0 to as when entering this
+	mov	@sp	,2(sp)		; fix up the stack here, saving many
+	tst	(sp)+			; words by not doing this in the macro
+	return
+
+
+	.sbttl	Increment status	; /BBS/ added this
+
+;	This kludge is provided because RT-11XM for some reason loses
+;	track of the status word's address, even when it's kept in the
+;	root, after calling c$dial results in a failed call four times.
+;	Then, it writes into RMON, trashing it and crashing everything.
+
+;	This is NOT any problem under TSX-Plus..   Billy Y.  24-Apr-91
+
+incsts::inc	status
+	return
+
+	.end

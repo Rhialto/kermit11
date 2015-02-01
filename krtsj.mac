@@ -1,0 +1,25 @@
+	.title	KRTSJ	Kermit-11 root module for RT-11FB,SB,SJ or TSX-Plus
+	.ident	"V03.63"
+
+; /63/  27-Sep-97  Billy Youdelman  V03.63
+;
+;	for LOW MEMORY OVERLAYS
+
+xmflow	== 0				   ; dummies for XM stuff
+xmftop	== 0				   ; unused in this version
+
+	.ASECT				   ; /62/ support SET RUN VBGEXE
+. = 4					   ; /62/ $JSX job definition word
+	.word	200			   ; /62/ set the VBGEXE$ bit
+
+	.psect	$RTQUE	,rw,d,gbl,rel,con
+	.psect	RTDIR	,rw,d,gbl,rel,con  ; /BBS/ force into root
+	.psect	IMGTYPE	,ro,d,lcl,rel,con
+imgtyp::.word	0			   ; /62/ flag it's SJ/FB image
+$limit::.limit				   ; /62/ here to match KRTXM..
+	.psect	USERMD	,rw,d,gbl,rel,con
+	.psect	FBSTART	,ro,i,lcl,rel,con
+
+fbstart::jmp	kermit			   ; force transfer address here
+
+	.end	fbstart

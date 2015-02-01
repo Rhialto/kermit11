@@ -1,0 +1,681 @@
+	.title	KRTRMS.MIN  RT-11 file I/O
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1984,1986 Change Software, Inc.
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+	.include "IN:KRTDEF.MIN"
+	.iif ndf  MSG$DA  .error	<; .include for IN:KRTDEF.MIN failed>
+
+	.MCALL	.CLOSE	,.CSISPC,.DSTAT	,.ENTER	,.EXIT	,.GTLIN
+	.MCALL	.LOOKUP,.PURGE	,.RCTRLO,.READW	,.WRITW
+
+	.sbttl	I/O database
+
+	LUN.KB	== 0
+	LUN.IN	== 1
+	LUN.OU	== 2
+	LUN.LO	== 3
+	LUN.TA	== 4
+	LUN.AT	== 5
+	LUN.SR	== 6
+	NRTQUE	== 10
+	PROT	=  100000
+	TTBSIZ	== 40
+
+	.psect	$rtque	,rw,d,gbl,rel,con
+rtque::	.blkw	10.*nrtque
+
+	.psect	rtioda	,rw,d,gbl,rel,con
+blknum::.word	0	,0	,0	,0	,0
+buflst::.word	ttbuf	,0	,0	,0	,0
+bufsiz::.word	ttbsiz	,maxsiz	,maxsiz	,maxsiz	,maxsiz
+bufp::	.word	0	,0	,0	,0	,0
+bufs::	.word	0	,0	,0	,0	,0
+date.a::.word	0	,0	,0	,0	,0
+filtyp::.word	terminal,text	,text	,text	,text
+mode::	.word	1	,0	,0	,0	,0
+prot.a::.word	0	,0	,0	,0	,0
+sizof::	.word	0	,0	,0	,0	,0
+
+status::.word	0
+totp.s::.word	0
+totp.r::.word	0
+ttbuf::	.blkb	ttbsiz+2
+
+asname::.blkb	ln$max
+bintyp::.word	0
+context::.word	0
+cstat::	.word	0 ,0 ,0 ,0 ,0 ,0
+dblk::	.rad50	"   "
+	.word	0 ,0 ,0
+defdir::.blkb	4+2
+defext:	.word	0 ,0 ,0 ,0
+dirbfr::.word	0
+dirflg::.word	0
+dirnam::.word	0
+dkblk::	.rad50	"DK "
+	.word	0 ,0 ,0
+dkname::.asciz	"DK:"
+	.byte	0 ,0
+en$siz::.word	0
+filnam::.blkb	ln$max
+indnam::.blkb	16+2
+ininam::.blkb	16+2
+logfil::.blkb	16+2
+lokdate::.word	0
+loklen::.word	0
+lokstat::.word	0
+r50out:	.word	0 ,0 ,0 ,0
+rtwork::.word	0 ,0 ,0 ,0 ,0 ,0 ,0 ,0
+srcnam::.blkb	ln$max
+
+freept::.word	0
+hilimi::.word	50
+maxtop::.word	0
+rt11ve::.word	0
+
+
+	.sbttl	Error mapping, codes are defined in KRTERR.MIN
+
+	.psect	$pdata
+cloerr::.word	er$sy1	,er$sy1	,er$sys	,er$prv
+csierr::.word	er$fnm	,er$dev	,er$sy2
+drderr::.word	fa$dio	,er$rer	,er$nop	,er$sys
+dsterr::.word	fa$nhd
+enterr::.word	er$lby	,er$ful	,er$sy3	,er$prv	,er$sy3
+faterr::.word	fa$imp	,fa$nhd	,fa$dio	,er$sys	,fa$ovr	,fa$dfl	,fa$adr
+	.word	fa$lun	,fa$imp	,fa$imp	,fa$imp	,er$sys	,fa$imp	,fa$imp
+	.word	fa$imp	,fa$imp	,fa$imp	,fa$imp	,fa$dio
+lokerr::.word	er$lby	,er$fnf	,er$sys
+reaerr::.word	er$eof	,er$rer	,er$nop	,er$sys
+renerr::.word	er$lby	,er$fnf	,er$iop	,er$prv
+wrierr::.word	er$eof	,er$wer	,er$nop	,er$sys
+
+
+	.sbttl	Get KMON command line args and pass to Kermit
+
+getmcr::save	<r1,r2,r3>
+	mov	sp	,mcrcmd
+	mov	#510	,r1
+	mov	@r1	,r2
+	dec	@r1
+	ble	40$
+	clr	(r1)+
+	mov	@r5	,r3
+3401$:	movb	(r1)+	,(r3)+
+	bne	3401$
+	sub	#82.	,sp
+	mov	sp	,r0
+	.gtlin	r0
+	add	#82.	,sp
+	mov	r2	,r0
+	br	90$
+40$:	mov	@r5	,r0
+	clrb	@r0
+	clr	r0
+90$:	unsave	<r3,r2,r1>
+	return
+
+
+	.sbttl	Not really fetch, just check in this version..
+
+fetch::	.dstat	#rtwork,r5
+	bcs	70$
+	tst	rtwork+4
+	bne	50$
+	mov	#er$dev	,r0
+	br	100$
+50$:	clr	r0
+	br	100$
+
+70$:	mov	#dsterr	,-(sp)
+	movb	@#errbyt,r0
+	bpl	95$
+	com	r0
+	mov	#faterr	,(sp)
+95$:	asl	r0
+	add	(sp)+	,r0
+	mov	@r0	,r0
+100$:	return
+
+
+	.sbttl	Parse file name and fill in with defaults
+
+fparse::save	<r3,r2,r1>
+	mov	2(r5)	,r2
+	mov	@r5	,r1
+	mov	#er$fnm	,r0
+	cmpb	@r1	,#comma
+	beq	100$
+	cmpb	@r1	,#'D
+	bne	1$
+	cmpb	1(r1)	,#'K
+	bne	1$
+	cmpb	2(r1)	,#':
+	beq	5$
+
+1$:	scan	#':	,r1
+	mov	r0	,r3
+	beq	7$
+
+3$:	movb	(r1)+	,(r2)+
+	sob	r0	,3$
+	clrb	@r2
+	br	20$
+
+5$:	add	#3	,r1
+7$:	mov	#defdir	,r0
+10$:	movb	(r0)+	,(r2)+
+	bne	10$
+	dec	r2
+20$:	copyz	r1	,r2 ,#ln$max-4
+	clr	r0
+100$:	unsave	<r1,r2,r3>
+	return
+
+
+	.sbttl	Is it wild?
+
+iswild::save	<r1>
+	mov	@r5	,r1
+	scan	#comma	,r1
+	tst	r0
+	bne	90$
+	scan	#'.	,r1
+	tst	r0
+	beq	90$
+	clr	r0
+5$:	cmpb	@r1	,#'.
+	beq	90$
+10$:	tstb	@r1
+	beq	100$
+	cmpb	@r1	,#'%
+	beq	90$
+	cmpb	@r1	,#'*
+	beq	90$
+	cmpb	(r1)+	,#':
+	bne	10$
+	tstb	@r1
+	bne	5$
+90$:	mov	#er$wld	,r0
+100$:	unsave	<r1>
+	return
+
+
+	.psect	$code
+	.sbttl	Open a file
+	.enabl	lsb
+
+create::mov	#1	,r0
+	br	1$
+
+open::	clr	r0
+1$:	save	<r1,r2,r3,r4,r5>
+	mov	r0	,r2
+	mov	(r5)	,r1
+	mov	2(r5)	,r4
+	mov	r4	,r3
+	asl	r4
+	bne	10$
+	mov	sp	,mode+0
+	clr	bufp+0
+	clr	r0
+	jmp	110$
+
+10$:	sub	#40.*2	,sp
+	clr	sizof(r4)
+	clr	bufp(r4)
+	clr	bufs(r4)
+	clr	mode(r4)
+	clr	blknum(r4)
+	mov	4(r5)	,filtyp(r4)
+	mov	buflst(r4),r0
+	mov	bufsiz(r4),r5
+20$:	clrb	(r0)+
+	sob	r5	,20$
+	mov	sp	,r5
+30$:	movb	(r1)+	,(r5)+
+	bne	30$
+	dec	r5
+	movb	#'=	,(r5)+
+	clrb	@r5
+	mov	sp	,r5
+	mov	#csierr	,r1
+	.csispc	r5,#defext,r5
+	mov	r5	,sp
+	bcs	80$
+40$:	call	fetch
+	tst	r0
+	bne	100$
+	tst	r2
+	bne	50$
+
+45$:	mov	#lokerr	,r1
+	.lookup	#rtwork,r3,r5
+	bcs	80$
+	mov	r0	,sizof(r4)
+	mov	#-1	,bufp(r4)
+	call	clr.at
+	mov	lokdate	,date.a(r4)
+	bit	#prot	,lokstat
+	beq	49$
+	inc	prot.a(r4)
+49$:	clr	r0
+	br	100$
+
+50$:	tst	2(r5)
+	bne	60$
+	mov	#csierr	,r1
+	br	80$
+60$:	mov	#enterr	,r1
+	mov	en$siz	,r2
+	bne	70$
+	mov	at$len	,r2
+70$:	.enter	#rtwork,r3,r5,r2
+	bcs	80$
+	clr	en$siz
+	mov	r0	,sizof(r4)
+	mov	sp	,mode(r4)
+	cmp	r3	,#lun.ou
+	bne	77$
+	clr	skipfile
+	mov	r5	,r0
+	mov	#r50out	,r1
+	mov	(r0)+	,(r1)+
+	mov	(r0)+	,(r1)+
+	mov	(r0)+	,(r1)+
+	mov	(r0)	,(r1)
+77$:	clr	r0
+	br	100$
+
+80$:	movb	@#errbyt,r0
+	bpl	90$
+	com	r0
+	mov	#faterr	,r1
+90$:	asl	r0
+	add	r0	,r1
+	call	clr.at
+	asr	r4
+	.purge	r4
+	mov	(r1)	,r0
+100$:	add	#40.*2	,sp
+110$:	unsave	<r5,r4,r3,r2,r1>
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Clear attributes
+
+clr.at:	clr	date.a(r4)
+	clr	prot.a(r4)
+	return
+
+
+	.sbttl	Preset a file I/O channel to desired block and offset
+
+prewind::save	<r2,r3>
+	mov	@r5	,r2
+	asl	r2
+	mov	2(r5)	,blknum(r2)
+	mov	bufsiz(r2),r3
+	asr	r3
+	.readw	#rtwork,@r5,buflst(r2),r3,blknum(r2)
+	bcs	100$
+	inc	blknum(r2)
+	mov	4(r5)	,r3
+	mov	r3	,bufp(r2)
+	asl	r0
+	sub	r3	,r0
+	mov	r0	,bufs(r2)
+100$:	unsave	<r3,r2>
+	return
+
+
+	.sbttl	Set buffer pointers to the top of a file
+
+rewind::mov	@r5	,r0
+	beq	100$
+	asl	r0
+	mov	#-1	,bufp(r0)
+	clr	bufs(r0)
+	clr	blknum(r0)
+100$:	clr	r0
+	return
+
+
+	.sbttl	Close a file
+
+close::	save	<r4,r2>
+	cmp	@r5	,#lun.ou
+	bne	1$
+	tst	skipfile
+	beq	1$
+	.purge	@r5
+	clr	skipfile
+	br	19$
+
+1$:	mov	@r5	,r4
+	asl	r4
+	tst	bufp(r4)
+	beq	7$
+	tst	mode(r4)
+	beq	7$
+	tst	r4
+	bne	3$
+	mov	buflst(r4),r0
+	add	bufp(r4),r0
+	clrb	(r0)
+	wrtall	buflst(r4)
+	br	19$
+
+3$:	mov	bufsiz(r4),r2
+	asr	r2
+	.writw	#rtwork,@r5,buflst(r4),r2,blknum(r4)
+	bcc	7$
+	movb	@#errbyt,r0
+	asl	r0
+	mov	wrierr(r0),r0
+	save	<r0>
+	.close	@r5
+	unsave	<r0>
+	br	20$
+
+7$:	mov	@r5	,r4
+	beq	19$
+	.close	r4
+	bcc	10$
+	movb	@#errbyt,r0
+	asl	r0
+	mov	cloerr(r0),r0
+	br	20$
+
+10$:	cmp	rt11ver	,#5
+	blt	19$
+	cmp	r4	,#lun.ou
+	bne	19$
+	asl	r4
+	tst	date.a(r4)
+	beq	13$
+	MOV	#rtwork	,R0
+	MOV	#lun.at+<34.*^o400>,@R0
+	MOV	#r50out	,2.(R0)
+	MOV	date.a(r4),4.(R0)
+	EMT	^o375
+13$:	tst	prot.a(r4)
+	beq	19$
+	MOV	#rtwork	,R0
+	MOV	#lun.at+<35.*^o400>,@R0
+	MOV	#r50out	,2.(R0)
+	MOVB	#1	,4.(R0)
+	EMT	^o375
+19$:	clr	r0
+
+20$:	mov	@r5	,r4
+	asl	r4
+	clr	bufp(r4)
+	clr	sizof(r4)
+	call	clr.at
+	save	<r0>
+	.rctrlo
+	unsave	<r0>
+	unsave	<r2,r4>
+	return
+
+
+	.sbttl	Get one character from a file
+
+getc::	mov	@r5	,r0
+	jmp	getcr0
+
+fgetcr::save	<r3>
+10$:	mov	r0	,r3
+	call	.getc
+	tst	r0
+	bne	100$
+	asl	r3
+	cmp	filtyp(r3),#text
+	bne	100$
+	tstb	r1
+	bne	100$
+	asr	r3
+	mov	r3	,r0
+	br	10$
+100$:	unsave	<r3>
+	return
+
+.getc:	save	<r2,r3>
+	mov	r0	,r2
+	mov	r0	,r1
+	asl	r2
+	tst	bufs(r2)
+	beq	10$
+	cmp	bufp(r2),#-1
+	bne	20$
+10$:	mov	bufsiz(r2),r3
+	asr	r3
+	.readw	#rtwork,r1,buflst(r2),r3,blknum(r2)
+	bcs	90$
+	inc	blknum(r2)
+	clr	bufp(r2)
+	asl	r0
+	mov	r0	,bufs(r2)
+
+20$:	mov	buflst(r2),r3
+	add	bufp(r2),r3
+	clr	r1
+	bisb	@r3	,r1
+	inc	bufp(r2)
+	dec	bufs(r2)
+	clr	r0
+	br	100$
+
+90$:	movb	@#errbyt,r0
+	asl	r0
+	mov	reaerr(r0),r0
+100$:	unsave	<r3,r2>
+	return
+
+
+	.sbttl	Read a record from a sequential file
+
+getrec::save	<r2,r3,r4>
+	clr	r4
+	mov	@r5	,r3
+	mov	4(r5)	,r2
+	clr	r1
+
+10$:	cmpb	r1	,#ff
+	beq	30$
+	mov	2(r5)	,r0
+	call	getcr0
+	tst	r0
+	bne	100$
+	cmpb	r1	,#cr
+	beq	30$
+	cmpb	r1	,#'z&37
+	beq	30$
+	cmpb	r1	,#lf
+	beq	10$
+	inc	r4
+	movb	r1	,(r3)+
+	sob	r2	,10$
+	mov	#er$rtb	,r0
+	br	100$
+
+30$:	cmpb	r1	,#'z&37
+	bne	40$
+	mov	#er$eof	,r0
+	clr	r1
+	br	100$
+40$:	mov	r4	,r1
+100$:	unsave	<r4,r3,r2>
+	return
+
+
+	.sbttl	Put a single character to a file
+
+putc::	save	<r1>
+	mov	2(r5)	,r1
+	clr	r0
+	bisb	@r5	,r0
+	call	putcr0
+	unsave	<r1>
+	return
+
+putcr0::save	<r1,r2,r3,r4>
+	mov	r1	,r2
+	asl	r2
+	cmp	bufp(r2),bufsiz(r2)
+	blo	20$
+	movb	r0	,r3
+	mov	bufsiz(r2),r4
+	asr	r4
+	tst	r1
+	beq	3$
+	cmp	filtyp(r2),#terminal
+	bne	4$
+3$:	mov	buflst(r2),r0
+	add	bufsiz(r2),r0
+	clrb	(r0)
+	wrtall	buflst(r2)
+	br	5$
+4$:	.writw	#rtwork,r1,buflst(r2),r4,blknum(r2)
+	bcs	90$
+5$:	inc	blknum(r2)
+	clr	bufp(r2)
+	mov	buflst(r2),r4
+	mov	bufsiz(r2),r0
+10$:	clrb	(r4)+
+	sob	r0	,10$
+	movb	r3	,r0
+20$:	mov	bufp(r2),r1
+	add	buflst(r2),r1
+	movb	r0	,@r1
+	inc	bufp(r2)
+	clr	r0
+	br	100$
+
+90$:	movb	@#errbyt,r0
+	asl	r0
+	mov	wrierr(r0),r0
+100$:	unsave	<r4,r3,r2,r1>
+	return
+
+
+	.sbttl	Put a record to a sequential file
+
+putrec::save	<r1,r2,r3>
+	mov	2(r5)	,r2
+	mov	@r5	,r3
+	mov	4(r5)	,r1
+	bne	10$
+
+	tst	r2
+	beq	100$
+	mov	r3	,r0
+	add	r2	,r0
+	clrb	(r0)
+	wrtall	r3
+	clr	r0
+	br	100$
+
+10$:	tst	r2
+	beq	30$
+
+20$:	clr	r0
+	bisb	(r3)+	,r0
+	call	putcr0
+	tst	r0
+	bne	100$
+	sob	r2	,20$
+
+30$:	asl	r1
+	cmp	filtyp(r1),#text
+	bne	100$
+	asr	r1
+	mov	#cr	,r0
+	call	putcr0
+	tst	r0
+	bne	100$
+	mov	#lf	,r0
+	call	putcr0
+100$:	unsave	<r3,r2,r1>
+	return
+
+
+	.sbttl	Suspend the mainline program
+
+suspen::save	<r1>
+	mov	@r5	,r1	; secs to wait arg
+	beq	10$		; no secs passed
+	mul	#60.	,r1	; secs --> ticks
+	br	20$		; ignore passed ticks
+10$:	mov	2(r5)	,r1	; ticks to wait arg
+	beq	100$		; nothing to do..
+20$:	mov	r1	,-(sp)	; ticks into outer loop
+	clr	-(sp)		; init inner loop count
+27$:	mov	#13700/2,(sp)	; this takes 1/60 second with
+29$:	dec	(sp)		; a vaule of 13700 on an 11/44
+	bne	29$		; try 13700/2 for default
+	dec	2(sp)		; end of inner loop
+	bne	27$		; now do the outer loop
+	cmp	(sp)+	,(sp)+	; done
+100$:	unsave	<r1>
+	clr	r0
+	return
+
+
+	.sbttl	Reset the keypad
+
+kp.clr::wrtall	#kp.res
+	return
+
+	.save
+	.psect	$pdata
+kp.res:	.byte	33 ,'> ,0
+	.even
+	.restore
+
+
+	.sbttl	Exit to KMON
+
+exit::	tst	sl.on
+	beq	10$
+	tst	sl.ked
+	beq	10$
+	call	kp.clr
+10$:	mov	#cr	,r0
+	call	writ1char
+	clr	r0
+	.exit
+
+
+	.sbttl	Main error handler
+
+direr$::mov	r0	,-(sp)
+	mov	4(sp)	,r0
+	beq	10$
+	calls	syserr	,<r0,#errtxt>
+	tst	cmdlun
+	beq	1$
+	mov	r0	,tk.err
+	br	10$
+1$:	wrtall	#errtxt
+	.newline
+10$:	mov	(sp)+	,r0
+	mov	@sp	,2(sp)
+	tst	(sp)+
+	return
+
+
+	.sbttl	Increment status
+
+incsts::inc	status
+	return
+
+	.end

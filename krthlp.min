@@ -1,0 +1,740 @@
+	.title  KRTHLP.MIN	31-May-93  13:09:43
+	.ident	"V03.62"
+
+; /62/	31-May-93  Billy Youdelman
+
+;	Copyright 1986 Brian Nelson
+
+	.include "IN:KRTMAC.MIN"
+	.iif ndf  KRTINC  .error	<; .include for IN:KRTMAC.MIN failed>
+
+	.mcall	.RCTRLO
+
+	CVTARG	= C.CRLF ! C.LSPA ! C.SSPA ! C.LCUC ! C.TSPA
+
+
+	.sbttl	Local data
+
+	.psect	$pdata
+bugtxt:	.asciz	"Upgrades"
+dbldash:.asciz	" --"
+fill7:	.byte	cr ,lf ,40 ,40 ,40 ,40 ,40 ,40
+filler:	.byte	40 ,0
+p2lp$:	.asciz	"LP:KRTHLP.OUT"
+ptopic:	.asciz	" Select topic, please: "
+	.even
+sub.0:	.word	sub.2 ,sub.3 ,sub.4
+
+	.psect	$rwdata	,rw,d,lcl,rel,con
+backlev:.word	0
+backup:	.word	0
+hlpbuf:	.blkb	200
+htopic:	.blkb	200
+idxdmp:	.word	0
+prbuff:	.blkb	200
+prmptd:	.word	0
+rmsidx:	.word	0
+sub.2:	.blkb	100
+sub.3:	.blkb	100
+sub.4:	.blkb	100
+subwild:.word	0
+topics:	.word	0 ,0 ,0 ,0 ,0 ,0 ,0 ,0
+topbuf:	.blkb	200
+toplev:	.word	0
+ttbuff:	.blkb	200
+wild:	.word	0
+
+
+	.psect	$code
+	.sbttl	HELP main_loop
+	.enabl	lsb
+
+c$bug::	strcpy	argbuf	,#bugtxt
+	br	c$help
+
+prihlp::tst	outopn
+	beq	1$
+	mov	#er$lby	,r0
+	br	2$
+
+1$:	calls	create	,<#p2lp$,#lun.ou,#text>
+	tst	r0
+	beq	3$
+2$:	direrr	r0
+	return
+
+3$:	mov	sp	,outopn
+	mov	#lun.ou	,xprint
+
+c$help::call	hlpopn
+	tst	r0
+	beq	9$
+	jmp	99$
+
+9$:	upcase	argbuf
+	clr	prmptd
+	clr	subwild
+
+10$:	clr	idxdmp
+	clr	wild
+	clr	topics
+	clrb	prbuff
+	mov	#hlphead,rmsidx
+	mov	argbuf	,r5
+	tstb	@r5
+	beq	60$
+	call	parse
+	call	hfind
+	tst	r0
+	beq	20$
+	dec	r0
+	beq	50$
+	mov	sp	,wild
+20$:	call	hprint
+	br	70$
+
+50$:	message	< Help not found for the requested topic>,cr
+	mov	backup	,rmsidx
+	beq	55$
+	mov	backlev	,toplev
+	clr	backup
+	clr	idxdmp
+	clr	wild
+	br	20$
+55$:	clr	topics
+	clrb	prbuff
+	clrb	hlpbuf
+	mov	#hlphead,rmsidx
+60$:	.newline
+	mov	#'1	,-(sp)
+	call	hindex
+
+70$:	tst	idxdmp
+	beq	99$
+	mov	#prbuff	,r3
+	mov	argbuf	,r4
+	mov	#topics	,r5
+	clrb	@r4
+75$:	mov	(r5)+	,r2
+	beq	80$
+	cmpb	(r2)	,#'*
+	beq	100$
+	strcat	r4	,r2
+	strcat	r4	,#filler
+	br	75$
+80$:	tstb	@r3
+	beq	88$
+	strcat	r3	,#dbldash
+88$:	strcat	r3	,#ptopic
+	clr	subwild
+	.rctrlo
+	.newline
+	calls	readcmd	,<#ttbuff,r3>
+	tst	r0
+	bne	100$
+	calls	cvt$$	,<#ttbuff,r1,#cvtarg>
+	tst	r0
+	beq	99$
+	clrb	ttbuff(r0)
+	cmpb	ttbuff	,#'*
+	bne	89$
+	mov	sp	,subwild
+89$:	strcat	r4	,#ttbuff
+	mov	sp	,prmptd
+	jmp	10$
+
+99$:	clr	r0
+100$:	save	<r0>
+	tst	outopn
+	beq	110$
+	calls	close	,<#lun.ou>
+	clr	outopn
+110$:	clr	xprint
+	calls	close	,<#lun.in>
+	clr	inopn
+	unsave	<r0>
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Parse command line
+
+parse:	save	<r3,r4,r5>
+	mov	#topbuf	,r4
+	mov	#topics	,r3
+	clr	@r3
+
+10$:	tstb	@r5
+	beq	100$
+	cmpb	@r5	,#space
+	bne	15$
+	inc	r5
+	br	10$
+15$:	mov	r4	,(r3)+
+	clr	@r3
+20$:	tstb	@r5
+	beq	30$
+	cmpb	@r5	,#space
+	beq	30$
+	movb	(r5)+	,(r4)+
+	br	20$
+30$:	clrb	(r4)+
+	br	10$
+100$:	unsave	<r5,r4,r3>
+	return
+
+
+	.sbttl	Find the topic in the help file
+
+hfind:	save	<r2,r3,r4,r5>
+	mov	#topics	,r5
+	mov	#'1	,r2
+	clrb	htopic
+	mov	#hlphead,r4
+
+10$:	tst	@r5
+	beq	100$
+	mov	@r4	,r1
+	beq	90$
+	cmpb	@r1	,r2
+	blo	90$
+	bne	80$
+
+	inc	r1
+	inc	r1
+	mov	(r5)	,r3
+	cmpb	(r3)	,#'*
+	beq	85$
+
+50$:	tstb	(r3)
+	beq	70$
+	tstb	(r1)
+	beq	80$
+	movb	(r1)+	,r0
+	cmpb	r0	,#'a!40
+	blo	55$
+	cmpb	r0	,#'z!40
+	bhi	55$
+	bicb	#40	,r0
+55$:	cmpb	(r3)+	,r0
+	beq	50$
+	br	80$
+
+70$:	mov	r2	,backlev
+	mov	r4	,backup
+	inc	r2
+	tst	(r5)+
+	mov	@r4	,r1
+	inc	r1
+	strcat	#htopic	,r1
+	clr	prmptd
+80$:	add	#6	,r4
+	br	10$
+
+85$:	tstb	htopic
+	beq	88$
+	tst	prmptd
+	bne	88$
+	tst	subwild
+	bne	88$
+	save	<r1>
+	mov	backup	,rmsidx
+	mov	backlev	,toplev
+	clr	wild
+	call	hprint
+	.newline
+	mov	sp	,wild
+	unsave	<r1>
+88$:	dec	r1
+	strcpy	#hlpbuf	,r1
+	mov	r2	,toplev
+	mov	#2	,r0
+	br	107$
+
+90$:	mov	#1	,r0
+	mov	#hlphead,rmsidx
+	clr	@r5
+	br	110$
+
+100$:	mov	r2	,toplev
+	dec	toplev
+	clr	r0
+	sub	#6	,r4
+
+107$:	mov	r4	,rmsidx
+	clr	backup
+110$:	unsave	<r5,r4,r3,r2>
+	return
+
+
+	.sbttl	Print help text found by HFIND
+
+hprint:	save	<r2,r3,r4>
+	clrb	sub.2
+	clrb	sub.3
+	clrb	sub.4
+	clr	r2
+	strcpy	#ttbuff	,#htopic
+	strcpy	#prbuff	,r0
+	mov	#hlpbuf	,r4
+	tst	wild
+	beq	29$
+	.newline
+	strcat	#ttbuff	,r4
+	wrtall	r0
+	.newline
+	clrb	(r0)
+
+29$:	call	preset
+	bcc	30$
+9999$:	jmp	100$
+
+30$:	calls	getrec	,<r4,#lun.in,#176>
+	tst	r0
+	bne	9999$
+	clrb	hlpbuf(r1)
+	cmpb	(r4)	,#space
+	blos	60$
+	add	#6	,rmsidx
+	cmpb	(r4)	,toplev
+	blo	90$
+	beq	50$
+	mov	rmsidx	,r3
+	cmpb	(r4)	,r2
+	ble	40$
+	movb	(r4)	,r0
+	sub	#'0+2	,r0
+	blt	37$
+	asl	r0
+	strcpy	sub.0(r0),#errtxt
+
+37$:	movb	(r4)	,r0
+	mov	r0	,-(sp)
+	call	hindex
+	tst	wild
+	beq	80$
+	.newline
+
+40$:	mov	r3	,rmsidx
+	call	preset
+	bcs	100$
+
+50$:	tst	wild
+	beq	90$
+	movb	(r4)	,r0
+	sub	#'0+1	,r0
+	blt	57$
+	beq	51$
+	dec	r0
+	beq	53$
+	dec	r0
+	beq	55$
+	br	57$
+51$:	clrb	sub.2
+53$:	clrb	sub.3
+55$:	clrb	sub.4
+
+57$:	movb	(r4)	,r2
+	clrb	(r4)
+	strcpy	#ttbuff	,#htopic
+	strcat	r0	,#sub.2
+	strcat	r0	,#sub.3
+	strcat	r0	,#sub.4
+	mov	@rmsidx	,r1
+	inc	r1
+	strcat	r0	,r1
+	strcpy	#errtxt	,r1
+
+60$:	tstb	ttbuff
+	beq	70$
+	.newline
+	wrtall	#ttbuff
+	tst	wild
+	bne	69$
+	.newline
+69$:	clrb	ttbuff
+70$:	tstb	(r4)
+	beq	75$
+	wrtall	r4
+75$:	.newline
+	jmp	30$
+
+80$:	mov	#1	,r0
+	br	100$
+90$:	clr	r0
+100$:	unsave	<r4,r3,r2>
+	return
+
+
+	.sbttl	Preset an I/O channel to an exact block and offset
+
+preset:	mov	rmsidx	,r0
+	calls	prewind	,<#lun.in,2(r0),4(r0)>
+	rts	pc
+
+
+	.sbttl	Print index
+	.enabl	lsb
+
+hindex:	save	<r2,r4,r5>
+	mov	sp	,idxdmp
+	clr	-(sp)
+	clr	-(sp)
+	mov	sp	,r5
+	movb	2+<5*2>(sp),2(r5)
+	cmpb	2(r5)	,#'1
+	bhi	10$
+	clrb	hlpbuf
+10$:	message	<    Additional information is available on:>,cr
+	wrtall	#fill7
+	mov	#4	,(r5)
+	mov	rmsidx	,r4
+
+30$:	mov	@r4	,r1
+	beq	305$
+
+	cmpb	@r1	,2(r5)
+	bhi	507$
+	blo	305$
+
+300$:	inc	r1
+	inc	r1
+301$:	strlen	r1
+	mov	r0	,r2
+302$:	sub	#18.	,r2
+	neg	r2
+	bgt	303$
+	neg	r2
+	dec	(r5)
+	bne	302$
+	wrtall	#fill7
+	mov	#4	,(r5)
+	br	301$
+303$:	wrtall	r1
+	dec	(r5)
+	beq	505$
+	mov	#space	,r0
+503$:	call	writ1ch
+	sob	r2	,503$
+	br	507$
+505$:	wrtall	#fill7
+	mov	#4	,(r5)
+507$:	add	#6	,r4
+	br	30$
+
+305$:	cmp	#4	,(r5)
+	beq	88$
+	.newline
+88$:	clr	r0
+
+	mov	r4	,rmsidx
+	cmp	(sp)+	,(sp)+
+	unsave	<r5,r4,r2>
+	mov	(sp)+	,(sp)
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	Open the help file
+	.enabl	lsb
+
+hlpopn:	mov	#rtname	,r3
+20$:	tst	@r3
+	beq	70$
+	calls	fparse	,<@r3,#srcnam>
+	calls	open	,<#srcnam,#lun.in,#text>
+	tst	r0
+	bne	40$
+
+	mov	#hlpbuf	,r4
+	calls	getrec	,<r4,#lun.in,#176>
+	tst	r0
+	bne	35$
+	clrb	hlpbuf(r1)
+	strlen	#hident
+	calls	instr	,<r4,r1,#hident,r0>
+	tst	r0
+	bne	99$
+35$:	message	<?KRTMIN-W->
+	wrtall	#srcnam
+	message	< is an incorrect version>,cr
+39$:	calls	close	,<#lun.in>
+40$:	tst	(r3)+
+	br	20$
+
+70$:	message	<Can't find KRTMIN.HLP on SY or DK>,cr
+	mov	#er$fnf	,r0
+	br	100$
+99$:	mov	sp	,inopn
+	clr	r0
+100$:	return
+
+	.dsabl	lsb
+
+	.save
+	.psect	$pdata
+rtname:	.word	3$ ,4$ ,0
+3$:	.asciz	"SY:KRTMIN.HLP"
+4$:	.asciz	"DK:KRTMIN.HLP"
+	.even
+
+
+	.sbttl	Fake RMS for help text file under RT-11
+
+hident:.asciz	/V03.62-5_min 31-May-93/
+	.even
+
+hlphead:.word	L1$	,0.	,29.
+	.word	L2$	,0.	,309.
+	.word	L3$	,1.	,212.
+	.word	L4$	,6.	,354.
+	.word	L5$	,7.	,69.
+	.word	L6$	,11.	,49.
+	.word	L7$	,11.	,132.
+	.word	L8$	,11.	,394.
+	.word	L9$	,12.	,9.
+	.word	L10$	,12.	,89.
+	.word	L11$	,12.	,317.
+	.word	L12$	,12.	,352.
+	.word	L13$	,13.	,283.
+	.word	L14$	,13.	,488.
+	.word	L15$	,15.	,115.
+	.word	L16$	,16.	,232.
+	.word	L17$	,16.	,378.
+	.word	L18$	,17.	,494.
+	.word	L19$	,18.	,149.
+	.word	L20$	,18.	,502.
+	.word	L21$	,20.	,143.
+	.word	L22$	,23.	,51.
+	.word	L23$	,24.	,462.
+	.word	L24$	,25.	,8.
+	.word	L25$	,25.	,150.
+	.word	L26$	,25.	,185.
+	.word	L27$	,29.	,16.
+	.word	L28$	,29.	,104.
+	.word	L29$	,33.	,89.
+	.word	L30$	,35.	,342.
+	.word	L31$	,36.	,88.
+	.word	L32$	,39.	,195.
+	.word	L33$	,40.	,158.
+	.word	L34$	,41.	,438.
+	.word	L35$	,42.	,369.
+	.word	L36$	,42.	,430.
+	.word	L37$	,42.	,490.
+	.word	L38$	,43.	,68.
+	.word	L39$	,45.	,126.
+	.word	L40$	,45.	,271.
+	.word	L41$	,45.	,410.
+	.word	L42$	,46.	,149.
+	.word	L43$	,46.	,417.
+	.word	L44$	,49.	,46.
+	.word	L45$	,49.	,296.
+	.word	L46$	,50.	,88.
+	.word	L47$	,50.	,316.
+	.word	L48$	,52.	,114.
+	.word	L49$	,53.	,108.
+	.word	L50$	,53.	,426.
+	.word	L51$	,53.	,470.
+	.word	L52$	,54.	,18.
+	.word	L53$	,54.	,290.
+	.word	L54$	,54.	,345.
+	.word	L55$	,55.	,173.
+	.word	L56$	,56.	,346.
+	.word	L57$	,56.	,392.
+	.word	L58$	,56.	,434.
+	.word	L59$	,57.	,93.
+	.word	L60$	,57.	,372.
+	.word	L61$	,57.	,467.
+	.word	L62$	,59.	,64.
+	.word	L63$	,59.	,220.
+	.word	L64$	,59.	,275.
+	.word	L65$	,61.	,58.
+	.word	L66$	,61.	,140.
+	.word	L67$	,61.	,212.
+	.word	L68$	,61.	,284.
+	.word	L69$	,61.	,367.
+	.word	L70$	,63.	,207.
+	.word	L71$	,63.	,347.
+	.word	L72$	,64.	,170.
+	.word	L73$	,64.	,287.
+	.word	L74$	,65.	,296.
+	.word	L75$	,66.	,412.
+	.word	L76$	,67.	,266.
+	.word	L77$	,67.	,476.
+	.word	L78$	,69.	,96.
+	.word	L79$	,69.	,200.
+	.word	L80$	,69.	,275.
+	.word	L81$	,70.	,333.
+	.word	L82$	,71.	,10.
+	.word	L83$	,71.	,217.
+	.word	L84$	,72.	,333.
+	.word	L85$	,73.	,438.
+	.word	L86$	,74.	,18.
+	.word	L87$	,74.	,217.
+	.word	L88$	,74.	,477.
+	.word	L89$	,75.	,242.
+	.word	L90$	,76.	,388.
+	.word	L91$	,76.	,428.
+	.word	L92$	,77.	,147.
+	.word	L93$	,77.	,219.
+	.word	L94$	,77.	,295.
+	.word	L95$	,77.	,376.
+	.word	L96$	,77.	,462.
+	.word	L97$	,78.	,3.
+	.word	L98$	,78.	,44.
+	.word	L99$	,78.	,93.
+	.word	L100$	,78.	,203.
+	.word	L101$	,78.	,317.
+	.word	L102$	,79.	,124.
+	.word	L103$	,79.	,201.
+	.word	L104$	,79.	,267.
+	.word	L105$	,79.	,337.
+	.word	L106$	,79.	,393.
+	.word	L107$	,79.	,469.
+	.word	L108$	,80.	,31.
+	.word	L109$	,80.	,109.
+	.word	L110$	,80.	,159.
+	.word	L111$	,80.	,211.
+	.word	L112$	,80.	,283.
+	.word	L113$	,80.	,370.
+	.word	L114$	,80.	,432.
+	.word	L115$	,80.	,476.
+	.word	L116$	,81.	,34.
+	.word	L117$	,82.	,332.
+	.word	L118$	,84.	,152.
+	.word	L119$	,86.	,86.
+	.word	L120$	,86.	,199.
+	.word	L121$	,86.	,253.
+	.word	L122$	,87.	,184.
+	.word	L123$	,88.	,207.
+	.word	0
+
+L1$:	.asciz	"1 ?"
+L2$:	.asciz	"1 @"
+L3$:	.asciz	"1 ASCII_Set"
+L4$:	.asciz	"1 ASSIGN"
+L5$:	.asciz	"1 Binary_Files"
+L6$:	.asciz	"1 BUG"
+L7$:	.asciz	"1 CD"
+L8$:	.asciz	"1 CLS"
+L9$:	.asciz	"1 CLX"
+L10$:	.asciz	"1 COPY"
+L11$:	.asciz	"1 CWD"
+L12$:	.asciz	"1 Debugging"
+L13$:	.asciz	"1 DELETE"
+L14$:	.asciz	"1 DIRECTORY"
+L15$:	.asciz	"1 EXAMINE"
+L16$:	.asciz	"1 EXIT"
+L17$:	.asciz	"1 HELP"
+L18$:	.asciz	"1 HOME"
+L19$:	.asciz	"1 HPRINT"
+L20$:	.asciz	"1 LOGFILE"
+L21$:	.asciz	"1 Long_Packets"
+L22$:	.asciz	"1 Parity"
+L23$:	.asciz	"1 PRINT"
+L24$:	.asciz	"1 PWD"
+L25$:	.asciz	"1 QUIT"
+L26$:	.asciz	"1 RECEIVE"
+L27$:	.asciz	"1 RENAME"
+L28$:	.asciz	"1 SEND"
+L29$:	.asciz	"1 SERVER"
+L30$:	.asciz	"1 SET"
+L31$:	.asciz	"2 ATTRIBUTES"
+L32$:	.asciz	"2 BINARY_TYPE"
+L33$:	.asciz	"2 BLOCK_CHECK_TYPE"
+L34$:	.asciz	"2 DEBUG"
+L35$:	.asciz	"3 NONE"
+L36$:	.asciz	"3 OFF"
+L37$:	.asciz	"3 ON"
+L38$:	.asciz	"3 PACKET"
+L39$:	.asciz	"3 RAW"
+L40$:	.asciz	"2 DEFAULT"
+L41$:	.asciz	"2 DELAY"
+L42$:	.asciz	"2 END_OF_LINE"
+L43$:	.asciz	"2 FILE_TYPE"
+L44$:	.asciz	"3 ASCII"
+L45$:	.asciz	"3 AUTO"
+L46$:	.asciz	"3 BINARY"
+L47$:	.asciz	"3 CREATE_SIZE"
+L48$:	.asciz	"3 CSI_PARSING"
+L49$:	.asciz	"3 DEC_MULTINATIONAL"
+L50$:	.asciz	"3 FIXED"
+L51$:	.asciz	"3 IMAGE"
+L52$:	.asciz	"3 NOPROTECT"
+L53$:	.asciz	"3 NOREPLACE"
+L54$:	.asciz	"3 NOVOLUME_VERIFY"
+L55$:	.asciz	"3 PROTECT"
+L56$:	.asciz	"3 REPLACE"
+L57$:	.asciz	"3 TEXT"
+L58$:	.asciz	"3 TYPE"
+L59$:	.asciz	"3 VOLUME_VERIFY"
+L60$:	.asciz	"2 HOME"
+L61$:	.asciz	"2 INCOMPLETE_FILE_DISPOSITION"
+L62$:	.asciz	"2 LINE"
+L63$:	.asciz	"2 LOGFILE"
+L64$:	.asciz	"2 LONG_PACKETS"
+L65$:	.asciz	"2 NOATTRIBUTES"
+L66$:	.asciz	"2 NODEBUG"
+L67$:	.asciz	"2 NOLONG_PACKETS"
+L68$:	.asciz	"2 NOREPEAT_QUOTING"
+L69$:	.asciz	"2 PARITY"
+L70$:	.asciz	"2 PAUSE"
+L71$:	.asciz	"2 PROMPT"
+L72$:	.asciz	"2 RECEIVE"
+L73$:	.asciz	"3 PACKET_LENGTH"
+L74$:	.asciz	"3 START_OF_PACKET"
+L75$:	.asciz	"3 TIME_OUT"
+L76$:	.asciz	"2 REPEAT_QUOTING"
+L77$:	.asciz	"2 RETRY"
+L78$:	.asciz	"2 SEND"
+L79$:	.asciz	"3 NOXON"
+L80$:	.asciz	"3 PACKET_LENGTH"
+L81$:	.asciz	"3 PADCHARACTER"
+L82$:	.asciz	"3 PADDING"
+L83$:	.asciz	"3 START_OF_PACKET"
+L84$:	.asciz	"3 TIME_OUT"
+L85$:	.asciz	"3 XON"
+L86$:	.asciz	"2 SERVER"
+L87$:	.asciz	"2 SL"
+L88$:	.asciz	"2 START_OF_PACKET"
+L89$:	.asciz	"2 TERMINAL"
+L90$:	.asciz	"2 TT:"
+L91$:	.asciz	"1 SHOW"
+L92$:	.asciz	"2 ALL"
+L93$:	.asciz	"2 ASSIGNS"
+L94$:	.asciz	"2 ATTRIBUTES"
+L95$:	.asciz	"2 BINARY_TYPE"
+L96$:	.asciz	"2 BLOCK_CHECK_TYPE"
+L97$:	.asciz	"2 DEBUG"
+L98$:	.asciz	"2 DEFAULT"
+L99$:	.asciz	"2 DELAY"
+L100$:	.asciz	"2 FILE_TYPE"
+L101$:	.asciz	"2 INCOMPLETE_FILE_DISPOSITION"
+L102$:	.asciz	"2 LINE"
+L103$:	.asciz	"2 PACKET"
+L104$:	.asciz	"2 PARAMETERS"
+L105$:	.asciz	"2 PARITY"
+L106$:	.asciz	"2 PAUSE"
+L107$:	.asciz	"2 REPEAT_QUOTING"
+L108$:	.asciz	"2 RETRY"
+L109$:	.asciz	"2 SERVER"
+L110$:	.asciz	"2 SL"
+L111$:	.asciz	"2 START_OF_PACKET"
+L112$:	.asciz	"2 TERMINAL"
+L113$:	.asciz	"2 TIME_OUT"
+L114$:	.asciz	"2 TT:"
+L115$:	.asciz	"2 VERSION"
+L116$:	.asciz	"1 SL_Editor"
+L117$:	.asciz	"2 Function_Keys"
+L118$:	.asciz	"2 KED_Mode_Functions"
+L119$:	.asciz	"1 SPACE"
+L120$:	.asciz	"1 STATUS"
+L121$:	.asciz	"1 TAKE"
+L122$:	.asciz	"1 TYPE"
+L123$:	.asciz	"1 Upgrades"
+	.even
+	.restore
+
+	.end
