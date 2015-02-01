@@ -1,7 +1,11 @@
 	.title	k11atr	process attribute packets
-	.ident	/1.0.02/
+	.ident	/1.0.03/
 	.enabl	gbl
 
+;	17-Oct-96  13:29:10 Johnny Billquist
+;				Corrected a bug if attribute packets
+;				was zero length.
+;
 ;	18-Apr-84  11:20:59 Brian Nelson
 ;
 ;	24-Mar-86  12:00:56 BDN	Major revision which has some rather
@@ -220,15 +224,16 @@ sn.cdt:	movb	#'0	,(r4)+		; System dependent data following
 100$:	return				; Exit
 
 
-sn.typ:	movb	#42	,(r4)+		; attribute type
-	movb	#41	,(r4)+		; /49/ Length of what follows
-	movb	#'A&137	,@r4		; assume ascii
-	cmpb	image	,#binary	; already decided that it's binary?
-	bne	10$			; no
-	movb	#'I&137	,@r4		; yes, say it's image mode today
-10$:	clrb	1(r4)			; insure .asciz
-	clr	r0			; flag success and exit
-	return				; bye
+sn.typ: movb    #42     ,(r4)+          ; attribute type
+        movb    #41     ,(r4)+          ; /49/ Length of what follows
+        movb    #'A&137 ,@r4            ; assume ascii
+        cmpb    image   ,#binary        ; already decided that it's binary?
+        bne     10$                     ; no
+        movb    #'B&137 ,@r4            ; yes, say it's BINARY mode today
+10$:    clrb    1(r4)                   ; insure .asciz
+        clr     r0                      ; flag success and exit
+        return                          ; bye
+
 
 
 sn.pr0:	call	getsys			; /59/ Get system type
@@ -293,7 +298,7 @@ r$attr::save	<r1,r2,r3,r4,r5>	; just to be safe
 
 20$:	call	200$			; /49/ Perhaps fix packets from old K11
 	sub	#40	,r1		; /49/ Convert length to integer
-	bmi	90$			; /49/ Again, nothing was there
+	ble	90$			; /49/ Again, nothing was there
 	mov	#curatr	,r2		; /49/ Copy current attribute argument
 40$:	movb	(r5)+	,(r2)+		; /49/ over to a save area now.
 	sob	r1	,40$		; /49/ Next please

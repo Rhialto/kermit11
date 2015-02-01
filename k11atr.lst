@@ -1,0 +1,928 @@
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59
+Table of contents
+
+     2-    1	define macros from IN:K11MAC.MAC
+    13-   31	return the next attribute packet to send
+    14-   72	dispatch routines for sending 'a' packets
+    15-  102	send a copy of the ifab over
+    16-  147	send file type (ascii,binary), protection and size
+    17-  244	dispatch on the type of attribute packet received
+    18-  304	process specific attribute types
+    19-  380	more attribute receive options
+    20-  448	recieve the ifab data for file attributes from another 11
+    21-  519	utility routines
+    22-  572	finish up the update of rms file attributes to output
+    23-  636	Map RSTS protection codes to Files-11 codes and back
+    24-  686	32 bit arithmetic modules from RSX Syslib.olb
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 1
+
+
+      1						.title	k11atr	process attribute packets
+      2						.ident	/1.0.02/
+      3						.enabl	gbl
+      4
+      5					;	18-Apr-84  11:20:59 Brian Nelson
+      6					;
+      7					;	24-Mar-86  12:00:56 BDN	Major revision which has some rather
+      8					;				unpleasant compatibility problems with
+      9					;				older Kermit-11's.
+     10					;
+     11					;	12-Sep-86  10:37:04 BDN Convert for I/D space running
+     12					;
+     13					;	Copyright (C) 1984  Change Software, Inc.
+     14					;
+     15					;
+     16					;	Process attribute packets for RSTS/E and RSX11M/M+
+     17					;
+     18					;	 This module is intended to be placed into an overlay
+     19					;	which MUST be the 'ERROR' cotree as the server, which
+     20					;	is overlayed in the  'UTILTY'  cotree can  indirectly
+     21					;	call the module through the packet control routines.
+     22					;	 This module will also be rather RMS11 dependent.
+     23					;
+     24					;
+     25					;	Get the Kermi-11 common macro definition INCLUDE file
+     26
+     27
+     28
+     29						.if ndf, K11INC
+     30						.ift
+     31						.include	/IN:K11MAC.MAC/
+     32						.endc
+     33
+     34
+     35	000000					.psect	$pdata
+     36
+     37	000000	000110'	000446'	000166'	watt:	.word	sn.sys	,sn.typ	,sn.fab	,sn.pr0	,sn.pr1	,sn.len	,sn.fty
+	000006	000506'	000610'	000616'
+	000014	000306'
+     38					;-	.word	sn.cdt
+     39	000016	000000 				.word	0
+     40	000020	   041 	   042 	   043 	attrty:	.byte	41	,42	,43	,44	,45	,46	,47
+	000023	   044 	   045 	   046
+	000026	   047
+     41	000027	   050 	   051 	   052 		.byte	50	,51	,52	,53	,54	,55	,56
+	000032	   053 	   054 	   055
+	000035	   056
+     42	000036	   057 	   060 	   061 		.byte	57	,60	,61
+     43	000041	   000 				.byte	0
+     44						.even
+     45
+     46	000042	001136'			attrds:	.word	at.$$
+     47	000044	001142'	001436'	001476'		.word	at.len	,at.typ	,at.cre	,at.id	,at.bil	,at.area,at.pas
+	000052	001502'	001506'	001512'
+	000060	001516'
+     48	000062	001522'	001526'	001532'		.word	at.bsiz	,at.acc	,at.enc	,at.dis	,at.pr0	,at.pr1	,at.sys
+	000070	001536'	001550'	001632'
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 1-1
+
+
+	000076	001636'
+     49	000100	001656'	001662'	001232'		.word	at.for	,at.fab	,at.xle
+     50
+     51	000106	   125 	   156 	   153 	badpak:	.asciz	/Unknown attribute packet type /
+	000111	   156 	   157 	   167
+	000114	   156 	   040 	   141
+	000117	   164 	   164 	   162
+	000122	   151 	   142 	   165
+	000125	   164 	   145 	   040
+	000130	   160 	   141 	   143
+	000133	   153 	   145 	   164
+	000136	   040 	   164 	   171
+	000141	   160 	   145 	   040
+	000144	   000
+     52	000145	   077 	   113 	   061 	incomp:	.ascii	/?K11-ATR Protocol bugfix detected. Use/<CR><LF>
+	000150	   061 	   055 	   101
+	000153	   124 	   122 	   040
+	000156	   120 	   162 	   157
+	000161	   164 	   157 	   143
+	000164	   157 	   154 	   040
+	000167	   142 	   165 	   147
+	000172	   146 	   151 	   170
+	000175	   040 	   144 	   145
+	000200	   164 	   145 	   143
+	000203	   164 	   145 	   144
+	000206	   056 	   040 	   125
+	000211	   163 	   145 	   015
+	000214	   012
+     53	000215	   123 	   105 	   124 		.asciz	/SET NOATT and see K11.BWR, K11INS.DOC./<CR><LF>
+	000220	   040 	   116 	   117
+	000223	   101 	   124 	   124
+	000226	   040 	   141 	   156
+	000231	   144 	   040 	   163
+	000234	   145 	   145 	   040
+	000237	   113 	   061 	   061
+	000242	   056 	   102 	   127
+	000245	   122 	   054 	   040
+	000250	   113 	   061 	   061
+	000253	   111 	   116 	   123
+	000256	   056 	   104 	   117
+	000261	   103 	   056 	   015
+	000264	   012 	   000
+     54						.even
+     55
+     56	000000					.psect	tempda	,rw,d,lcl,rel,con
+     57	000000				curatr:	.blkb	200
+     58
+     59	000000					.psect	$code
+     60
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 2
+Return the next attribute packet to send
+
+     62						.sbttl	return the next attribute packet to send
+     63
+     64					;	W $ A T T R
+     65					;
+     66					;	input:	@r5	filename address
+     67					;		2(r5)	lun it's using
+     68					;		4(r5)	output packet address
+     69					;
+     70					;	output:	r0	rms error code, else zero
+     71					;		r1	> 0 the packet length, also come back for more later
+     72					;		r1	= 0 no more packets or else receiver can't handle them
+     73
+     74
+     75	000000				w$attr::save	<r2,r3,r4>		; save registers that we may use here
+     76	000006	132767 	000010 	000011G		bitb	#capa.a	,conpar+p.capas	; the other system handle 'A' packets?
+     77	000014	001425 				beq	90$			; no, exit with 'eof'
+     78	000016	016504 	000004 		10$:	mov	4(r5)	,r4		; point to the packet
+     79	000022	016700 	000000G			mov	atrctx	,r0		; now dispatch on what to send next
+     80	000026	006300 				asl	r0			; simple to do
+     81	000030	005760 	000000'			tst	watt(r0)		; all done ?
+     82	000034	001415 				beq	90$			; yes, just exit then
+     83	000036	004770 	000000'			jsr	pc	,@watt(r0)	; and do it
+     84	000042	005267 	000000G			inc	atrctx			; next time, do the next one in the list
+     85	000046	005700 				tst	r0			; was it possible to do this attr?
+     86	000050	001362 				bne	10$			; no, try the next one then
+     87	000052					strlen	4(r5)			; get the length and return it
+     88	000062	010001 				mov	r0	,r1		; and say that this packet is for real
+     89	000064	005000 				clr	r0			; exit without error
+     90	000066	000404 				br	100$			; bye
+     91
+     92	000070	005000 			90$:	clr	r0			; all done, no more attributes to
+     93	000072	005001 				clr	r1			; send over
+     94	000074	005067 	000000G			clr	atrctx			; init for the next file we send
+     95
+     96	000100				100$:	unsave	<r4,r3,r2>		; pop these and exit
+     97	000106	000207 				return				; bye
+     98
+     99
+    100
+    101
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 3
+Dispatch routines for sending 'a' packets
+
+    103						.sbttl	dispatch routines for sending 'a' packets
+    104						.enabl	lsb
+    105
+    106	000110	004767 	000000G		sn.sys:	call	getsys			; get the system type first
+    107	000114					scan	r0	,#200$		; find out what we are
+    108	000130	005700 				tst	r0			; did it work ?
+    109	000132	001413 				beq	110$			; no
+    110	000134	112724 	000056 			movb	#'.	,(r4)+		; sys id attr packet
+    111	000140	112724 	000042 			movb	#42	,(r4)+		; /49/ Length of whats to follow
+    112	000144	112724 	000104 			movb	#'D&137	,(r4)+		; return the vendor code (DEC)
+    113	000150	116024 	000275'			movb	210$(r0),(r4)+		; and the system type
+    114	000154	105014 				clrb	@r4			; .asciz
+    115	000156	005000 				clr	r0			; say it worked
+    116	000160	000207 				return				; bye
+    117
+    118	000162	010600 			110$:	mov	sp	,r0		; it failed
+    119	000164	000207 				return
+    120
+    121
+    122						.save
+    123	000266					.psect	$PDATA	,D
+    124	000266	   001 	   003 	   004 	200$:	.byte	sy$11m	,sy$ias	,sy$rsts,sy$mpl	,sy$rt	,sy$pos	,0
+	000271	   006 	   007 	   011
+	000274	   000
+    125	000275	   000 			210$:	.byte	0
+    126	000276	   070 	   071 	   101 		.byte	'8	,'9	,'A&137	,'8	,'B&137	,'C&137	,0
+	000301	   070 	   102 	   103
+	000304	   000
+    127						.even
+    128	000166					.restore
+    129						.dsabl	lsb
+    130
+    131
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 4
+Send a copy of the ifab over
+
+    133						.sbttl	send a copy of the ifab over
+    134
+    135
+    136					;	 The routine 'GETATR' takes the directory (or file header) information
+    137					;	regarding the file format from the IFAB allocated  to the FAB for  the
+    138					;	file currently being sent. This data is converted to octal strings and
+    139					;	then sent over as an ATTRIBUTE packet with a type of '0', which is the
+    140					;	type reserved for system specific data.
+    141					;	 The  receiver  KERMIT should ALWAYS get the SYSTEM and EXECUTIVE type
+    142					;	attribute packet first so it can decide whether or not it wants to use
+    143					;	the data being sent.
+    144					;
+    145					;	For instance, the file A.A would have a packet sent over as in below
+    146					;
+    147					; Name .Typ    Size    Prot   Access     Date      Time   Clu  RTS    Pos
+    148					;A     .A         1    < 60> 01-May-84 01-May-84 10:17 AM   4 ...RSX  3493
+    149					; RF:VAR=132 FO:SEQ   USED:1:98       RECSI:46       CC:IMP
+    150					;
+    151					;
+    152					;
+    153					;SPACK -   Length   78   Type  A    Paknum    3
+    154					;0001002 000056 000000 000001 000000 000001 000142 000000 000204 000000 000000
+    155
+    156
+    157
+    158
+    159	000166				sn.fab:	calls	getatr	,<2(r5),#at$fab>; get the ifab stuff now
+    160	000212	005700 				tst	r0			; but did it work?
+    161	000214	100433 				bmi	100$			; no, it crapped out
+    162	000216	112724 	000060 			movb	#'0	,(r4)+		; return sys type attr code
+    163	000222	112724 	000155 			movb	#<13*7>+40,(r4)+	; Length of data to follow.
+    164	000226	010400 				mov	r4	,r0		; fill it with spaces first
+    165	000230	012701 	000115 			mov	#13*7	,r1		; simple
+    166	000234	112720 	000040 		5$:	movb	#40	,(r0)+		;
+    167	000240	077103 				sob	r1	,5$		; next
+    168	000242	012702 	000000G			mov	#at$fab	,r2		; where we store such things
+    169	000246	012700 	000013 			mov	#13	,r0		; number of words to send
+    170	000252				10$:	calls	l$otoa	,<r4,(r2)+>	; do it
+    171	000272	062704 	000007 			add	#7	,r4		; skip over it
+    172	000276	077013 				sob	r0	,10$		; next
+    173	000300	005000 				clr	r0			; say that it worked
+    174	000302	105014 				clrb	@r4			; .asciz
+    175	000304	000207 			100$:	return
+    176
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 5
+Send file type (ascii,binary), protection and size
+
+    178						.sbttl	send file type (ascii,binary), protection and size
+    179
+    180					;	SN.FTY added /52/
+    181
+    182						.enabl	lsb
+    183
+    184	000306	112724 	000060 		sn.fty:	movb	#'0	,(r4)+		; Attribute type (SYS type)
+    185	000312	112724 	000042 			movb	#42	,(r4)+		; Length of data to follow.
+    186	000316	112724 	000042 			movb	#42	,(r4)+		; Sending extended filetype
+    187	000322	016700 	000000G			mov	image	,r0		; Index into it
+    188	000326	116024 	000306'			movb	200$(r0),(r4)+		; Insert it
+    189	000332	105014 				clrb	@r4			; .Asciz
+    190	000334	005000 				clr	r0			; Success
+    191	000336	000207 				return				; Exit
+    192
+    193	000340					.ASSUME	TEXT	EQ	0
+    194	000340					.ASSUME	BINARY	EQ	1
+    195	000340					.ASSUME	DECNAT	EQ	2
+    196
+    197						.save				; Save, start a DATA psect
+    198	000306					.psect	$pdata	,d
+    199	000306	   101 	   111 	   116 	200$:	.byte	'A&137	,'I&137	,'N&137	,'A&137
+	000311	   101
+    200						.even
+    201	000340					.restore			; Pop old psect
+    202						.dsabl	lsb			; And drop local symbol block
+    203
+    204
+    205
+    206	000340	112724 	000060 		sn.cdt:	movb	#'0	,(r4)+		; System dependent data following
+    207	000344	112724 	000071 			movb	#41+<6*4>,(r4)+		; Amount of data to follow
+    208	000350	112724 	000043 			movb	#43	,(r4)+		; Date of creation, 64bit format
+    209	000354					CALLS	getcdt	,<2(r5)>	; Get address of data
+    210	000374	010002 				mov	r0	,r2		; Successful (ie, not RT11)
+    211	000376	001420 				beq	90$			; No
+    212	000400	012703 	000004 			mov	#4	,r3		; Number of words
+    213	000404				10$:	CALLS	l$otoa	,<r4,(r2)+>	; Do it
+    214	000424	062704 	000006 			add	#6	,r4		; Move over
+    215	000430	077313 				sob	r3	,10$		; Next please
+    216	000432	105014 				clrb	@r4			; .ASCIZ
+    217	000434	005000 				clr	r0			; Success
+    218	000436	000402 				br	100$			; Exit
+    219	000440	012700 	177777 		90$:	mov	#-1	,r0		; Failure
+    220	000444	000207 			100$:	return				; Exit
+    221
+    222
+    223	000446	112724 	000042 		sn.typ: movb    #42     ,(r4)+          ; attribute type
+    224	000452	112724 	000041 		        movb    #41     ,(r4)+          ; /49/ Length of what follows
+    225	000456	112714 	000101 		        movb    #'A&137 ,@r4            ; assume ascii
+    226	000462	126727 	000000G	000001 	        cmpb    image   ,#binary        ; already decided that it's binary?
+    227	000470	001002 			        bne     10$                     ; no
+    228	000472	112714 	000102 		        movb    #'B&137 ,@r4            ; yes, say it's BINARY mode today
+    229	000476	105064 	000001 		10$:    clrb    1(r4)                   ; insure .asciz
+    230	000502	005000 			        clr     r0                      ; flag success and exit
+    231	000504	000207 			        return                          ; bye
+    232
+    233
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 5-1
+Send file type (ascii,binary), protection and size
+
+    234
+    235	000506	004767 	000000G		sn.pr0:	call	getsys			; /59/ Get system type
+    236	000512	010046 				mov	r0	,-(sp)		; /59/ Save it
+    237	000514					calls	getpro	,<2(r5)>	; /59/ Get protection for file
+    238	000534	122627 	000004 			cmpb	(sp)+	,#4		; /59/ If RSTS, we want to convert
+    239	000540	001002 				bne	10$			; /59/ to files11 format.
+    240	000542	004767 	002016 			call	tof11			; /59/ Yes, convert
+    241	000546	112724 	000054 		10$:	movb	#54	,(r4)+		; /59/ Sending internal protection
+    242	000552	112724 	000046 			movb	#40+6	,(r4)+		; /59/ Field is six characters
+    243	000556					calls	l$otoa	,<r4,r0>	; /59/ Convert to octal
+    244	000576	062704 	000006 			add	#6	,r4		; /59/ Always leave pointing to end
+    245	000602	105014 				clrb	@r4			; /59/ And make it .asciz
+    246	000604	005000 				clr	r0			; /59/ Success
+    247	000606	000207 				return				; /59/ Exit
+    248
+    249	000610	012700 	177777 		sn.pr1:	mov	#-1	,r0
+    250	000614	000207 				return
+    251
+    252
+    253	000616				sn.len:	calls	getsiz	,<2(r5)>	; get the size of the file please
+    254	000636	005700 				tst	r0			; did this work ?
+    255	000640	001036 				bne	100$			; no
+    256	000642	005201 				inc	r1			; try to accomodate rounding
+    257	000644	006201 				asr	r1			; in 1024 blocks, not 512
+    258	000646	042701 	100000 			bic	#100000	,r1		; insure no sign bits now
+    259	000652	112724 	000041 			movb	#41	,(r4)+		; attribute type (file size)
+    260	000656	112724 	000045 			movb	#45	,(r4)+		; length of the number
+    261	000662					deccvt	r1,r4,#5		; convert to ascii
+    262	000710	012700 	000005 			mov	#5	,r0		; convert leading spaces to '0'
+    263	000714	121427 	000040 		10$:	cmpb	@r4	,#40		; if a space, then make it a '0'
+    264	000720	001002 				bne	20$			; no
+    265	000722	112714 	000060 			movb	#'0	,@r4		; yes, stuff a space in
+    266	000726	005204 			20$:	inc	r4			; next please
+    267	000730	077007 				sob	r0	,10$		; next please
+    268	000732	105014 				clrb	@r4			; insure .asciz
+    269	000734	005000 				clr	r0			; to be safe
+    270	000736	000207 			100$:	return				; bye
+    271
+    272
+    273
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 6
+Dispatch on the type of attribute packet received
+
+    275						.sbttl	dispatch on the type of attribute packet received
+    276	000740					.psect	$code
+    277
+    278					;	R $ A T T R
+    279					;
+    280					;	input:	@r5	the packet address
+    281					;	output:	r0	error code, zero for success
+    282
+    283	000740				r$attr::save	<r1,r2,r3,r4,r5>	; just to be safe
+    284	000752	011505 				mov	@r5	,r5		; /49/ Get packet data address
+    285	000754	112500 			10$:	movb	(r5)+	,r0		; /49/ Attribute type code
+    286	000756	001440 				beq	90$			; /49/ Nothing there ???
+    287	000760	112501 				movb	(r5)+	,r1		; /49/ Get length field next
+    288	000762	001436 				beq	90$			; /49/ Nothing there ?
+    289	000764	120027 	000056 			cmpb	r0	,#'.		; /49/ If this is an OLD kermit-11
+    290	000770	001005 				bne	20$			; /49/ with the invalid packet fmt
+    291	000772	120127 	000104 			cmpb	r1	,#'D&137	; /49/ then we will have to make a
+    292	000776	001002 				bne	20$			; /49/ note of it and try to fix it
+    293	001000	010667 	000000G			mov	sp	,oldatt		; /49/ up.
+    294
+    295	001004				20$:
+    296					;	call	200$			; /49/ Perhaps fix packets from old K11
+    297	001004	162701 	000040 			sub	#40	,r1		; /49/ Convert length to integer
+    298	001010	100423 				bmi	90$			; /49/ Again, nothing was there
+    299	001012	012702 	000000'			mov	#curatr	,r2		; /49/ Copy current attribute argument
+    300	001016	112522 			40$:	movb	(r5)+	,(r2)+		; /49/ over to a save area now.
+    301	001020	077102 				sob	r1	,40$		; /49/ Next please
+    302	001022	105022 				clrb	(r2)+			; /49/ Insure .asciz please
+    303	001024	010546 				mov	r5	,-(sp)		; /49/ Make sure the r5 context saved
+    304	001026					scan	r0	,#attrty	; look for the attribute packet type?
+    305	001042	006300 				asl	r0			; simple to do
+    306	001044	004770 	000042'			jsr	pc	,@attrds(r0)	; process the attribute packet now
+    307	001050	012605 				mov	(sp)+	,r5		; /49/ Restore the R5 context now.
+    308	001052	005700 				tst	r0			; Success
+    309	001054	001737 				beq	10$			; Yes
+    310	001056	000401 				br	100$			; No, exit
+    311	001060	005000 			90$:	clr	r0			; Packet format error or end of data
+    312	001062				100$:	unsave	<r5,r4,r3,r2,r1>	; bye
+    313	001074	000207 				return				; exit
+    314
+    315
+    316	001076	010046 			200$:	mov	r0	,-(sp)		; /49/ Fix bad attribute data up (?)
+    317	001100	120027 	000041 			cmpb	r0	,#41		; /49/ The old (and incorrect) K11's
+    318	001104	001412 				beq	220$			; /49/ did the filesize format ok
+    319	001106	005767 	000000G			tst	oldatt			; /49/ Is this a fubarred old Kermit-11
+    320	001112	001407 				beq	220$			; /49/ No
+    321	001114	005305 				dec	r5			; /49/ Yes, we had been forgetting to
+    322	001116					strlen	r5			; /49/ include the length field before
+    323	001124	010001 				mov	r0	,r1		; /49/ the actual attribute data.
+    324	001126	062701 	000040 			add	#40	,r1		; /49/ Convert to char format.
+    325	001132	012600 			220$:	mov	(sp)+	,r0		; /49/ So backup one char and reset the
+    326	001134	000207 				return				; /49/ Length.
+    327
+    328	001136	005000 			at.$$:	clr	r0			; /49/ Ignore unknown attribute types
+    329	001140	000207 				return				; /49/ Exit
+    330					;-	calls	error	,<#1,#badpak>	; send error back to abort things
+    331					;-	mov	#-1	,r0		; return 'abort'
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 6-1
+Dispatch on the type of attribute packet received
+
+    332					;-	return
+    333
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 7
+Process specific attribute types
+
+    335						.sbttl	process specific attribute types
+    336
+    337
+    338					;	File size in 1024 byte chunks (512 would have been better)
+    339
+    340	001142				at.len:	save	<r1,r2>			; save temps please
+    341	001146	005067 	000000G			clr	at$len			; assume zero
+    342	001152	012702 	000000'			mov	#curatr	,r2		; /49/ Where we saved attributes
+    343	001156	005001 				clr	r1			; init the accumulator
+    344	001160	105712 			10$:	tstb	@r2			; eol ?
+    345	001162	001414 				beq	30$			; yep
+    346	001164	121227 	000040 			cmpb	@r2	,#40		; ignore leading spaces please
+    347	001170	001407 				beq	20$			; yes, a space
+    348	001172	005046 				clr	-(sp)			; get the next digit please
+    349	001174	111216 				movb	@r2	,@sp		; and convert to decimal
+    350	001176	162716 	000060 			sub	#'0	,@sp		; got it
+    351	001202	070127 	000012 			mul	#12	,r1		; shift accum over 10
+    352	001206	062601 				add	(sp)+	,r1		; add in the current digit
+    353	001210	005202 			20$:	inc	r2			; next ch please
+    354	001212	000762 				br	10$			; /49/ Next please
+    355	001214	006301 			30$:	asl	r1			; convert 1024 blocks to 512 blocks
+    356	001216	010167 	000000G			mov	r1	,at$len		; save it please
+    357	001222				100$:	unsave	<r2,r1>			; pop temps and exit
+    358	001226	005000 				clr	r0
+    359	001230	000207 				return
+    360
+    361
+    362					;	Exact size in bytes (type '1')
+    363
+    364	001232				at.xlen:save	<r1,r2,r4,r4,r5>	; /49/ Save temps please
+    365	001244	006301 				asl	r1			; /49/ Convert 1024 blocks to 512 blocks
+    366	001246	005067 	000000G			clr	at$len			; /49/ Assume zero
+    367	001252	012705 	000000'			mov	#curatr	,r5		; /49/ Point to attribute save area
+    368	001256	005003 				clr	r3			; /49/ Init the accumulator
+    369	001260	005002 				clr	r2			; /49/ Double precision please
+    370	001262	105715 			10$:	tstb	@r5			; /49/ Eol ?
+    371	001264	001421 				beq	30$			; /49/ Yep
+    372	001266	121527 	000040 			cmpb	@r5	,#40		; /49/ Ignore leading spaces please
+    373	001272	001414 				beq	20$			; /49/ Yes, a space
+    374	001274	012700 	000012 			mov	#12	,r0		; /49/ Setup for call to $DMUL
+    375	001300	004767 	001316 			call	$dmul			; /49/ Do it please
+    376	001304	010002 				mov	r0	,r2		; /49/ Restore accumulator values now
+    377	001306	010103 				mov	r1	,r3		; /49/ Ditto....
+    378	001310	005046 				clr	-(sp)			; /49/ Get the next digit please
+    379	001312	111516 				movb	@r5	,@sp		; /49/ And convert to decimal
+    380	001314	162716 	000060 			sub	#'0	,@sp		; /49/ Got it
+    381	001320	062603 				add	(sp)+	,r3		; /49/ Add in the current digit
+    382	001322	005502 				adc	r2			; /49/ Add carry bit in also please
+    383	001324	005205 			20$:	inc	r5			; /49/ Next ch please
+    384	001326	000755 				br	10$			; /49/ Next please
+    385	001330	010201 			30$:	mov	r2	,r1		; /49/ Setup for call to $DDIV now
+    386	001332	010302 				mov	r3	,r2		; /49/ Ditto....
+    387	001334	012700 	001000 			mov	#1000	,r0		; /49/ Convert to 512 byte blocks now
+    388	001340	004767 	001314 			call	$ddiv			; /49/ Simple
+    389	001344	010267 	000000G			mov	r2	,at$len		; /49/ Save it please
+    390	001350	005700 				tst	r0			; /49/ Was there a remainder ?
+    391	001352	001402 				beq	40$			; /49/ No, exit
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 7-1
+Process specific attribute types
+
+    392	001354	005267 	000000G			inc	at$len			; /49/ Yes, len++
+    393	001360	004767 	000000G		40$:	call	getsys			; /61/ See if RT11, since a UNIX system
+    394	001364	120027 	000007 			cmpb	r0	,#SY$RT		; /61/ will send the wrong size, ie, RT
+    395	001370	001010 				bne	100$			; /61/ needs CrLf rather than Lf at eol
+    396	001372	016701 	000000G			mov	at$len	,r1		; /61/ So we will add a small fudge
+    397	001376	072127 	177773 			ash	#-5	,r1		; /61/ factor in (len += len/32)
+    398	001402	042701 	174000 			bic	#174000	,r1		; /61/ ...
+    399	001406	060167 	000000G			add	r1	,at$len		; /61/ Tacky, but effective I guess
+    400	001412	016767 	000000G	000000G	100$:	mov	at$len	,at$xlen	; /61/ Save
+    401	001420					unsave	<r5,r4,r3,r2,r1>	; /49/ Pop temps and exit
+    402	001432	005000 				clr	r0
+    403	001434	000207 				return
+    404
+    405
+    406	001436					global	<$ddiv	,$dmul>
+    407	001436					global	<at.xlen>
+    408
+    409
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 8
+More attribute receive options
+
+    411						.sbttl	more attribute receive options
+    412
+    413
+    414	001436	126727 	000000'	000102 	at.typ:	cmpb	curatr	,#'B&137	; 'binary' ?
+    415	001444	001404 				beq	10$			; yes
+    416	001446	126727 	000000'	000111 		cmpb	curatr	,#'I&137	; 'image'  ?
+    417	001454	001006 				bne	100$			; no
+    418	001456	012767 	000001 	000000G	10$:	mov	#binary	,image		; flag for image mode then
+    419	001464	012767 	000001 	000000G		mov	#binary	,at$typ		; save it here also
+    420	001472	005000 			100$:	clr	r0
+    421	001474	000207 				return
+    422
+    423
+    424	001476	005000 			at.cre:	clr	r0
+    425	001500	000207 				return
+    426
+    427	001502	005000 			at.id:	clr	r0
+    428	001504	000207 				return
+    429
+    430	001506	005000 			at.bil:	clr	r0
+    431	001510	000207 				return
+    432
+    433	001512	005000 			at.area:clr	r0
+    434	001514	000207 				return
+    435
+    436	001516	005000 			at.pas:	clr	r0
+    437	001520	000207 				return
+    438
+    439	001522	005000 			at.bsiz:clr	r0
+    440	001524	000207 				return
+    441
+    442	001526	005000 			at.acc:	clr	r0
+    443	001530	000207 				return
+    444
+    445	001532	005000 			at.enc:	clr	r0
+    446	001534	000207 				return
+    447
+    448	001536	116767 	000000'	000000G	at.dis:	movb	curatr	,at$dis
+    449	001544	005000 				clr	r0
+    450	001546	000207 				return
+    451
+    452	001550	004767 	000402 		at.pr0:	call	ispdp			; /59/ Is this another Kermit-11
+    453	001554	005700 				tst	r0			; /59/ sending us protection in
+    454	001556	001423 				beq	100$			; /59/ internal (Files11) format?
+    455	001560	004767 	000000G			call	getsys			; /59/ If it's RSTS, convert from
+    456	001564	010002 				mov	r0	,r2		; /59/ F11 format to RSTS format.
+    457	001566					calls	octval	,<#curatr>	; /59/ Convert from octal string.
+    458	001606	120227 	000004 			cmpb	r2	,#4		; /59/ Is it RSTS ?
+    459	001612	001003 				bne	10$			; /59/ No, can use as is
+    460	001614	010100 				mov	r1	,r0		; /59/ We are running on a RSTS
+    461	001616	004767 	000702 			call	torsts			; /59/ system, convert it.
+    462	001622	010167 	000000G		10$:	mov	r1	,at$pr0		; /59/ Save the protection.
+    463	001626	005000 			100$:	clr	r0			; /59/ Success
+    464	001630	000207 				return				; /59/ And exit
+    465
+    466	001632	005000 			at.pr1:	clr	r0
+    467	001634	000207 				return
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 8-1
+More attribute receive options
+
+    468
+    469	001636	116767 	000000'	000000G	at.sys:	movb	curatr	,at$sys		; major vendor type
+    470	001644	116767 	000001'	000001G		movb	curatr+1,at$sys+1	; save the system type
+    471	001652	005000 				clr	r0			; no errors
+    472	001654	000207 				return				; exit
+    473
+    474	001656	005000 			at.for:	clr	r0
+    475	001660	000207 				return
+    476
+    477
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 9
+Recieve the ifab data for file attributes from another 11
+
+    479						.sbttl	recieve the ifab data for file attributes from another 11
+    480						.enabl	lsb
+    481
+    482		000115 				fabsiz	=	7*13		; need at least this many
+    483
+    484	001662	012705 	000000'		at.fab:	mov	#curatr	,r5		; /49/ Save area for current attr's
+    485	001666	004767 	000264 			call	ispdp			; are we compatible today?
+    486	001672	005700 				tst	r0			; no if eq
+    487	001674	001526 				beq	100$			; no, ignore the system dep attr's
+    488	001676					strlen	r5			; packet size ok
+    489	001704	020027 	000115 			cmp	r0	,#fabsiz	; well....
+    490	001710	002055 				bge	40$			; Ok, must be a IFAB
+    491	001712	010503 				mov	r5	,r3		; /53/ Not an IFAB, perhaps other sys
+    492	001714	121327 	000043 			cmpb	(r3)	,#43		; /54/ Date info?
+    493	001720	001027 				bne	30$			; /54/ No
+    494	001722	005203 				inc	r3			; /54/ Yes, process 4 octal words
+    495	001724	010667 	000000G			mov	sp	,at$cdt		; /54/ Flag we have been here
+    496	001730	012746 	000004 			mov	#4	,-(sp)		; /54/ Number of words
+    497	001734	012702 	000000G			mov	#at$klu	,r2		; /54/ Destination
+    498	001740	005001 			10$:	clr	r1			; /54/ Accumulator
+    499	001742	012700 	000006 			mov	#6	,r0		; /54/ Number of itmes
+    500	001746	112304 			20$:	movb	(r3)+	,r4		; /54/ The next character
+    501	001750	162704 	000060 			sub	#'0	,r4		; /54/ Convert to a number
+    502	001754	006301 				asl	r1			; /54/ Multiply by 8
+    503	001756	006301 				asl	r1			; /54/ ...
+    504	001760	006301 				asl	r1			; /54/ ......
+    505	001762	060401 				add	r4	,r1		; /54/ Put in current result
+    506	001764	077010 				sob	r0	,20$		; /54/ Next please
+    507	001766	010122 				mov	r1	,(r2)+		; /54/ Copy the word
+    508	001770	005316 				dec	(sp)			; /54/ More to do
+    509	001772	001362 				bne	10$			; /54/ Yep
+    510	001774	005726 				tst	(sp)+			; /54/ All done
+    511	001776	000465 				br	100$			; /54/ Exit
+    512										;
+    513	002000	122327 	000042 		30$:	cmpb	(r3)+	,#42		; /53/ File type subfunction?
+    514	002004	001062 				bne	100$			; /53/ No, ignore for now
+    515	002006	112300 				movb	(r3)+	,r0		; /53/ Get the file type
+    516	002010					SCAN	r0	,#200$		; /53/ Look for it
+    517	002024	006300 				asl	r0			; /53/ Word addressing
+    518	002026	016067 	000346'	000000G		mov	210$(r0),image		; /53/ Set it
+    519	002034	016067 	000346'	000000G		mov	210$(r0),at$typ		; /53/ Here also.
+    520	002042	000443 				br	100$			; /53/ Exit
+    521
+    522	002044	012704 	000000G		40$:	mov	#at$fab	,r4		; copy the packet over now
+    523	002050	010503 				mov	r5	,r3		; and the source please
+    524	002052	012724 	177777 			mov	#-1	,(r4)+		; flag that the attributes are for real
+    525	002056	012702 	000013 			mov	#13	,r2		; number of words to convert back
+    526	002062	105063 	000006 		50$:	clrb	6(r3)			; insure .asciz now
+    527	002066					calls	octval	,<r3>		; simple
+    528	002104	005700 				tst	r0			; successfull?
+    529	002106	001007 				bne	90$			; no, clear flag and exit
+    530	002110	010124 				mov	r1	,(r4)+		; and save the value now
+    531	002112	062703 	000007 			add	#7	,r3		; point to the next octal number
+    532	002116	077217 				sob	r2	,50$		; next please
+    533	002120	010667 	000000G			mov	sp	,at$val		; it's ok to use the attributes
+    534	002124	000412 				br	100$			; bye
+    535	002126	005067 	000000G		90$:	clr	at$fab			; error exit (conversion error)
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 9-1
+Recieve the ifab data for file attributes from another 11
+
+    536	002132					message	<Fab attribute error>,cr; /49/
+    537	002152	005000 			100$:	clr	r0			; always flag success and exit
+    538	002154	000207 				return
+    539
+    540						.save
+    541	000342					.psect	$pdata	,d
+    542	000342	   101 	   111 	   116 	200$:	.byte	'A	,'I	,'N	,0
+	000345	   000
+    543	000346	000000 			210$:	.word	TEXT
+    544	000350	000000 	000001 	000002 		.word	TEXT	,BINARY	,DECNAT	,0
+	000356	000000
+    545						.even
+    546	002156					.restore
+    547						.dsabl	lsb
+    548
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 10
+Utility routines
+
+    550						.sbttl	utility routines
+    551
+    552		000070 				pd$rsx	=	'8
+    553		000071 				pd$ias	=	'9
+    554		000101 				pd$rsts	=	'A&137
+    555		000102 				pd$rt	=	'B&137
+    556		000103 				pd$pos	=	'C&137
+    557
+    558					;	I S P D P
+    559					;
+    560					;	input:	nothing
+    561					;	output:	r0 <> 0 if the other system is a KERMIT-11 system
+    562					;	errors:	none
+    563
+    564
+    565	000360					.psect	$pdata
+    566
+    567	000360	   070 	   071 	   101 	pdplst:	.byte	pd$rsx	,pd$ias	,pd$rsts,pd$rt	,pd$pos	,0
+	000363	   102 	   103 	   000
+    568						.even
+    569	002156					.psect	$code
+    570
+    571	002156	005000 			ispdp::	clr	r0			; presume failure
+    572	002160	126727 	000000G	000104 		cmpb	at$sys	,#'D&137	; a DEC system ?
+    573	002166	001007 				bne	100$			; no, exit
+    574	002170					scan	<at$sys+1>,#pdplst
+    575	002206	000207 			100$:	return
+    576
+    577	002210	005067 	000000G		clratr::clr	at$len
+    578	002214	005067 	000000G			clr	at$xlen
+    579	002220	005067 	000000G			clr	at$typ
+    580	002224	005067 	000000G			clr	at$cre
+    581	002230	005067 	000000G			clr	at$id
+    582	002234	005067 	000000G			clr	at$bil
+    583	002240	005067 	000000G			clr	at$area
+    584	002244	005067 	000000G			clr	at$pas
+    585	002250	005067 	000000G			clr	at$bsiz
+    586	002254	005067 	000000G			clr	at$acc
+    587	002260	005067 	000000G			clr	at$enc
+    588	002264	005067 	000000G			clr	at$dis
+    589	002270	005067 	000000G			clr	at$pr0
+    590	002274	005067 	000000G			clr	at$pr1
+    591	002300	005067 	000000G			clr	at$sys
+    592	002304	005067 	000000G			clr	at$for
+    593	002310	005067 	000000G			clr	at$fab
+    594	002314	005067 	000000G			clr	atrctx
+    595	002320	005067 	000000G			clr	at$klu+0
+    596	002324	005067 	000002G			clr	at$klu+2
+    597	002330	005067 	000004G			clr	at$klu+4
+    598	002334	005067 	000006G			clr	at$klu+6
+    599	002340	005067 	000000G			clr	at$cdt
+    600	002344	000207 				return
+    601
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 11
+Finish up the update of rms file attributes to output
+
+    603						.sbttl	finish up the update of rms file attributes to output
+    604
+    605					;	A T R F I N
+    606					;
+    607					;	If the file was send in image mode, and we have been sent
+    608					;	valid attributes (basically, the sender's IFAB), then call
+    609					;	PUTATR to place these attributes into our output file's
+    610					;	IFAB so they will get updated.
+    611					;
+    612					;
+    613					;	Note: 11-Jul-84  17:12:49  BDN,  edit /19/
+    614					;
+    615					;	 Note that for RSTS/E, we have an unusual problem in that if
+    616					;	the sender sent a stream ascii file (most likely a file with
+    617					;	NO attributes)  over and the sender  said it's binary,  then
+    618					;	RMS-11 sends GARBAGE for the VFC header size. When this data
+    619					;	is wriiten  into the output file's IFAB, RMS11 finds invalid
+    620					;	data in the IFAB and writes attributes to disk with the last
+    621					;	block field (F$HEOF and F$LEOF)  equal to ZERO.  Such a file
+    622					;	would thus be unreadable to PIP, RMS and other programs that
+    623					;	look at the file attributes.  The fix  is one of two things.
+    624					;	One, we can clear the invalid  VFC size and fudge the record
+    625					;	size and maximum record size to something usable (like 512),
+    626					;	or  we can simply ignore  the senders attributes and let the
+    627					;	file  stand as a  FIXED, NO CC, recordsize 512 file.  Rather
+    628					;	than to try to fix the attributes, we will simple ignore the
+    629					;	attributes  if the sender said that the file is stream ascii
+    630					;	with a garbage VFC.  Since  the attributes  are only used if
+    631					;	the transfer was in image moed, this will not  affect normal
+    632					;	files, only files like DMS-500 files that have no attributes
+    633					;	but must be sent in image mode.
+    634					;	Of course, the sending Kermit-11 can always be given the SET
+    635					;	ATT OFF and SET FIL BIN and the receiving Kermit-11 be given
+    636					;	the SET FIL BIN and the issue will never arise.
+    637					;
+    638					;	The mods are noted with /19/ after the statement.
+    639
+    640	002346				atrfin::save	<r1,r2,r3>		; just in case please
+    641	002354	005715 				tst	@r5			; lun zero ?
+    642	002356	001454 				beq	100$			; yep
+    643	002360	005767 	000000G			tst	at$val			; valid attributes to write ?
+    644	002364	001451 				beq	100$			; no
+    645	002366	005767 	000000G			tst	at$cdt			; Ever set the creation date/time?
+    646	002372	001411 				beq	10$			; No
+    647	002374					calls	putcdt	,<@r5,#at$klu>	; Yes, update it
+    648	002416	126727 	000000G	000001 	10$:	cmpb	at$typ	,#binary	; did we get this as a binary file?
+    649	002424	001031 				bne	100$			; no
+    650	002426	012701 	000000G			mov	#at$fab	,r1		; yes
+    651	002432	005721 				tst	(r1)+			; valid data present ?
+    652	002434	001425 				beq	100$			; no
+    653	002436	021127 	002000 			cmp	@r1	,#2000		; /19/ stream ascii ?
+    654	002442	001004 				bne	30$			; /19/ no
+    655	002444	026127 	000016 	177400 		cmp	16(r1)	,#177400	; /19/ garbage for the vfc header size?
+    656	002452	001410 				beq	90$			; /19/ yes, forget about the attributes
+    657	002454				30$:	calls	putatr	,<@r5,r1>	; /19/ update the ifab for the file
+    658	002474	005067 	000000G		90$:	clr	at$typ			; /19/ no longer valid please
+    659	002500	005067 	000000G			clr	at$fab			; no longer valid please
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 11-1
+Finish up the update of rms file attributes to output
+
+    660	002504	005067 	000000G			clr	at$val			; no longer valid please
+    661	002510	005067 	000000G		100$:	clr	at$cdt
+    662	002514					unsave	<r3,r2,r1>		; output file and exit
+    663	002522	000207 				return
+    664
+    665
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 12
+Map RSTS protection codes to Files-11 codes and back
+
+    667						.sbttl	Map RSTS protection codes to Files-11 codes and back
+    668
+    669
+    670					;	/59/  9-OCT-1987 08:11 BDN
+    671					;
+    672					;	 Use the files11 format for transfering protection code
+    673					;	between two kermit-11's, thus it will work even for RSX
+    674					;	to RSTS transfer.
+    675
+    676						.Save
+    677	000366					.Psect	$Pdata	,d
+    678
+    679
+    680	000366	146000 			dflt.f:	.word	^B1100110000000000	; Default to no world, group
+    681	000370	000020 			rsts.p:	.word	1*20			; If 0 set, no owner read
+    682	000372	000040 				.word	2*20			; If 1 set, no owner write
+    683	000374	000400 				.word	1*400			; If 2 set, no group read
+    684	000376	001000 				.word	2*400			; If 3 set, no group write
+    685	000400	010000 				.word	1*10000			; If 4 set, no world read
+    686	000402	020000 				.word	2*10000			; If 5 set, no world write
+    687
+    688	002524					.Restore
+    689
+    690	002524	012701 	000077 		torsts:	mov	#77	,r1		; Start with no access
+    691	002530	005002 				clr	r2			; Current bit to set
+    692	002532	012703 	000006 			mov	#6	,r3		; Six times please
+    693	002536	005004 				clr	r4			; Indexing into bit table
+    694	002540	012702 	000001 			mov	#1	,r2		; Start with bit one
+    695	002544	036400 	000370'		10$:	bit	rsts.p(r4),r0		; Check for F11 bit set
+    696	002550	001001 				bne	20$			; Set, implies access
+    697	002552	040201 				bic	r2	,r1		; So clear it here
+    698	002554	006302 			20$:	asl	r2			; Shift it
+    699	002556	005724 				tst	(r4)+			; Next bit pattern
+    700	002560	077307 				sob	r3	,10$		; Loopback
+    701	002562	000207 				return				; Exit
+    702
+    703	002564	016701 	000366'		tof11:	mov	dflt.f	,r1		; Default Files-11 bitmask
+    704	002570	005002 				clr	r2			; Start with bit zero of RSTS
+    705	002572	012703 	000006 			mov	#6	,r3		; Loop six times
+    706	002576	032700 	000001 		10$:	bit	#1	,r0		; Check for bit being set in RSTS
+    707	002602	001402 				beq	20$			; code. Not set, leave alone
+    708	002604	056201 	000370'			bis	rsts.p(r2),r1		; Set, so set the Files-11 prot
+    709	002610	005722 			20$:	tst	(r2)+			; Next
+    710	002612	006200 				asr	r0			; Get the next bit moved over
+    711	002614	077310 				sob	r3	,10$		; And loop back
+    712	002616	010100 				mov	r1	,r0		; Return in r0
+    713	002620	000207 				return				; Exit
+    714
+    715
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 13
+32 bit arithmetic modules from RSX Syslib.olb
+
+    717						.sbttl	32 bit arithmetic modules from RSX Syslib.olb
+    718
+    719	002622	010046 			$DMUL:	MOV	R0,-(SP)
+    720	002624	005000 				CLR	R0
+    721	002626	005001 				CLR	R1
+    722	002630	005716 			10$:	TST	(SP)
+    723	002632	001410 				BEQ	30$
+    724	002634	006016 				ROR	(SP)
+    725	002636	103003 				BCC	20$
+    726	002640	060301 				ADD	R3,R1
+    727	002642	005500 				ADC	R0
+    728	002644	060200 				ADD	R2,R0
+    729	002646	006303 			20$:	ASL	R3
+    730	002650	006102 				ROL	R2
+    731	002652	000766 				BR	10$
+    732	002654	005726 			30$:	TST	(SP)+
+    733	002656	000207 				RETURN
+    734
+    735	002660	010346 			$DDIV:	MOV	R3,-(SP)
+    736	002662	012703 	000040 			MOV	#40,R3
+    737	002666	010046 				MOV	R0,-(SP)
+    738	002670	005000 				CLR	R0
+    739	002672	006302 			10$:	ASL	R2
+    740	002674	006101 				ROL	R1
+    741	002676	006100 				ROL	R0
+    742	002700	020016 				CMP	R0,(SP)
+    743	002702	103402 				BCS	20$
+    744	002704	161600 				SUB	(SP),R0
+    745	002706	005202 				INC	R2
+    746	002710	005303 			20$:	DEC	R3
+    747	002712	003367 				BGT	10$
+    748	002714	005726 				TST	(SP)+
+    749	002716	012603 				MOV	(SP)+,R3
+    750	002720	000207 				RETURN
+    751
+    752
+    753		000001 				.end
+K11atr	process attribute packe	MACRO V05.05  Thursday 17-Oct-96 12:59  Page 13-1
+Symbol table
+
+ATRCTX= ****** GX	AT.ID   001502R     004	JOB$BA  000001   	PRO$BA  000002   	SPACE = 000040
+ATRFIN  002346RG    004	AT.LEN  001142R     004	JOB$IN  000000   	PRO$DI  000001   	SY$IAS= 000003
+ATTRDS  000042R     005	AT.PAS  001516R     004	K11INC= 000001   	PRO$LO  000000   	SY$MPL= 000006
+ATTRTY  000020R     005	AT.PR0  001550R     004	LF    = 000012   	PRO$NE  000004   	SY$POS= 000011
+AT$ACC= ****** GX	AT.PR1  001632R     004	LN$ALL= 000012   	PRO$SE  000006   	SY$PRO= 000011
+AT$ARE= ****** GX	AT.SYS  001636R     004	LN$CNT= 000005   	PUTATR= ****** G 	SY$RST= 000004
+AT$BIL= ****** GX	AT.TYP  001436R     004	LN$MAX= 000120   	PUTCDT= ****** G 	SY$RT = 000007
+AT$BSI= ****** GX	AT.XLE  001232RG    004	LOG$AL= 000077   	P.CAPA= 000011   	SY$VMS= 000005
+AT$CDT= ****** GX	AT.$$   001136R     004	LOG$CO= 000004   	P.CHKT= 000007   	SY$11M= 000001
+AT$CRE= ****** GX	BADPAK  000106R     005	LOG$FI= 000002   	P.EOL = 000004   	TERMIN= 177777
+AT$DIS= ****** GX	BINARY= 000001   	LOG$IO= 000040   	P.MXL1= 000013   	TER$BI= 000004
+AT$ENC= ****** GX	CAPA.A= 000010   	LOG$OP= 100000   	P.MXL2= 000014   	TER$CC= 000001
+AT$FAB= ****** GX	CAPA.L= 000002   	LOG$PA= 000001   	P.NPAD= 000002   	TER$PA= 000010
+AT$FOR= ****** GX	CAPA.S= 000004   	LOG$RP= 000020   	P.PADC= 000003   	TER$XO= 000002
+AT$ID = ****** GX	CLRATR  002210RG    004	LOG$ST= 000010   	P.QBIN= 000006   	TEXT  = 000000
+AT$KLU= ****** GX	CONPAR= ****** GX	L$CVTN= ****** G 	P.QCTL= 000005   	TOF11   002564R     004
+AT$LEN= ****** GX	CON$ES= 000034   	L$LEN = ****** G 	P.REPT= 000010   	TORSTS  002524R     004
+AT$PAS= ****** GX	CR    = 000015   	L$OTOA= ****** G 	P.SPSI= 000000   	TTY   = 000000
+AT$PR0= ****** GX	CURATR  000000R     006	MAXLNG= 001130   	P.TIME= 000001   	VTPOS = 000003
+AT$PR1= ****** GX	DECNAT= 000002   	MOUT  = ****** G 	P.VEND= 000017   	VTPRT1= 000004
+AT$SYS= ****** GX	DEL   = 000177   	OCTVAL= ****** G 	P.WIND= 000012   	VT100 = 000001
+AT$TYP= ****** GX	DFLT.F  000366R     005	OLDATT= ****** GX	RSTS.P  000370R     005	VT200 = 000002
+AT$VAL= ****** GX	ESC   = 000033   	PAR$EV= 000002   	R$ATTR  000740RG    004	WATT    000000R     005
+AT$XLE= ****** GX	FABSIZ= 000115   	PAR$MA= 000003   	SCANCH= ****** G 	W$ATTR  000000RG    004
+AT.ACC  001526R     004	FF    = 000014   	PAR$NO= 000005   	SN.CDT  000340R     004	$DDIV   002660RG    004
+AT.ARE  001512R     004	GETATR= ****** G 	PAR$OD= 000001   	SN.FAB  000166R     004	$DMUL   002622RG    004
+AT.BIL  001506R     004	GETCDT= ****** G 	PAR$SP= 000004   	SN.FTY  000306R     004	$RDATA= 000001
+AT.BSI  001522R     004	GETPRO= ****** G 	PDPLST  000360R     005	SN.LEN  000616R     004	$SDATA= 000002
+AT.CRE  001476R     004	GETSIZ= ****** G 	PD$IAS= 000071   	SN.PR0  000506R     004	$$    = 000002
+AT.DIS  001536R     004	GETSYS= ****** GX	PD$POS= 000103   	SN.PR1  000610R     004	$$1   = 000001
+AT.ENC  001532R     004	IMAGE = ****** GX	PD$RST= 000101   	SN.SYS  000110R     004	$$2   = 000000
+AT.FAB  001662R     004	INCOMP  000145R     005	PD$RSX= 000070   	SN.TYP  000446R     004	$$5   = 000015
+AT.FOR  001656R     004	ISPDP   002156RG    004	PD$RT = 000102   	SOH   = 000001
+
+. ABS.	000000    000	(RW,I,GBL,ABS,OVR)
+      	000000    001	(RW,I,LCL,REL,CON)
+$RTQUE	000000    002	(RW,D,GBL,REL,OVR)
+$RWDAT	000000    003	(RW,D,GBL,REL,CON)
+$CODE 	002722    004	(RO,I,LCL,REL,CON)
+$PDATA	000404    005	(RO,D,LCL,REL,CON)
+TEMPDA	000200    006	(RW,D,LCL,REL,CON)
+Errors detected:  0
+
+*** Assembler statistics
+
+
+Work  file  reads: 0
+Work  file writes: 0
+Size of work file: 12658 Words  ( 50 Pages)
+Size of core pool: 13484 Words  ( 51 Pages)
+Operating  system: RSX-11M/M-PLUS
+
+Elapsed time: 00:00:23.04
+K11ATR,K11ATR=K11ATR

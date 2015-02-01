@@ -1,6 +1,6 @@
 	.title	k11m41	kermit i/o for RSX11M/M+ v4.1 and 2.1
 
-	.ident	/5.0.05/	; Jerry Hudgins (see below)
+	.ident	/5.0.06/	; Johnny Billquist
 
 ;	define macros and things we want for KERMIT-11
 
@@ -88,6 +88,9 @@
 ;			Moved GETPRV call in ASSDEV to ensure priv's are
 ;			up for SF.SMC; will otherwise crash M+ V4.0.  Set
 ;			priv's on in EXIT routine also.
+;
+; 21-Oct-04 Johnny Billquist 5.0.06
+;	Y2K fixup.
 ;
 ;
 ;	RSX11M,M+ and P/OS support.
@@ -373,10 +376,10 @@ xinit::	call	rmsini			; /53/ Setup SST
 	MESSAGE				; cr/lf
 40$:	ALUN$S	#LUN.TT,#"TI,#TIUNIT	; Assign command term.
 	QIOW$S	#IO.ATT,#LUN.TT,#EF.TT,,#kbiost; Attach it, also
-	QIOW$S	#SF.SMC,#LUN.TT,,,,,<#echoch,#2>
+	QIOW$S	#SF.SMC,#LUN.TT,#EF.TT,,,,<#echoch,#2>
 	sub	#10	,sp		; /53/ Get terminal driver support
 	mov	sp	,r2		; /53/ A buffer
-	QIOW$S	#IO.GTS,#LUN.TT,,,,,<r2,#4>
+	QIOW$S	#IO.GTS,#LUN.TT,#EF.TT,,,,<r2,#4>
 	bcs	50$			; /53/ Oops
 	bit	#F2.EIO	,2(r2)		; /53/ Extended IO today?
 	beq	50$			; /53/ No
@@ -477,8 +480,9 @@ ttyini::save	<r1>
 2$:	clr	r0				; Make return success
 	clr	savdon				; not saved tt settings yet
 	cmp	2(r5),#lun.co			; Command terminal (SAFETY)
-	beq	10$				; (yes, ignore this)
-	QIOW$S	#io.att,2(r5),#ef.tt		; Attach the terminal.	(RTM01)
+	bne	3$
+	jmp	10$				; (yes, ignore this)
+3$:	QIOW$S	#io.att,2(r5),#ef.tt		; Attach the terminal.	(RTM01)
 	QIOW$S	#sf.gmc,2(r5),#ef.tt,,#kbiost,,<#savchr,#savlen>
 	mov	kbiost,r0
 	cmpb	r0,#IS.SUC			; OK?
@@ -495,7 +499,7 @@ ttyini::save	<r1>
 	cmpb	r0,#IS.SUC			; OK?
 	bne	10$				; (no)
 	clr	r0				; Yes - clear r0 = OK
-	QIOW$S	#SF.SMC,2(r5),,,,,<#dtrast,#4>	; Set this up for carrier loss
+	QIOW$S	#SF.SMC,2(r5),#EF.TT,,,,<#dtrast,#4>	; Set this up for carrier loss
 10$:	tst	proflg				; if a pro/350, ignore errors
 	beq	100$				; not a 350
 	clr	r0				; a 350, forget about the errors
@@ -537,7 +541,7 @@ ttyfin::call	getprv				; /41/ May need privs up now
 	srex$s					; no more abort handling
 	cmp	2(r5),#lun.co			; Command terminal?
 	beq	10$				; (yes, skip it)
-	QIOW$S	#SF.SMC,2(r5),,,,,<#dtrclr,#4>	; Set this up for carrier loss
+	QIOW$S	#SF.SMC,2(r5),#EF.TT,,,,<#dtrclr,#4>	; Set this up for carrier loss
 	QIOW$S	#io.det,2(r5),#ef.tt		; Attach the terminal.	(RTM01)
 	tst	savdon				; ever save the crap?
 	beq	10$				; no, don't reset it
@@ -937,9 +941,9 @@ binwri::mov	4(r5)	,310$			; /40/ Registers saved in ASTs?
 	return
 
 
-200$:	QIOW$S	#IO.KIL,310$			; /40/ abort the pending I/O
+200$:	QIOW$S	#IO.KIL,310$,#EF.TT		; /40/ abort the pending I/O
 	call	getprv				; /41/ May need privs up now
-	QIOW$S	#SF.SMC,310$,,,,,<#300$,#2>	; /40/ insure line is XON'ED
+	QIOW$S	#SF.SMC,310$,#EF.TT,,,,<#300$,#2>	; /40/ insure line is XON'ED
 	call	drpprv				; /41/ Don't want privs anymore
 	tst	(sp)+				; /40/ pop timeout flag and
 	astx$s					; /40/ exit
@@ -1062,13 +1066,13 @@ read1c::clr	-(sp)
 wrtall::SAVE	<r0,r2>			; Must use IO.WAL for CLE for
 	mov	2+4(sp)	,r2		; some versions of RSX11M
 	STRLEN	r2			; Get the string length.
-	QIOW$S	#IO.WAL,#5,,,,,<r2,r0>	; Dump the string in pass-all mode
+	QIOW$S	#IO.WAL,#LUN.TT,#EF.TT,,,,<r2,r0>	; Dump the string in pass-all mode
 	UNSAVE	<r2,r0>			; Pop register
 	mov	(sp)+	,(sp)		; Move return address over parameter
 	return				; Exit
 
 
-clrcns::QIOW$S	#SF.SMC,#5,,,,,<#can,#2>; Simple
+clrcns::QIOW$S	#SF.SMC,#LUN.TT,#EF.TT,,,,<#can,#2>; Simple
 	return
 
 	.save
@@ -1105,7 +1109,7 @@ l$ttyo::
 	bne	10$			; none yet so far
 	sub	@r5	,r0		; get the length
 	dec	r0			; off by one
-20$:	QIOW$S	#io.wvb,#5,#ef.tt,,#kbiost,,<@r5,r0>
+20$:	QIOW$S	#io.wvb,#LUN.TT,#ef.tt,,#kbiost,,<@r5,r0>
 	cmpb	kbiost	,#is.suc	; did it work ?
 	bne	90$			; no, exit with carry set
 	clc				; yes, it worked
@@ -1161,7 +1165,8 @@ exit::	tst	eioini			; /54/ Extended IO init
 10$:	tst	assdon			; ever slave the line?
 	beq	exits			; no
 	call	rstass			; /41/ restore more things now
-exits:	mov	exstac	,r0		; /41/ get exit status
+exits:
+	mov	exstac	,r0		; /41/ get exit status
 	bne	20$			; /41/ something is there to emit
 	EXIT$S				; /41/ nothing there, exit w/o status
 20$:	asl	r0			; /41/ shift over 4 bits
@@ -1372,7 +1377,7 @@ Inqpar::SAVE	<r1>			; Save this one
 	ALUN$S	#LUN.CO,r1,r0		; assign the terminal please
 	mov	sp	,r1		; Point to it
 	movb	#TC.PAR	,(r1)		; Want to know about parity
-	QIOW$S	#SF.GMC,#LUN.CO,,,,,<r1,#2>
+	QIOW$S	#SF.GMC,#LUN.CO,#EF.TT,,,,<r1,#2>
 	bcs	90$			; Oops
 	movb	1(r1)	,r0
 	mov	sp	,r0		; Assume parity
@@ -1411,7 +1416,7 @@ ttyhan::save    <r1>
 	call	ttpars			; /41/ No, likely we are on P/OS
 	bcs	100$			; /41/ Parse failed (?)
 	ALUN$S	#LUN.AS,r1,r0		; /41/ Never assigned, do it now
-	QIOW$S	#IO.ATT,#LUN.AS		; /41/ 
+	QIOW$S	#IO.ATT,#LUN.AS,#EF.TT	; /41/ 
 5$:	tstb	logstr			; /41/if logoff MESSAGE len > 0	  +SSH
 	beq	10$			; /41/no			  +SSH
 	strlen	#logstr			; /41/yes, send logout line	  +SSH
@@ -1422,7 +1427,7 @@ ttyhan::save    <r1>
 	QIOW$S  #IO.HNG,#lun.as,#ef.tt,#50,#kbiost	;		  /SSH
 	tst	assdon			; /41/ Ever reach ASSDEV ?
 	beq	20$			; /41/ No
-	QIOW$S	#IO.DET,#lun.as		; /41/ Likely P/OS, so detach NOW
+	QIOW$S	#IO.DET,#lun.as,#EF.TT	; /41/ Likely P/OS, so detach NOW
 20$:	call	rstass			; restore any old line setting	  +SSH
 	CMKT$S	#EF.TMO,#200$		; /41/ Kill the mark time now
         moverr  kbiost  ,r0
@@ -1430,7 +1435,7 @@ ttyhan::save    <r1>
 100$:	return
 
 
-200$:	QIOW$S	#IO.KIL,#LUN.AS		; /41/ We get here on a timeout
+200$:	QIOW$S	#IO.KIL,#LUN.AS,#EF.TT	; /41/ We get here on a timeout
 	tst	(sp)+			; /41/ Pop EF
 	ASTX$S				; /41/ Exit from the AST
 
@@ -1558,7 +1563,7 @@ setspd::save	<r1,r2,r3,r4>
 	mov	#aslspd	,r2		; /41/ pointer to it
 	alun$s	r4,r1,r0		; assign the terminal please
 	mrkt$s	#ef.tmo,#2,#2,#spdtmo	; in case we can't get the device
-	QIOW$S	#sf.smc,r4,#ef.tt,#50,#kbiost,,<r2,#4>
+	QIOW$S	#sf.smc,r4,#ef.tt,,#kbiost,,<r2,#4>
 	cmkt$s	#ef.tmo,#spdtmo		; we got it ok
 	clr	r0			; assume success
 	cmpb	kbiost	,#is.suc	; did it work ?
@@ -1577,7 +1582,7 @@ setspd::save	<r1,r2,r3,r4>
 	return
 
 spdtmo:	tst	(sp)+			; remove the event flag number
-	QIOW$S	#io.kil,r4,#ef.tt,#50,#kbiost
+	QIOW$S	#io.kil,r4,#ef.tt,,#kbiost
 	movb	#ie.abo	,kbiost		; insure that's the error code
 	astx$s				; exit from this timeout ast
 
@@ -1747,7 +1752,7 @@ assdev::tst	proflg			; if this is a pro/350 we don't
 
 
 asstmo:	tst	(sp)+			; remove the event flag number
-	QIOW$S	#io.kil,#lun.as,#ef.tt,#50,#kbiost
+	QIOW$S	#io.kil,#lun.as,#ef.tt,,#kbiost
 	moverr	#ie.daa	,r2		; get the error code and exit
 	astx$s				; exit from this timeout ast
 
@@ -1757,7 +1762,7 @@ rstass:	tst	assdon			; /41/ If line was ever assigned then
 	clr	assdon			; /41/ no longer assigned
 	call	getprv			; /41/ insure privs are up
 	QIOW$S	#SF.SMC,#lun.as,#ef.tt,,,,<#savass,#asvlen>
-	QIOW$S	#IO.DET,#lun.as		; /41/ detach it
+	QIOW$S	#IO.DET,#lun.as,#EF.TT	; /41/ detach it
 	call	drpprv			; /41/ Insure no privs now
 100$:	return
 
@@ -1816,7 +1821,12 @@ ascdat::save
 	movb	(r2)+	,(r0)+		; store month name
 	movb	(r2)+	,(r0)+
 	movb	#'-	,(r0)+		; insert dash
-	mov	@r1	,r2		; r2 := year
+	mov	r3,-(sp)
+	mov	@r1	,r3		; r2 := year
+	clr	r2
+	div	#100.,r2
+	mov	r3,r2
+	mov	(sp)+,r3
 	jsr	pc	,cnvert		; convert and store year
 	movb	#40 	,(r0)+		; final space
 	clrb	@r0
@@ -1985,9 +1995,9 @@ dirnex:	movb	defdir	,-(sp)		; anything in DEFDIR ?
 $mover:	tstb	2(sp)
 	bmi	10$
 	clr	2(sp)
-	return
-10$:	neg	2(sp)
-	return
+10$:	return
+;10$:	neg	2(sp)
+;	return
 
 
 	.sbttl	rsxsys	sys command for RSX11M/M+
@@ -2013,7 +2023,7 @@ runmcr::
 
 rsxsys::
 	save	<r1,r2,r3,r4>
-	QIOW$S	#io.det,#lun.tt,#ef.tt,#50,#kbiost
+	QIOW$S	#io.det,#lun.tt,#ef.tt,,#kbiost
 	mov	r0	,r4		; save the CLI we want to use
 	sub	#12*2	,sp		; need eight word exit block BDN
 	mov	sp	,r2		; Get address of exit block  BDN
@@ -2030,12 +2040,12 @@ rsxsys::
 	spwn$s	r4,,,,,#6,,r2,r1,r3	; do it
 	bcc	10$			; Ignore error for now
 	moverr	@#$DSW	,r0		; get the error code please
-	QIOW$S	#io.att,#lun.tt,#ef.tt,#50,#kbiost
+	QIOW$S	#io.att,#lun.tt,#ef.tt,,#kbiost
 	print	#100$
 	br	20$
 10$:	stse$s	#6			; Stop for task to exit
 20$:	add	#12*2	,sp		; pop exit status block
-	QIOW$S	#io.att,#lun.tt,#ef.tt,#50,#kbiost
+	QIOW$S	#io.att,#lun.tt,#ef.tt,,#kbiost
 	unsave	<r4,r3,r2,r1>		; pop registers and exit
 	return
 
@@ -2088,7 +2098,7 @@ qspool::movb	#1	,r0
 
 ;	Much simpler for RSX than for RSTS
 
-detach::QIOW$S	#io.det,#5,#ef.tt,,#kbiost
+detach::QIOW$S	#io.det,#LUN.TT,#ef.tt,,#kbiost
 	clr	r0
 	return
 
@@ -2266,7 +2276,7 @@ trntrm::save	<r1,r2,r3,r4>		; +/41/ save temp registers
 	mov	sp	,tr$res(r3)	; and a pointer to it
 	sub	#30	,sp		; allocate buffer for xlate name
 	mov	sp	,tr$nam(r3)	; and a pointer to the buffer
-	mov	#-1	,tr$uni(r3)	; 'unit' number counter
+	mov	#0	,tr$uni(r3)	; 'unit' number counter
 	call	getsys			; vanilla RSX 11M today?
 	cmpb	r0	,#SY$11M	; well ?
 	bne	10$			; no
@@ -2274,7 +2284,7 @@ trntrm::save	<r1,r2,r3,r4>		; +/41/ save temp registers
 
 10$:	STRCPY	tr$nam(r3),#ln$nam	; copy the prototype name over
 	tst	tr$uni(r3)		; is this the first time through?
-	bmi	30$			; yes (ie, it's -1)
+	beq	30$			; yes (ie, it's 0)
 	mov	tr$uni(r3),r1		; no, append the 'unit' on logical
 	clr	r2			; so we get a name like KERMIT$LINE2
 20$:	tstb	(r0)+			; get to the end of the logical
@@ -2386,7 +2396,7 @@ inqter:	save	<r1,r2>			; /45/ Get the type of terminal
 	mov	sp	,r2		; /45/ A pointer to that buffer
 	movb	#TC.TTP	,@r2		; /45/ Characteristic to read
 	movb	#TC.ANI	,2(r2)		; /45/ Does this one work on old RSXs
-	qiow$s	#SF.GMC,#5,,,,,<r2,#4>	; /45/ Get RSX to tell us now
+	qiow$s	#SF.GMC,#LUN.TT,#EF.TT,,,,<r2,#4>	; /45/ Get RSX to tell us now
 	bcs	90$			; /45/ Failed, return TTY
 	tstb	3(r2)			; /45/ See if ANSICRT
 	bne	20$			; /45/ YES, exit now with VT100

@@ -1,21 +1,21 @@
-
+ 
 Kermit-11 files, 19-Feb-87  16:14:03 BDN
-
+ 
 Notes:
-
+ 
 1.  All command files (filetype .COM)  run under RSTS version 9. There
    are no build files for  native execs,  as I build all Kermits under
    RSTS and then download to the target system.
-
+ 
 2.  All .HEX  files are simply  hexified versions of the corresponding
    executable image.
-
+ 
 3.  The Columbia tapes will have only the HEX files, and then only for
    the non I/D space tasks. The DECUS tapes will have the HEX and TASK
    images,  except in the case of the I/D images, only the task images
    will be present.
-
-
+ 
+ 
 K11   .BWR	Notes regarding possible bugs
 K11   .COM	Task build DCL command file for RSTS+RMSRES Kermit
 K11   .ODL	Overlay for K11.TSK

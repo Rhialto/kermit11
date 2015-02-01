@@ -1,5 +1,5 @@
 	.title	k11rms	rms i/o for KERMIT-11
-	.ident	/3.56.0/
+	.ident	/3.56.1/
 	.library	/LB:[1,1]RMSMAC.MLB/
 
 
@@ -10,6 +10,10 @@
 ; Edited by:
 ; RBD01 - Bob Denny 03-Mar-84	See K11CMD for edit trails
 ;
+; BQT01 - Johnny Billquist 8-Oct-2004
+;	Changed some data to be in R/W psect.
+;	Added my own memory listhead instead of using the one from
+;	RMS.
 ;
 ;	*******************************************************
 ;	*  NOTES REGARDING DECnet (DAP) REMOTE FILE SUPPORT)  *
@@ -1235,7 +1239,7 @@ resstr:	.blkb	64.			; a temp place for the result
 
 	.sbttl	the real work of lookup
 
-	.psect	$pdata
+	.psect	$rwdat
 					; Make this <> 0 if you can't do CALFIP
 fu$dir::.word	0			; style wildcarding on your non-standard
 					; RSTS system.  Could cause side effects
@@ -1416,7 +1420,7 @@ tlog::	save	<r1,r2,r3>		; /46/ Save registers
 	return				; /46/ Exit
 
 	.save
-	.psect	$PDATA
+	.psect	$RWDAT
 tlogda:	.word	0,0			; /46/ Returned data
 ln$mk1::.word	0
 	.restore
@@ -1663,7 +1667,6 @@ GSAMIN::			; Minimum allocation
 GSAREQ::			; Size of this request
 	.Word	000000		; (if 'GSAMIN' extends fail)
 
-
 
 	.Sbttl	GSA Initialization code
 
@@ -1797,7 +1800,7 @@ gsax:
 	.psect	IMPURE	,d
 
 Limit:	.Limit
-pdpb:	GPRT$	tbuf
+pdpb:	GPRT$	,tbuf
 tdpb:	GTSK$	tbuf
 
 tbuf:	.blkw	20

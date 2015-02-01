@@ -1,0 +1,12 @@
+TIN V1.1  
+Task name:        Date: 2-FEB-97. Pri=0. Start=154246. EXTTSK=000000.
+Task addresses - Low: 000000, W0 high: 043377, High: 043377
+Load size: 000015 Max size: 000434 # of window blocks: 4.
+Task flags (000401): PRV
+Partition: GEN    Offset: 000000
+System ID: RSX-11M-PLUS.
+  Common 2. Name: RMSRES Date 30-JUN-89. Windows: 2.
+  System ID: RSX-11M-PLUS.
+  Common addresses - Low: 000000, W high: 017777, High: 037777
+  Load size: 000200 Max size: 000200 Offset: 000000 Seg. descr. size: 000014
+  Flags: Read-Only SUP PIC Library

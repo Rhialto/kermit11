@@ -1,7 +1,7 @@
 .enable substitution
-mac in:K11RMS =lb:[1,1]rmsmac.mlb/ml,in:'<UIC>'K11RMS 
-mac in:K11RMZ =lb:[1,1]rmsmac.mlb/ml,in:'<UIC>'K11RMZ 
-mac in:k11cpy =lb:[1,1]rmsmac.mlb/ml,in:'<UIC>'k11cpy 
+mac in:K11RMS =lb:[1,1]rmsmac.mlb/ml,in:[kermit]K11RMS 
+mac in:K11RMZ =lb:[1,1]rmsmac.mlb/ml,in:[kermit]K11RMZ 
+mac in:k11cpy =lb:[1,1]rmsmac.mlb/ml,in:[kermit]k11cpy 
 mac in:K11DAT =in:K11DAT 
 mac in:k11m41 =in:k11m41  
 mac in:K11SUB =in:K11SUB 

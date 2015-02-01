@@ -1,4 +1,3 @@
-
 ;	K11IDM.ODL	I/D odl for M+
 
 	.psect	topmem	,d,rw,gbl,ovr,rel
@@ -53,7 +52,8 @@ atr:	.fctr	lb:k11atr
 ini:	.fctr	lb:k11ini
 mem:	.fctr	lb:[1,1]vmlib/lb:extsk
 ;-libr:	.fctr	lb:syslib.p21/dl
-@lb:[1,1]rmsslx
+;@lb:[1,1]rmsslx
 ;@lb:[1,1]rmsrlx
-;@lb:[1,1]daprlx
+@daprlx
+
 	.end

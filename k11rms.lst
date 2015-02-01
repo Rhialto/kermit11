@@ -1,0 +1,2233 @@
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39
+Table of contents
+
+     2-    1	define macros from IN:K11MAC.MAC
+    14-   92	rms file access blocks
+    16-  262	rms record access blocks
+    17-  315	Set up SST table to catch RMSRES missing
+    18-  423	create sequential file
+    19-  539	setup things for open/create in the FAB
+    20-  599	close a file
+    21-  640	try to determine if a file needs binary xfer mode
+    22-  700	getatr	return attributes for a file already open
+    23-  807	connect record access block to file access block
+    24-  843	disconnect record access block from file access block
+    25-  864	read a record from a sequential file
+    26-  905	put a record to an rms sequential file
+    27-  948	getc	get one character from an input file
+    28- 1015	putc	put a single character to an rms file
+    29- 1082	flush
+    30- 1100	lookup	do a filename lookup, wildcarding supported
+    31- 1151	the real work of lookup
+    33- 1296	fparse	parse filename and fill in with defaults
+    35- 1484	return current task size and return exec
+    36- 1526	gsa	get space for i/o buffers
+    37- 1554	Control block definitions
+    38- 1583	GSA Initialization code
+    39- 1615	GSA Mainline code
+    40- 1702	Corrected version of $INIDM
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 1
+
+
+      1						.title	k11rms	rms i/o for KERMIT-11
+      2						.ident	/3.56./
+      3						.library	/LB:[1,1]RMSMAC.MLB/
+      4
+      5
+      6					;	Brian Nelson  30-Nov-83  09:53:49
+      7					;
+      8					;	Copyright (C) 1983   Change Software, Inc.
+      9					;
+     10					; Edited by:
+     11					; RBD01 - Bob Denny 03-Mar-84	See K11CMD for edit trails
+     12					;
+     13					; BQT01 - Johnny Billquist 8-Oct-2004
+     14					;	Changed some data to be in R/W psect.
+     15					;
+     16					;	*******************************************************
+     17					;	*  NOTES REGARDING DECnet (DAP) REMOTE FILE SUPPORT)  *
+     18					;	*******************************************************
+     19					;
+     20					; The code here contains some magic for DECnet (DAP) remote file
+     21					; access.  I have not been able to find documentation on the DAP
+     22					; support that is present in RMS-11 (V2).  My current understanding
+     23					; of this, through experimentation, is as follows:
+     24					;
+     25					;	1. $PARSE fails with RMS status ER$UIN when given a file
+     26					;	   specification containing a node name, but seems to
+     27					;	   merge the input string and defaults into the expanded
+     28					;	   string buffer anyway.  It also sets the file specification
+     29					;	   mask.  I have assumed that the ER$UIN error is encountered
+     30					;	   in $PARSE after the merging of the default and input
+     31					;	   filespec information, and reflects the "fact" that RMS-11
+     32					;	   (V2) DOES NOT SUPPORT WILDCARDING ON REMOTE FILE ACCESS.
+     33					;
+     34					;	2. Therefore, lookup() has been modified to return the
+     35					;	   expanded string if its second calling parameter (index)
+     36					;	   is zero (1st call) and there is either a node name or a
+     37					;	   quoted literal in the spec, no wildcards and the error
+     38					;	   is ER$UIN.
+     39					;
+     40					;	3. fparse() has been modified to accept if the error is ER$UIN,
+     41					;	   and if there are no wildcards and there is a node name present.
+     42					;	   The FB$FID bit is cleared, however, so that the original
+     43					;	   file spec string and the defaults will be used by $OPEN.
+     44					;
+     45					;	4. The "SY:" defaulting is not necessary, and in fact causes
+     46					;	   remote accesses to fail on VMS systems, where "SY:" has
+     47					;	   no conventional meaning.
+     48					;
+     49					;	5. The other routines which use $parse have been similarly
+     50					;	   modified to use the expanded string once only.
+     51					;
+     52					;	6. Finally, the NAMCVT routine in K11M41 was changed to handle
+     53					;	   quoted sections in strings and node names.  This was the
+     54					;	   hardest part of the DAP adaptation.
+     55					;
+     56					; I have to believe that $parse and friends act this way because remote
+     57					; wildcarding got "left out" at the last minute because of scheduling
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 1-1
+
+
+     58					; problems in the RMS group.  The code I have added here should permit
+     59					; remote wildcarding when it is turned on by the RMS folks.
+     60					;
+     61					; Bob Denny	03-Mar-84
+     62					;
+     63					;
+     64					;
+     65					; Please note that RSTS rms11 requires a real default device. I thus
+     66					; have to put my origional default for SY: back in for RSTS only. We
+     67					; will determine this at tkb time by defining a global called FU$DEF
+     68					; to be <> 0 in K11E80.MAC  and = 0 in K11M41.MAC.
+     69					;
+     70					;
+     71					; Brian Nelson  16-Mar-84  17:34:19
+     72					;
+     73					; BDN 17-Feb-87  08:57:48  Re-do the allocation of record buffers so
+     74					;			   can GBLDEF the size during TKB. This will
+     75					;			   allow the I/D space Kermit to handle much
+     76					;			   larger ascii records.
+     77
+     78
+     79					;	define macros and things we want for KERMIT-11
+     80
+     81						.if ndf, k11inc
+     82						.ift
+     83
+     84
+     85						.if ndf, K11INC
+     86						.ift
+     87						.include	/IN:K11MAC.MAC/
+     88						.endc
+     89
+     90						.endc
+     91						.iif ndf, k11inc, .error ; INCLUDE for IN:K11MAC.MAC failed
+     92
+     93
+     94					;	This is K11RMS.MAC,  the RMS11 version 2 i/o interface for
+     95					;	Kermit on RSTS version 8, RSX11M+ v2.1 and RSX11M v4.1. It
+     96					;	is,  without a doubt,  the worst part of Kermit due RMS11,
+     97					;	but it's strong points are  future uses and the RSX / RSTS
+     98					;	transportability.  An example of "future uses" is DECnet
+     99					;	remote file access (DAP) support now present.
+    100					;
+    101					;
+    102					;	open  ( %loc filename, %val channel_number ,%val type )
+    103					;	create( %loc filename, %val channel_number ,%val type )
+    104					;	getrec( %loc buffer  , %val channel_number ) { returns RSZ in R1}
+    105					;	putrec( %loc buffer  , %val record_size    ,%val channel_number )
+    106					;	close ( %val channel_number )
+    107					;	putc  ( %val char    , %val channel_number )
+    108					;	getc  ( %val channel_number )
+    109
+    110
+    111		000015 				cr	=	15
+    112		000012 				lf	=	12
+    113		000014 				ff	=	14
+    114		000001 				soh	=	1
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 1-2
+
+
+    115					;
+    116					; This isn't defined globally. (??)
+    117					;
+    118		000400 				nb$nod	=	400	; Node in file or default string (FNB in NAM)
+    119
+    120						.enabl	gbl
+    121
+    122	000000					.psect	$code	,ro,i,lcl,rel,con
+    123	000000					.psect	rmssup	,rw,d,lcl,rel,con
+    124
+    125
+    126						.mcall	fabof$
+    127						.mcall	rabof$
+    128						.mcall	xabof$
+    129						.mcall	ifaof$
+    130
+    131	000000					fabof$	RMS$L
+    132	000000					rabof$	RMS$L
+    133	000000					xabof$	RMS$L
+    134	000000					ifaof$	RMS$L
+    135
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 2
+
+
+    137						.mcall	fab$b	,fab$e	,rab$b	,rab$e
+    138						.mcall	xab$b	,xab$e
+    139						.mcall	nam$b	,nam$e
+    140						.mcall	$initif	,org$
+    141						.mcall	pool$b	,pool$e	,p$bdb	,p$fab
+    142						.mcall	p$rabx	,p$idx	,p$buf
+    143
+    144						.mcall	$compar	,$fetch	,$store	,$rewin
+    145						.mcall	$close	,$creat	,$erase	,$open
+    146						.mcall	$connec	,$delet	,$discon,$find
+    147						.mcall	$get	,$put	,$updat	,$flush
+    148						.mcall	$read	,$write	,$off	,$set
+    149						.mcall	$testbits
+    150
+    151
+    152	000000					org$	SEQ,<CRE,DEL,GET,PUT>
+    153
+    154	000000					.psect	rmssup	,rw,d,lcl,rel,con ; ORG$ macro needs .save/.restore
+    155
+    156
+    157						.if ne	,0			; Decide whether or not to use
+    158						.ift				; dynamic space allocation by
+    159										; task extension or to use
+    160					rmsbuf:	pool$b				; static pools
+    161						p$rab	6			; plenty of record streams
+    162						p$bdb	6			; same goes for block buffers
+    163						p$fab	4			; up to 3 fabs (needed for search)
+    164						p$buf	3072.			; for 2 files and directory i/o
+    165						pool$e				; end of static pool
+    166
+    167						.iff				; use task extension for space
+    168										; routine modifed from GSA example
+    169						.mcall	gsa$			; from RMS v2.0 distribution.
+    170	000000					gsa$	gsa			; set our GSA address
+    171						.globl	gsa			; it may be global
+    172
+    173						.endc				; to decide on pool allocation
+    174
+    175	000000					.psect	rmssup	,rw,d,lcl,rel,con ; GSA$ macro needs .save/.restore
+    176
+    177
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 3
+Rms file access blocks
+
+    179						.sbttl	rms file access blocks
+    180
+    181		000003 				facc	=	fb$get ! fb$put
+    182
+    183	000000				fab1:	fab$b
+    184	000120					f$alq	0			; initial allocation of 10 blocks
+    185	000120					f$fac	facc			; allowed i/o operations
+    186	000120					f$fna	nam1			; name of the file
+    187	000120					f$fns	0			; length of the filename
+    188	000120					f$fop	fb$sup			; supercede old versions
+    189	000120					f$lch	lun1			; channel number to use
+    190	000120					f$org	fb$seq			; seq
+    191	000120					f$rat	fb$cr			; implied carriage control
+    192	000120					f$rfm	fb$var			; variable length records
+    193	000120					f$xab	datxb1			; Date info
+    194	000120					fab$e
+    195	000120				fab1en:
+    196
+    197	000120				fab2:	fab$b
+    198	000240					f$alq	0			; initial allocation of 10 blocks
+    199	000240					f$fac	facc			; allowed i/o operations
+    200	000240					f$fna	nam2			; name of the file
+    201	000240					f$fns	0			; length of the filename
+    202	000240					f$fop	fb$sup			; supercede old versions
+    203	000240					f$lch	lun2			; channel number to use
+    204	000240					f$org	fb$seq			; seq
+    205	000240					f$rat	fb$cr			; implied carriage control
+    206	000240					f$rfm	fb$var			; variable length records
+    207	000240					f$xab	datxb2			; Date info
+    208	000240					fab$e
+    209	000240				fab2en:
+    210
+    211
+    212	000240				fab3:	fab$b
+    213	000360					f$alq	0			; initial allocation of 10 blocks
+    214	000360					f$fac	facc			; allowed i/o operations
+    215	000360					f$fna	nam3			; name of the file
+    216	000360					f$fns	0			; length of the filename
+    217	000360					f$fop	fb$sup			; supercede old versions
+    218	000360					f$lch	lun3			; channel number to use
+    219	000360					f$org	fb$seq			; seq
+    220	000360					f$rat	fb$cr			; implied carriage control
+    221	000360					f$rfm	fb$var			; variable length records
+    222	000360					f$xab	datxb3			; Date info
+    223	000360					fab$e
+    224	000360				fab3en:
+    225
+    226
+    227	000360				fab4:	fab$b
+    228	000500					f$alq	0			; initial allocation of 10 blocks
+    229	000500					f$fac	facc			; allowed i/o operations
+    230	000500					f$fna	nam4			; name of the file
+    231	000500					f$fns	0			; length of the filename
+    232	000500					f$fop	fb$sup			; supercede old versions
+    233	000500					f$lch	lun4			; channel number to use
+    234	000500					f$org	fb$seq			; seq
+    235	000500					f$rat	fb$cr			; implied carriage control
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 3-1
+Rms file access blocks
+
+    236	000500					f$rfm	fb$var			; variable length records
+    237	000500					f$xab	datxb4			; Date info
+    238	000500					fab$e
+    239
+    240	000500					GLOBAL	<MAXSIZ>
+    241
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 4
+Rms file access blocks
+
+    243	000500					.psect	rmssup	,rw,d,lcl,rel,con
+    244
+    245	000500	   123 	   131 	   072 	sydisk::.ascii	/SY:/
+    246		000003 			sylen	==	. - sydisk
+    247						.even
+    248		000500'			sydska	==	sydisk
+    249		000003 			sydskl	==	sylen
+    250
+    251					;								;RBD01--
+    252					;	pointers to buffer and fabs
+    253					;
+    254					;	While none of this is really needed since all this info is
+    255					;	available in  the FAB and RAB,  I find it cleaner to do it
+    256					;	this way and thus avoid having to look at the  RMS control
+    257					;	structures.
+    258
+    259	000504	000000 	000000'	000120'	fablst::.word	0	,fab1	,fab2	,fab3	,fab4
+	000512	000240'	000360'
+    260	000516	000000 	002574'	002674'	namlst::.word	0	,nam1	,nam2	,nam3	,nam4
+	000524	002774'	003074'
+    261	000530	000000 	000000 	000000 	namlen::.word	0	,0	,0	,0	,0
+	000536	000000 	000000
+    262	000542	000000 	005474'	005614'	rablst::.word	0	,rab1	,rab2	,rab3	,rab4
+	000550	005734'	006054'
+    263	000554	004430'	004472'	004472'	buflst:	.word	ttbuf	,buf1	,buf2	,buf3	,buf4
+	000562	004472'	004472'
+    264	000566	004430'	004472'	004472'	bufdef:	.word	ttbuf	,buf1	,buf2	,buf3	,buf4
+	000574	004472'	004472'
+    265	000600	000040 	000000G	000000G	bufsiz:	.word	TTBSIZ	,MAXSIZ	,MAXSIZ	,MAXSIZ	,MAXSIZ
+	000606	000000G	000000G
+    266	000612	004472'	004472'	004472'	bigbuf:	.word	bufx	,bufx	,bufx	,bufx	,bufx
+	000620	004472'	004472'
+    267	000624	177777 	000000 	000000 	filtyp:	.word	TERMINAL,TEXT	,TEXT	,TEXT	,TEXT
+	000632	000000 	000000
+    268	000636	000000 	000000 	000000 	bufp:	.word	0	,0	,0	,0	,0
+	000644	000000 	000000
+    269	000650	000000 	000000 	000000 	bufs:	.word	0	,0	,0	,0	,0
+	000656	000000 	000000
+    270	000662	000001 	000000 	000000 	mode:	.word	1	,0	,0	,0	,0
+	000670	000000 	000000
+    271	000674	000000 	000000 	000000 	blknum:	.word	0	,0	,0	,0	,0
+	000702	000000 	000000
+    272	000706	000000 	000000 	000000 	itsopen:.word	0	,0	,0	,0	,0
+	000714	000000 	000000
+    273
+    274		000156 				FILSIZ	==	110.
+    275		000140 				BINLSIZ	==	30*4
+    276
+    277	000720				defdir::.blkb	FILSIZ+2		; default directory for send and rec
+    278	001100				srcnam::.blkb	FILSIZ+2		; original send filespec
+    279	001260				filnam::.blkb	FILSIZ+2		; output from directory lookup routine
+    280	001440				asname::.blkb	FILSIZ+2		; for SEND file [as] file
+    281	001620				$cmdbu::.blkb	120
+    282	001740				$argbu::.blkb	120
+    283	002060	002062'			bintyp::.word	10$
+    284	002062	000140 			10$:	.rept	BINLSIZE
+    285						.byte	0
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 4-1
+Rms file access blocks
+
+    286						.endr
+    287	002222	002224'			totp.r::.word	10$
+    288	002224	000034 			10$:	.rept	34
+    289						.word	0,0
+    290						.endr
+    291	002404	002406'			totp.s::.word	10$
+    292	002406	000034 			10$:	.rept	34
+    293						.word	0,0
+    294						.endr
+    295
+    296					;	this sets the default for creating text files
+    297
+    298	002566	000002 			df$rat::.word	fb$cr
+    299	002570	000002 			df$rfm::.word	fb$var
+    300	002572	000000 			en$siz::.word	0			; for RT11 compatibilty
+    301
+    302		000532'			namln1	=	namlen+2
+    303		000534'			namln2	=	namlen+4
+    304		000536'			namln3	=	namlen+6
+    305		000540'			namln4	=	namlen+10
+    306
+    307	002574	000100 			nam1:	.rept	100
+    308						.byte	0
+    309						.endr
+    310
+    311	002674	000100 			nam2:	.rept	100
+    312						.byte	0
+    313						.endr
+    314
+    315	002774	000100 			nam3:	.rept	100
+    316						.byte	0
+    317						.endr
+    318
+    319	003074	000100 			nam4:	.rept	100
+    320						.byte	0
+    321						.endr
+    322						.even
+    323
+    324
+    325	003174				packet::.blkb	MAXLNG+100		; /51/ Moved.
+    326						.even
+    327
+    328	004424	000000 	000000 		top:	.LIMIT
+    329
+    330		000040 				TTBSIZ	=	40
+    331	004430				ttbuf:	.blkb	TTBSIZ+2
+    332
+    333	004472				buf1:	.iif df, MAXSIZ, .blkb MAXSIZ+2	; /56/ Dynamic or static setup?
+    334	004472				buf2:	.iif df, MAXSIZ, .blkb MAXSIZ+2	; /56/ ...
+    335	004472				buf3:	.iif df, MAXSIZ, .blkb MAXSIZ+2	; /56/ ....
+    336	004472				buf4:	.iif df, MAXSIZ, .blkb MAXSIZ+2	; /56/ .....
+    337
+    338	004472				bufx:	.blkb	1002			; one large buffer to share
+    339
+    340
+    341		000001 			lun1	=	1
+    342		000002 			lun2	=	2
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 4-2
+Rms file access blocks
+
+    343		000003 			lun3	=	3
+    344		000004 			lun4	=	4
+    345		000004 			maxlun	=	lun4
+    346
+    347
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 5
+Rms record access blocks
+
+    349						.sbttl	rms record access blocks
+    350
+    351	005474				rab1:	rab$b				; define record access block
+    352	005614					r$fab	fab1			; associate a fab with this rab
+    353	005614					r$rac	rb$seq			; access by keys
+    354	005614					r$rbf	buf1			; where to return the data
+    355	005614					r$ubf	buf1			; where to return the data
+    356	005614					rab$e				; end of record access block
+    357
+    358	005614				rab2:	rab$b				; define record access block
+    359	005734					r$fab	fab2			; associate a fab with this rab
+    360	005734					r$rac	rb$seq			; access by keys
+    361	005734					r$rbf	buf2			; where to return the data
+    362	005734					r$ubf	buf2			; where to return the data
+    363	005734					rab$e				; end of record access block
+    364
+    365	005734				rab3:	rab$b				; define record access block
+    366	006054					r$fab	fab3			; associate a fab with this rab
+    367	006054					r$rac	rb$seq			; access by keys
+    368	006054					r$rbf	buf3			; where to return the data
+    369	006054					r$ubf	buf3			; where to return the data
+    370	006054					rab$e				; end of record access block
+    371
+    372	006054				rab4:	rab$b				; define record access block
+    373	006174					r$fab	fab4			; associate a fab with this rab
+    374	006174					r$rac	rb$seq			; access by keys
+    375	006174					r$rbf	buf4			; where to return the data
+    376	006174					r$ubf	buf4			; where to return the data
+    377	006174					rab$e				; end of record access block
+    378
+    379
+    380
+    381	006174				proxab:	xab$b	XB$PRO			; file protection xab
+    382	006206					x$nxt	0			; no more links
+    383	006206					x$pro	60.			; normal protection of <60>
+    384	006206					xab$e				; end of file protection xab
+    385
+    386	006206				datxb1:	xab$b	XB$DAT
+    387	006254					x$nxt	0
+    388	006254					xab$e
+    389	006254				datxb2:	xab$b	XB$DAT
+    390	006322					x$nxt	0
+    391	006322					xab$e
+    392	006322				datxb3:	xab$b	XB$DAT
+    393	006370					x$nxt	0
+    394	006370					xab$e
+    395	006370				datxb4:	xab$b	XB$DAT
+    396	006436					x$nxt	0
+    397	006436					xab$e
+    398
+    399	000000					.psect	$code
+    400
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 6
+Set up SST table to catch RMSRES missing
+
+    402						.sbttl	Set up SST table to catch RMSRES missing
+    403
+    404						.mcall	SVTK$S,EXST$S,EXTK$S	; This code added /53/
+    405						.mcall	GTSK$S
+    406
+    407					;	Dynamic record buffer allocation and dynamic recall buffer
+    408					;	allocation added /56/
+    409
+    410
+    411						.save				; Save current PSECT
+    412	006436					.psect	RMSSUP	,D		; Switch to a data psect
+    413						.even				; Insure this
+    414	006436	000000 	000000 	000340'	tbl:	.word	0,0,norms		; Missing RMS gives a BPT trap
+    415	006444	   015 	   012 		nolib:	.byte	CR,LF
+    416	006446	   120 	   162 	   157 		.ascii	/Probable cause: Either RMSRES or an RMS satellite/<CR><LF>
+	006451	   142 	   141 	   142
+	006454	   154 	   145 	   040
+	006457	   143 	   141 	   165
+	006462	   163 	   145 	   072
+	006465	   040 	   105 	   151
+	006470	   164 	   150 	   145
+	006473	   162 	   040 	   122
+	006476	   115 	   123 	   122
+	006501	   105 	   123 	   040
+	006504	   157 	   162 	   040
+	006507	   141 	   156 	   040
+	006512	   122 	   115 	   123
+	006515	   040 	   163 	   141
+	006520	   164 	   145 	   154
+	006523	   154 	   151 	   164
+	006526	   145 	   015 	   012
+    417	006531	   162 	   145 	   163 		.asciz	/resident library is not installed on this system./<CR><LF>
+	006534	   151 	   144 	   145
+	006537	   156 	   164 	   040
+	006542	   154 	   151 	   142
+	006545	   162 	   141 	   162
+	006550	   171 	   040 	   151
+	006553	   163 	   040 	   156
+	006556	   157 	   164 	   040
+	006561	   151 	   156 	   163
+	006564	   164 	   141 	   154
+	006567	   154 	   145 	   144
+	006572	   040 	   157 	   156
+	006575	   040 	   164 	   150
+	006600	   151 	   163 	   040
+	006603	   163 	   171 	   163
+	006606	   164 	   145 	   155
+	006611	   056 	   015 	   012
+	006614	   000
+    418						.even
+    419	000000					.restore			; Pop old psect
+    420						.enabl	lsb
+    421
+    422
+    423	000000	012703 	000000G		Rmsini::mov	#MAXSIZ	,r3		; Allocate record buffers
+    424	000004	010367 	000036'			mov	r3	,O$MRS+fab1	; Since we are allocating
+    425	000010	010367 	000156'			mov	r3	,O$MRS+fab2	; the RMS record buffers at
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 6-1
+Set up SST table to catch RMSRES missing
+
+    426	000014	010367 	000276'			mov	r3	,O$MRS+fab3	; run time we will can't
+    427	000020	010367 	000416'			mov	r3	,O$MRS+fab4	; fill these fields in with
+    428	000024	010367 	005520'			mov	r3	,O$USZ+rab1	; ...MAC
+    429	000030	010367 	005640'			mov	r3	,O$USZ+rab2	; .... and so on
+    430	000034	010367 	005760'			mov	r3	,O$USZ+rab3	; ....
+    431	000040	010367 	006100'			mov	r3	,O$USZ+rab4	; ....
+    432										;
+    433						.If df	,MAXSIZ			; Dynamic or static today?
+    434						.Ift				; Static
+    435										;
+    436						mov	#buf1	,r2		; So get the preallocated buffers
+    437						mov	top+2	,r4		;
+    438						.Iff				; Dynamic allocation
+    439										;
+    440	000044	072327 	177774 			ash	#-<6-2>	,r3		; We need 4 buffers, in 64 byte
+    441	000050	062703 	000002 			add	#2	,r3		; chuncks. Add a safety margin
+    442	000054					EXTK$S	r3			; Ask for the memory
+    443	000066	103465 				bcs	110$			; Oops, we will have to die.
+    444	000070	016702 	004426'			mov	top+2	,r2		; The higest virtual address+2
+    445	000074	062702 	000002 			add	#2	,r2		; filled in by TKB via .LIMIT
+    446	000100	042702 	000001 			bic	#1	,r2		; Insure even
+    447										;
+    448						.Endc				; .If DF, Maxsiz
+    449										;
+    450	000104	012700 	000004 			mov	#4	,r0		; Number of fields to update
+    451	000110	005003 				clr	r3			; Offset into BUFDEF and BUFLST
+    452	000112	010263 	000570'		10$:	mov	r2	,bufdef+2(r3)	; Insert a record buffer address
+    453	000116	010263 	000556'			mov	r2	,buflst+2(r3)	; Ditto for here also
+    454	000122	062703 	000002 			add	#2	,r3		; Next please
+    455	000126	062702 	000002G			add	#MAXSIZ+2,r2		; Point to the next buffer
+    456	000132	077011 				sob	r0	,10$		; And go do another
+    457						.If ndf	,MAXSIZ			; Setup pointer for command line
+    458	000134	010204 				mov	r2	,r4		; recall buffers if dynamic RMS
+    459						.Endc				; buffer allocation was used
+    460										; Now for command line recall
+    461	000136	012701 	000000G			mov	#LNCNT$	,r1		; buffers. The count is defined
+    462	000142	020127 	000012 			cmp	r1	,#LN$ALL	; via a GBLDEF=LNCNT$:n by TKB.
+    463	000146	003046 				bgt	120$			; Ensure enough vector space. No, die
+    464	000150	012703 	000000C			mov	#<LN$MAX+2>*LNCNT$,r3	; Total byte count for recall buffers
+    465	000154	072327 	177772 			ash	#-6	,r3		; In 64 byte chunks
+    466	000160	062703 	000001 			add	#<LN$MAX+2>/100,r3	; Fix for truncation
+    467	000164					EXTK$S	r3			; Ask for it
+    468	000176	103443 				bcs	130$			; No room, die (should never happen)
+    469	000200	010167 	000000G			mov	r1	,lastcnt	; Save the number of recall buffers
+    470	000204	012702 	000000G			mov	#lastli	,r2		; The pointer array
+    471	000210	010422 			40$:	mov	r4	,(r2)+		; Insert the buffer address
+    472	000212	105014 				clrb	@r4			; Insure the buffer is zapped
+    473	000214	062704 	000122 			add	#LN$MAX+2,r4		; Get to the next one
+    474	000220	077105 				sob	r1	,40$		; And loop
+    475										;
+    476										; Finally, our original purpose.
+    477	000222					SVTK$S	#tbl,#3			; Only want TBIT traps
+    478	000240	000207 				return				; Exit
+    479
+    480
+    481	000242				110$:	Message	<Failure to allocate record buffers>,CR
+    482	000262	000421 				br	200$
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 6-2
+Set up SST table to catch RMSRES missing
+
+    483	000264				120$:	Message	<LN$ALL is less than LNCNT$>,CR
+    484	000304	000410 				br	200$
+    485	000306				130$:	Message	<Failure to allocate command recall buffers>,CR
+    486
+    487	000326				200$:	EXST$S	#EX$SEV			; Die...
+    488
+    489						.dsabl	lsb
+    490
+    491
+    492
+    493	000340				Norms:	MESSAGE	<Breakpoint trap, >	; A message
+    494	000350	011601 				mov	(sp)	,r1		; Dump PC and PS
+    495	000352					MESSAGE	< PC: >			; A header
+    496	000362					OCTOUT	R1			; ...
+    497	000400	016601 	000002 			mov	2(sp)	,r1		; PS
+    498	000404					MESSAGE	<  PSW: >		; ...
+    499	000414					OCTOUT	r1			; ...
+    500	000432	021627 	140000 			cmp	(sp)	,#140000	; Perhaps RMSRES missing?
+    501	000436	103412 				blo	100$			; No
+    502	000440					PRINT	#nolib			; Dump the cause
+    503	000464				100$:	EXST$S	#EX$SEV			; Die
+    504
+    505	000476					Global	<LNCNT$>
+    506
+    507
+    508
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 7
+Create sequential file
+
+    510						.sbttl	create sequential file
+    511	000476					.psect	$code
+    512						.even
+    513
+    514					;	F C R E A T E    and   FOPEN
+    515					;
+    516					;	fcreate( %loc filename; %val channel_number, %val type ,%val mb_count)
+    517					;	fopen  ( %loc filename; %val channel_number, %val type ,%val mb_count)
+    518					;
+    519					;	input:	@r5	filename address
+    520					;		2(r5)	channel number
+    521					;		4(r5)	val 'binary' or 'text' or 0
+    522					;		6(r5)	RMS multiblock count for the stream
+    523					;
+    524					;	output:	r0	rms error code
+    525					;
+    526					;	 Create a variable length sequential implied carriage control
+    527					;	disk file.  If 'type' is 'binary'  then use read/write access
+    528					;	to write  a fixed  512 byte image file. If  channel number is
+    529					;	zero (0),  then initialize  buffer single character  terminal
+    530					;	output.  It is always assumed that channel '0' implies writes
+    531					;	to the attached console terminal.
+    532
+    533						.enabl	lsb
+    534	000476				open::	calls	fopen	,<@r5,2(r5),4(r5),#0>
+    535	000532	000207 				return
+    536
+    537	000534				create::calls	fcreate	,<@r5,2(r5),4(r5),#0>
+    538	000570	000207 				return
+    539
+    540	000572				append::calls	fapnd	,<@r5,2(r5),4(r5),#0>
+    541	000626	000207 				return
+    542
+    543
+    544	000630				fopen::	save	<r1,r2,r3>		; save registers
+    545	000636	004767 	000000G			call	drpprv			; insure no privs are up now	+MJG
+    546	000642	005046 				clr	-(sp)			; flag for open not create
+    547	000644	000417 				br	5$			; and try to do it
+    548
+    549
+    550	000646				fapnd::	save	<r1,r2,r3>		; save registers		+SSH
+    551	000654	004767 	000000G			call	drpprv			; insure no privs		+SSH
+    552	000660	012746 	000001 			mov	#1,-(sp)		; flag for open / append	+SSH
+    553	000664	000407 				br	5$			; and try to do it		+SSH
+    554
+    555
+    556	000666				fcreat::save	<r1,r2,r3>		; save registers
+    557	000674	004767 	000000G			call	drpprv			; insure no privs are up now	+MJG
+    558	000700	012746 	177777 		tcreat:	mov	#-1	,-(sp)		; flag for create
+    559
+    560	000704				5$:	$initif				; initialize rms i/o system if needed
+    561	000710	016500 	000002 			mov	2(r5)	,r0		; get channel number please
+    562	000714	001007 				bne	10$			; not channel zero, do it normally
+    563
+    564	000716	010667 	000706'			mov	sp	,itsopen+0	; flag it as having been initted
+    565	000722	010667 	000662'			mov	sp	,mode+0		; psuedo writing to the terminal
+    566	000726	005067 	000636'			clr	bufp+0			; initialize the terminal's buffer
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 7-1
+Create sequential file
+
+    567	000732	000523 				br	120$			; pointer and exit
+    568
+    569	000734	006300 			10$:	asl	r0			; times 2
+    570	000736	010002 				mov	r0	,r2		; save it please
+    571	000740	016201 	000516'			mov	namlst(r2),r1		; get address of name block
+    572	000744					calls	fparse	,<@r5,r1>	; parse and fill in defaults
+    573	000764	005700 				tst	r0			; did the parse succeed ?
+    574	000766	001105 				bne	120$			; no, exit with RMS error in r0
+    575	000770					strlen	r1			; get the expanded filename length
+    576	000776	010062 	000530'			mov	r0	,namlen(r2)	; and save the length
+    577	001002	010200 				mov	r2	,r0		; get r0 back again please
+    578	001004	016001 	000504'			mov	fablst(r0),r1		; get the file access block
+    579	001010	011602 				mov	@sp	,r2		; pass create/open/append flag	   /SSH
+    580	001012	004767 	000204 			call	settyp			; setup the FAB now
+    581	001016	010002 				mov	r0	,r2		; save the channel number*2
+    582	001020	005716 				tst	@sp			; create or open or append	   /SSH
+    583	001022	100427 				bmi	30$			; if negative then create	   /SSH
+    584
+    585	001024					$open	r1			; try to open existing file	   /SSH
+    586	001050	005716 				tst	@sp			; opening for append ?		   +SSH
+    587	001052	001405 				beq	28$			; no, go setup for read		   +SSH
+    588	001054	010662 	000662'			mov	sp	,mode(r2)	; indicate open for writing	   +SSH
+    589	001060	005062 	000636'			clr	bufp(r2)		; clear single char i/o pointer    +SSH
+    590	001064	000424 				br	40$			; continue with status check	   +SSH
+    591	001066				28$:					;				   +SSH
+    592	001066	012762 	177777 	000636'		mov	#-1	,bufp(r2)	; init for buffer needing a read
+    593	001074	005062 	000662'			clr	mode(r2)		; no writing please
+    594	001100	000416 				br	40$			; check RMS status out now
+    595
+    596	001102				30$:	$creat	r1			; try hard to create the file
+    597	001126	010662 	000662'			mov	sp	,mode(r2)	; open for writing
+    598	001132	005062 	000636'			clr	bufp(r2)		; clear single character i/o pointer
+    599
+    600	001136				40$:	$fetch	r0,sts,r1		; get status back out please
+    601	001142	005700 				tst	r0			; if status > 0 then status = 0
+    602	001144	100423 				bmi	130$			; error if less than zero	   /SSH
+    603	001146	016500 	000002 			mov	2(r5)	,r0		; connect access up now
+    604	001152	006300 				asl	r0			; flag also that we are open
+    605	001154	010660 	000706'			mov	sp	,itsopen(r0)	; simple
+    606	001160	006200 				asr	r0			; restore r0 now
+    607	001162	016501 	000006 			mov	6(r5)	,r1		; and the multiblock count also
+    608	001166	011602 				mov	(sp)	,r2		; and the create/open/append opt   +SSH
+    609	001170	004767 	001424 			call	rmscon			; connect record stream up
+    610	001174	005700 				tst	r0			; if error > 0 then error = 0
+    611	001176	100401 				bmi	120$			; yep
+    612	001200	005000 				clr	r0			; error = 0
+    613
+    614	001202	005726 			120$:	tst	(sp)+			; pop open/create flag
+    615	001204				125$:	unsave	<r3,r2,r1>		; pop registers we saved
+    616	001212	000207 				return				; and exit
+    617
+    618	001214	005726 			130$:	tst	(sp)+			; if error on open for append	   +SSH
+    619	001216	003772 				ble	125$			; no, return with error		   +SSH
+    620	001220	000627 				br	tcreat			; yes, try creating the file	   +SSH
+    621
+    622	001222					global	<drpprv>		;				+MJG
+    623
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 7-2
+Create sequential file
+
+    624						.dsabl	lsb
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 8
+Setup things for open/create in the FAB
+
+    626						.sbttl	setup things for open/create in the FAB
+    627
+    628
+    629					;	S E T T Y P
+    630					;
+    631					;	input:	r0	channel number times 2
+    632					;		r2	<> 0 implies create
+    633					;		r5	--> open/create parameter list
+    634					;
+    635		000057 				fbrw	=	fb$rea ! fb$wri
+    636
+    637	001222	016001 	000504'		settyp::mov	fablst(r0),r1
+    638	001226	005060 	000674'			clr	blknum(r0)		; in case of read/write mode
+    639	001232	012760 	000000G	000600'		mov	#MAXSIZ	,bufsiz(r0)	; default for the buffer size
+    640	001240	012760 	000000 	000624'		mov	#text	,filtyp(r0)	; assume ascii text files for now
+    641	001246	016060 	000566'	000554'		mov	bufdef(r0),buflst(r0)	; set a default record buffer also
+    642	001254	005060 	000650'			clr	bufs(r0)		; clear single character i/o recsiz
+    643	001260					$store	#proxab,XAB,r1		; /59/ Get the protection out.
+    644	001266					$store	namlen(r0),FNS,r1
+    645	001274					$store	#fb$seq,ORG,r1		; insure sequential by default
+    646	001302					$store	df$rat ,RAT,r1		; implied carriage control
+    647	001310					$store	df$rfm ,RFM,r1		; and also variable length records
+    648	001316					$store	#fb$get,FAC,r1		; insure readonly please
+    649	001324	005767 	000000G			tst	fu$def			; do we require a default device
+    650	001330	001406 				beq	1$			; no
+    651	001332					$store	#sydisk,DNA,r1		; yes, stuff the correct def dev in
+    652	001340					$store	#sylen ,DNS,r1		; and the length of it also please
+    653	001346	005702 			1$:	tst	r2			; if creating or appending the file /SSH
+    654	001350	001411 				beq	10$			; no				    /SSH
+    655	001352					$store	#<fb$put>,FAC,r1 	; yes, get put access   	    /SSH
+    656	001360	016767 	000000G	006204'		mov	at$pr0	,proxab+O$PRO	; /59/ Protection explicity set?
+    657	001366	001002 				bne	10$			; /59/ Yes
+    658	001370					$store	#0,XAB,r1		; /59/ No, remove the protection XAB
+    659	001374	026527 	000004 	000001 	10$:	cmp	4(r5)	,#binary	; is this a binary file ?
+    660	001402	001040 				bne	100$			; no, just exit
+    661
+    662	001404	012760 	001000 	000600'		mov	#1000	,bufsiz(r0)	; yes, fix it up for that
+    663	001412	016060 	000612'	000554'		mov	bigbuf(r0),buflst(r0)	; setup a large i/o buffer please
+    664	001420	012760 	000001 	000624'		mov	#binary	,filtyp(r0)	; please
+    665	001426					$store	#0	,RAT,r1		; no cr/lf implied please
+    666	001432					$store	#fb$fix	,RFM,r1		; fixed length also
+    667	001440					$store	#fb$rea	,FAC,r1		; assume read only please
+    668	001446	005702 				tst	r2			; readonly ?
+    669	001450	001403 				beq	30$			; yes
+    670	001452					$store	#fbrw	,FAC,r1		; read/write mode needed ?
+    671	001460				30$:	save	<r2,r3>			; zero out the big buffer
+    672	001464	016002 	000554'			mov	buflst(r0),r2		; get the buffer address
+    673	001470	012703 	001000 			mov	#1000	,r3		; 1000 (8) bytes please
+    674	001474	105022 			40$:	clrb	(r2)+			; simple
+    675	001476	077302 				sob	r3	,40$		; next please
+    676	001500					unsave	<r3,r2>			; pop registers we just used
+    677
+    678	001504				100$:	$store	bufsiz(r0),MRS,r1	; stuff max recordsize in please
+    679	001512	000207 				return
+    680
+    681	001514					global	<fu$def>
+    682	001514					GLOBAL	<AT$PR0>		; /59/ Protection mask
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 8-1
+Setup things for open/create in the FAB
+
+    683
+    684
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 9
+Close a file
+
+    686						.sbttl	close a file
+    687
+    688
+    689	001514				close::	save	<r1,r2,r3>		; save registers we may have
+    690	001522	011500 				mov	@r5	,r0		; get the lun
+    691	001524	006300 				asl	r0			; times 2
+    692	001526	005760 	000706'			tst	itsopen(r0)		; check for lun being open
+    693	001532	001446 				beq	90$			; no, skip all this then
+    694	001534	005060 	000706'			clr	itsopen(r0)		; not anymore please
+    695	001540	004767 	002270 			call	flush			; dump out any remaining buffer
+    696	001544	011500 				mov	@r5	,r0		; then disconnect the access stream
+    697	001546	001441 				beq	100$			; terminal
+    698
+    699	001550	006300 				asl	r0			; channel number times 2
+    700	001552	005760 	000662'			tst	mode(r0)		; writing to it today?
+    701	001556	001407 				beq	10$			; no
+    702	001560					calls	atrfin	,<@r5>		; yes, perhaps do attribute things
+    703	001576	011500 			10$:	mov	@r5	,r0		; then disconnect the access stream
+    704	001600	004767 	001110 			call	rmsdis			; by doing a $disconnect
+    705	001604	011501 				mov	@r5	,r1		; get the FAB for the file open on
+    706	001606	006301 				asl	r1			; the passed channel
+    707	001610	016101 	000504'			mov	fablst(r1),r1		;
+    708	001614					$close	r1			; try hard to close the file
+    709	001640					$fetch	r0,sts,r1		; get status back out please
+    710	001644	005700 				tst	r0			; if status > 0 then status = 0
+    711	001646	002401 				blt	100$			; error if less than zero
+    712	001650	005000 			90$:	clr	r0			; make > 0 status eq 0
+    713	001652				100$:	unsave	<r3,r2,r1>
+    714	001660	000207 				return
+    715
+    716
+    717	001662	011500 			rewind::mov	@r5	,r0
+    718	001664	001415 				beq	100$
+    719	001666	006300 				asl	r0
+    720	001670	016000 	000542'			mov	rablst(r0),r0
+    721	001674					$rewind	r0
+    722	001720	005000 			100$:	clr	r0
+    723	001722	000207 				return
+    724
+    725
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 10
+Try to determine if a file needs binary xfer mode
+
+    727						.sbttl	try to determine if a file needs binary xfer mode
+    728
+    729					;	B I N F I L
+    730					;
+    731					;	input:	@r5	address of the filename
+    732					;		2(r5)	lun
+    733					;	output:	r0	< 0 then RMS error
+    734					;		r0	> 0 then the file is most likely binary
+    735
+    736
+    737	001724				binfil::save	<r1,r2,r3,r4>		; save registers we may use
+    738	001734	005004 				clr	r4			; nothing is open as of yet
+    739	001736					calls	chkext	,<@r5>		; check file based on filetype
+    740	001754	005700 				tst	r0			; assume a binary file ?
+    741	001756	001114 				bne	100$			; yep
+    742	001760	016502 	000002 			mov	2(r5)	,r2		; get the lun
+    743	001764	006302 				asl	r2			; times 2
+    744	001766	016202 	000504'			mov	fablst(r2),r2		; get the fab address now
+    745	001772					$fetch	r3,XAB,r2		; save the xab link address
+    746	001776	004767 	000000G			call	getuic			; for RSTS, skip the protection XAB
+    747	002002	000300 				swab	r0			; if the user is not privledged
+    748	002004	120027 	000001 			cmpb	r0	,#1		; since RMS uses the UU.LOK directive
+    749	002010	001003 				bne	5$			; which may be patched to fail.
+    750	002012					$store	#proxab,XAB,r2		; and stuff our own into it
+    751	002020				5$:	calls	open	,<@r5,2(r5),#binary>
+    752	002050	005700 				tst	r0			; did the open work
+    753	002052	100454 				bmi	90$			; no
+    754	002054	010604 				mov	sp	,r4		; flag that it's open
+    755
+    756	002056	004767 	004002 			call	getsys			; if this is RSTS then a protection
+    757	002062	120027 	000004 			cmpb	r0	,#sy$rsts	; bit of 100 being set indicates an
+    758	002066	001006 				bne	10$			; executable file
+    759	002070	012701 	006174'			mov	#proxab	,r1		; get the xab for the protection code
+    760	002074					$testbit #100,PRO,r1		; if set, then it's executable
+    761	002102	001023 				bne	40$			; assume it's binary
+    762
+    763	002104				10$:	$testbit #<fb$rel!fb$idx>,ORG,r2; indexed or relative file ?
+    764	002112	001017 				bne	40$			; yes, it must be sent as a binary file
+    765	002114					$compare #fb$stm,RFM,r2		; stream ascii file ?
+    766	002122	001411 				beq	30$			; yes, assume not binary then
+    767	002124					$testbit #FB$FTN,RAT,r2		; /47/ Please not for Fortran files
+    768	002132	001005 				bne	30$			; /47/ Ok
+    769	002134					$testbit #fb$cr,RAT,r2		; implied carriage control ?
+    770	002142	001001 				bne	30$			; yes, assume not 8 bit then
+    771	002144	000402 				br	40$			; anything else is binary please
+    772
+    773
+    774	002146	005046 			30$:	clr	-(sp)			; flag as most likely being ascii
+    775	002150	000402 				br	50$			; bye
+    776	002152	012746 	000001 		40$:	mov	#1	,-(sp)		; flag as being binary and exit
+    777	002156	005704 			50$:	tst	r4			; ever opened up ?
+    778	002160	001410 				beq	60$			; no
+    779	002162					calls	close	,<2(r5)>	; close up
+    780	002202	012600 			60$:	mov	(sp)+	,r0
+    781	002204				90$:	$store	r3,XAB,r2		; restore old xab links, if any
+    782
+    783	002210				100$:	unsave	<r4,r3,r2,r1>		; bye
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 10-1
+Try to determine if a file needs binary xfer mode
+
+    784	002220	000207 				return
+    785
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 11
+Getatr	return attributes for a file already open
+
+    787						.sbttl	getatr	return attributes for a file already open
+    788
+    789						.mcall	ifaof$			; access the ifab for the fab
+    790	002222					ifaof$	rms$l			; get the ifab symbols defined
+    791
+    792
+    793	002222	011501 			getsiz::mov	@r5	,r1		; return error in r0, size in r1
+    794	002224	006301 				asl	r1			; lun times 2
+    795	002226	016101 	000504'			mov	fablst(r1),r1		; fab for this file
+    796	002232	016101 	000012 			mov	<o$alq+0>(r1),r1	; get the size please
+    797	002236	005000 				clr	r0			; no errors
+    798	002240	000207 				return				; exit
+    799
+    800	002242	011500 			getpro::mov	@r5	,r0		; size in r0
+    801	002244	006300 				asl	r0			; lun times 2
+    802	002246	016000 	000504'			mov	fablst(r0),r0		; fab for this file
+    803	002252	016000 	000030 			mov	O$XAB(r0),r0		; get the protection please
+    804	002256	016000 	000010 			mov	O$PRO(r0),r0		; ...
+    805	002262	000207 				return				; exit
+    806
+    807
+    808
+    809					;	Getcdt	Return time/date of creation, system (ie, RMS vs RT) dep.
+    810					;
+    811					;	Passed:	2(r5)	Channel number file is open on
+    812					;	Return:	R0	Zero if failure (internal error) else address of
+    813					;			64 byte Smithsonian date format
+    814
+    815
+    816	002264	011500 			Getcdt::mov	@r5	,r0		; Channel
+    817	002266	001411 				beq	100$			; Oops
+    818	002270	006300 				asl	r0			; Word offsets
+    819	002272	016000 	000504'			mov	FABLST(r0),r0		; Get the fab
+    820	002276	001405 				beq	100$			; Impossible
+    821	002300	016000 	000030 			mov	O$XAB(r0),r0		; XAB address
+    822	002304	001402 				beq	100$			; Nothing
+    823	002306	062700 	000016 			add	#O$CDT	,r0		; Point to 4word creation dat/tim
+    824	002312	000207 			100$:	return				; Exit
+    825
+    826	002314	011500 			Putcdt::mov	@r5	,r0		; Channel
+    827	002316	001417 				beq	100$			; Oops
+    828	002320	006300 				asl	r0			; Word offsets
+    829	002322	016000 	000504'			mov	FABLST(r0),r0		; Get the fab
+    830	002326	001413 				beq	100$			; Impossible
+    831	002330	016000 	000030 			mov	O$XAB(r0),r0		; XAB address
+    832	002334	001410 				beq	100$			; Nothing
+    833	002336	062700 	000016 			add	#O$CDT	,r0		; Point to 4word creation dat/tim
+    834	002342	016501 	000002 			mov	2(r5)	,r1		; Data
+    835	002346	012120 				mov	(r1)+	,(r0)+		; Copy it
+    836	002350	012120 				mov	(r1)+	,(r0)+		; .Copy it
+    837	002352	012120 				mov	(r1)+	,(r0)+		; ..Copy it
+    838	002354	012120 				mov	(r1)+	,(r0)+		; ...Copy it
+    839	002356	000207 			100$:	return				; Exit
+    840
+    841
+    842	002360				getatr::save	<r1,r2>			; save these please
+    843	002364	011501 				mov	@r5	,r1		; the channel number please
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 11-1
+Getatr	return attributes for a file already open
+
+    844	002366	006301 				asl	r1			; times two please
+    845	002370	016101 	000504'			mov	fablst(r1),r1		; simple
+    846	002374	016101 	000004 			mov	o$ifi(r1),r1		; and now we are at the ifab
+    847	002400	016502 	000002 			mov	2(r5)	,r2		; where to copy the attributes to
+    848	002404	116122 	000033 			movb	f$ratt(r1),(r2)+	; stuff the input record attributes
+    849	002410	116122 	000032 			movb	f$forg(r1),(r2)+	; also stuff the input file org in
+    850	002414	016122 	000034 			mov	f$rsiz(r1),(r2)+	; and the input record size please
+    851	002420	016122 	000036 			mov	f$hvbn(r1),(r2)+	; and the input eof markers
+    852	002424	016122 	000040 			mov	f$lvbn(r1),(r2)+	; like hi and low virtual block
+    853	002430	016122 	000042 			mov	f$heof(r1),(r2)+	; and the high and low eof block
+    854	002434	016122 	000044 			mov	f$leof(r1),(r2)+	; numbers also
+    855	002440	016122 	000046 			mov	f$ffby(r1),(r2)+	; and, at last, the first free byte
+    856	002444	116122 	000051 			movb	f$hdsz(r1),(r2)+	; VFC header size next
+    857	002450	116122 	000050 			movb	f$bksz(r1),(r2)+	; and largest bucket size
+    858	002454	016122 	000052 			mov	f$mrs(r1) ,(r2)+	; the maximum record size
+    859	002460	016122 	000054 			mov	f$deq(r1) ,(r2)+	; and the default extenstion size
+    860	002464	016122 	000056 			mov	f$rtde(r1),(r2)+	; and the run time extentsion size
+    861	002470				100$:	unsave	<r2,r1>			; all done
+    862	002474	005000 				clr	r0			; say it worked ok
+    863	002476	000207 				return
+    864
+    865
+    866
+    867	002500				putatr::save	<r1,r2>			; save these please
+    868	002504	011501 				mov	@r5	,r1		; the channel number please
+    869	002506	006301 				asl	r1			; times two please
+    870	002510	016101 	000504'			mov	fablst(r1),r1		; simple
+    871	002514	016101 	000004 			mov	o$ifi(r1),r1		; and now we are at the ifab
+    872	002520	016502 	000002 			mov	2(r5)	,r2		; where to get the attributes from
+    873	002524	112261 	000033 			movb	(r2)+	,f$ratt(r1)	; stuff the input record attributes
+    874	002530	112261 	000032 			movb	(r2)+	,f$forg(r1)	; also stuff the input file org in
+    875	002534	012261 	000034 			mov	(r2)+	,f$rsiz(r1)	; and the input record size please
+    876	002540	012261 	000036 			mov	(r2)+	,f$hvbn(r1)	; and the input eof markers
+    877	002544	012261 	000040 			mov	(r2)+	,f$lvbn(r1)	; like hi and low virtual block
+    878	002550	012261 	000042 			mov	(r2)+	,f$heof(r1)	; and the high and low eof block
+    879	002554	012261 	000044 			mov	(r2)+	,f$leof(r1)	; numbers also
+    880	002560	012261 	000046 			mov	(r2)+	,f$ffby(r1)	; and, at last, the first free byte
+    881	002564	112261 	000051 			movb	(r2)+	,f$hdsz(r1)	; VFC header size next
+    882	002570	112261 	000050 			movb	(r2)+	,f$bksz(r1)	; and largest bucket size
+    883	002574	012261 	000052 			mov	(r2)+	,f$mrs(r1) 	; the maximum record size
+    884	002600	012261 	000054 			mov	(r2)+	,f$deq(r1) 	; and the default extenstion size
+    885	002604	012261 	000056 			mov	(r2)+	,f$rtde(r1)	; and the run time extentsion size
+    886	002610				100$:	unsave	<r2,r1>			; all done
+    887	002614	005000 				clr	r0			; say it worked ok
+    888	002616	000207 				return
+    889
+    890
+    891
+    892
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 12
+Connect record access block to file access block
+
+    894						.sbttl	connect record access block to file access block
+    895
+    896
+    897					;	C O N N E C T
+    898					;
+    899					;	connect( %val channel_number )
+    900					;
+    901					;	input:	r0	channel number
+    902					;		r1	multiblock count
+    903					;		r2	create/open/append option flag			+SSH
+    904					;	output:	r0	rms sts
+    905					;
+    906					;	Connect a record access block to a file access block.
+    907					;	Called only from OPEN and CREATE
+    908
+    909
+    910	002620	010146 			rmscon:	mov	r1	,-(sp)		; the block count size
+    911	002622	010001 				mov	r0	,r1		; get address of record access block
+    912	002624	006301 				asl	r1			; channel number times 2
+    913	002626	016101 	000542'			mov	rablst(r1),r1		; address of a rab to use
+    914	002632					$store	(sp)+,MBC,r1		; the block buffer count
+    915	002636					$store	#0,ROP,r1		; assume no processing options	   +SSH
+    916	002642	005702 				tst	r2			; if appending to existing file	   +SSH
+    917	002644	003403 				ble	7$			; no, leave options alone	   +SSH
+    918	002646					$store	#rb$eof,ROP,r1		; yes, set position to EOF option  +SSH
+    919	002654				7$:					;				   +SSH
+    920	002654					$conne	r1			; try hard to connect access up
+    921	002700					$fetch	r0,sts,r1		; get status back out please
+    922	002704	005700 				tst	r0			; if status > 0 then status = 0
+    923	002706	002401 				blt	10$			; error if less than zero
+    924	002710	005000 				clr	r0			; make > 0 status eq 0
+    925	002712	000207 			10$:	return
+    926
+    927
+    928
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 13
+Disconnect record access block from file access block
+
+    930						.sbttl	disconnect record access block from file access block
+    931
+    932
+    933					;	R M S D I S
+    934					;
+    935					;	input:	r0	channel number
+    936					;		r0	error sts
+    937					;
+    938
+    939	002714	010001 			rmsdis:	mov	r0	,r1
+    940	002716	006301 				asl	r1
+    941	002720	016101 	000542'			mov	rablst(r1),r1
+    942	002724					$discon	r1			; disconnect access stream from file
+    943	002750					$fetch	r0,sts,r1		; get status back out please
+    944	002754	005700 				tst	r0			; if status > 0 then status = 0
+    945	002756	002401 				blt	10$			; error if less than zero
+    946	002760	005000 				clr	r0			; make > 0 status eq 0
+    947	002762	000207 			10$:	return
+    948
+    949
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 14
+Read a record from a sequential file
+
+    951						.sbttl	read a record from a sequential file
+    952
+    953
+    954					;	G E T R E C
+    955					;
+    956					;	getrec( %loc buffer, %val channel_number )
+    957					;
+    958					;	input:	@r5	address of user buffer, at least 80 bytes
+    959					;		2(r5)	channel number
+    960					;
+    961					;	output:	r0	rms sts
+    962					;		r1	record size
+    963					;
+    964					;	Read the next record from a disk file. Assumes that the
+    965					;	user  has supplied a buffer of 80 characters to  return
+    966					;	the record to.
+    967
+    968
+    969	002764	016500 	000002 		getrec::mov	2(r5)	,r0		; get the channel number
+    970	002770	006300 				asl	r0			; times 2 to index into table
+    971	002772	016001 	000542'			mov	rablst(r0),r1		; get the record access buffer
+    972	002776					$store	#0  ,RSZ,r1
+    973	003002					$store	@r5 ,UBF,r1		; stuff a record buffer in
+    974	003006					$store	bufsiz(r0),USZ,r1	; and a maximum record size
+    975	003014	026027 	000624'	000001 		cmp	filtyp(r0),#binary	; a binary file today ?
+    976	003022	001017 				bne	10$			; no, use normal get$
+    977	003024	005061 	000046 			clr	o$bkt+0(r1)		; use sequential mode please
+    978	003030	005061 	000050 			clr	o$bkt+2(r1)		; both words are to have zero
+    979	003034					$read	r1			; get next virtual block please
+    980	003060	000412 				br	20$			; get error code out now
+    981	003062				10$:	$get	r1			; read a record now
+    982	003106				20$:	$fetch	r0,STS,r1		; get the return STATUS field
+    983	003112	005700 				tst	r0			; did it work ?
+    984	003114	002403 				blt	100$			; no
+    985	003116	005000 				clr	r0			; say no errors
+    986	003120					$fetch	r1,RSZ,r1		; get the record size now
+    987	003124	000207 			100$:	return
+    988
+    989	003126					global	<o$bkt>
+    990
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 15
+Put a record to an rms sequential file
+
+    992						.sbttl	put a record to an rms sequential file
+    993
+    994
+    995					;	P U T R E C
+    996					;
+    997					;	putrec( %loc buffer, %val record_size, %val channel_number )
+    998					;
+    999					;	input:	@r5	address of user buffer
+   1000					;		2(r5)	record size
+   1001					;		4(r5)	channel number
+   1002					;
+   1003					;	output:	r0	rms sts
+   1004					;
+   1005					;	Write the next record to  a disk file.
+   1006
+   1007
+   1008	003126	010146 			putrec::mov	r1	,-(sp)
+   1009	003130	016500 	000004 			mov	4(r5)	,r0		; get the channel number
+   1010	003134	001013 				bne	5$			; if zero then assume TI:
+   1011	003136					print	@r5	,2(r5)		; dump the buffer to ti: then
+   1012	003162	000460 				br	100$			; and exit
+   1013	003164	006300 			5$:	asl	r0			; times 2 to index into table
+   1014	003166	016001 	000542'			mov	rablst(r0),r1		; get the record access buffer
+   1015	003172					$store	@r5  ,RBF,r1		; stuff a record buffer in
+   1016	003176					$store	2(r5),RSZ,r1		; and a current record size
+   1017	003204	026027 	000624'	000001 		cmp	filtyp(r0),#binary	; image mode today ?
+   1018	003212	001022 				bne	10$			; no
+   1019	003214					$store	#1000,RSZ,r1		; yes, insure block write
+   1020	003222	005061 	000046 			clr	o$bkt+0(r1)		; yes, clear the VBN fields
+   1021	003226	005061 	000050 			clr	o$bkt+2(r1)		; yes, clear the VBN fields
+   1022	003232					$write	r1			; simple
+   1023	003256	000412 				br	20$			; get the status and exit
+   1024	003260				10$:	$put	r1			; write a record now		   /SSH
+   1025	003304				20$:	$fetch	r0,STS,r1		; get the return STATUS field
+   1026	003310	005700 				tst	r0			; did it work ?
+   1027	003312	002402 				blt	99$			; no
+   1028	003314	005000 				clr	r0			; say no errors
+   1029	003316	000402 				br	100$
+   1030	003320	010067 	000000G		99$:	mov	r0,tmperr		; store error code for debugging
+   1031	003324	012601 			100$:	mov	(sp)+	,r1
+   1032	003326	000207 				return
+   1033
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 16
+Getc	get one character from an input file
+
+   1035						.sbttl	getc	get one character from an input file
+   1036
+   1037
+   1038					;	G E T C
+   1039					;
+   1040					;	getc(%val channel_number)
+   1041					;
+   1042					;	input:	@r5	channel_number
+   1043					;	output:	r0	rms error status
+   1044					;		r1	the character just read
+   1045
+   1046	003330	011500 			getc::	mov	@r5	,r0
+   1047	003332	004767 	000000G			call	getcr0
+   1048	003336	000207 				return
+   1049
+   1050
+   1051	003340				fgetcr::save	<r2,r3>			; save temps
+   1052	003344	010002 				mov	r0	,r2		; channel number please
+   1053	003346	006302 				asl	r2			; times 2
+   1054	003350	026227 	000636'	177777 		cmp	bufp(r2),#-1		; need to initialize the buffer?
+   1055	003356	001020 				bne	10$			; no
+   1056	003360					calls	getrec	,<buflst(r2),r0>; yes, load it please
+   1057	003402	005700 				tst	r0			; did the read work ?
+   1058	003404	001070 				bne	100$			; no, return rms error code
+   1059	003406	005062 	000636'			clr	bufp(r2)		; it worked. clear current pointer
+   1060	003412	010162 	000650'			mov	r1	,bufs(r2)	; and save the record size
+   1061	003416	000426 				br	30$			; and goto common code
+   1062
+   1063	003420	026227 	000636'	177776 	10$:	cmp	bufp(r2),#-2		; flag to return <cr> ?
+   1064	003426	001007 				bne	20$			; no
+   1065	003430	112701 	000015 			movb	#cr	,r1		; yes, return it in r1
+   1066	003434	012762 	177775 	000636'		mov	#-3	,bufp(r2)	; and setup for a <lf> nexttime
+   1067	003442	005000 				clr	r0			; no error
+   1068	003444	000450 				br	100$			; bye
+   1069
+   1070	003446	026227 	000636'	177775 	20$:	cmp	bufp(r2),#-3		; flag to return a <lf> ?
+   1071	003454	001007 				bne	30$			; no
+   1072	003456	112701 	000012 			movb	#lf	,r1		; yes, return <lf> in r1
+   1073	003462	012762 	177777 	000636'		mov	#-1	,bufp(r2)	; flag buffer reload next time
+   1074	003470	005000 				clr	r0			; no error
+   1075	003472	000435 				br	100$
+   1076
+   1077
+   1078	003474	005762 	000650'		30$:	tst	bufs(r2)		; anything left to get in record?
+   1079	003500	001017 				bne	40$			; yes
+   1080	003502	012762 	177776 	000636'		mov	#-2	,bufp(r2)	; no, flag for a <cr> next
+   1081	003510	026227 	000624'	000001 		cmp	filtyp(r2),#binary	; a binary file today ?
+   1082	003516	001003 				bne	35$			; yes, need data as is please
+   1083	003520	012762 	177777 	000636'		mov	#-1	,bufp(r2)	; yes, flag for a read next
+   1084	003526	010200 			35$:	mov	r2	,r0		; channel number please
+   1085	003530	006200 				asr	r0			; NOT times two
+   1086	003532	004767 	000000G			call	getcr0			; call ourselves to do it
+   1087	003536	000413 				br	100$			; and exit
+   1088
+   1089	003540	016203 	000554'		40$:	mov	buflst(r2),r3		; get the address of the buffer
+   1090	003544	066203 	000636'			add	bufp(r2),r3		; and point to the next character
+   1091	003550	005001 				clr	r1			; to be returned in r1
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 16-1
+Getc	get one character from an input file
+
+   1092	003552	151301 				bisb	@r3	,r1		; simple
+   1093	003554	005262 	000636'			inc	bufp(r2)		; buffer.pointer := succ(buffer.pointer)
+   1094	003560	005362 	000650'			dec	bufs(r2)		; amountleft := pred( amountleft )
+   1095	003564	005000 				clr	r0			; no errors please
+   1096
+   1097	003566				100$:	unsave	<r3,r2>
+   1098	003572	000207 				return
+   1099
+   1100
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 17
+Putc	put a single character to an rms file
+
+   1102						.sbttl	putc	put a single character to an rms file
+   1103
+   1104					;	P U T C
+   1105					;
+   1106					;	input:	@r5	the character to put
+   1107					;		2(r5)	the channel number to use
+   1108					;
+   1109					;	Buffer single character i/o to internal disk buffer.
+   1110					;	Buffer is dumped if internal buffer is  full or, for
+   1111					;	FB$VAR records (default for TEXT), a carraige return
+   1112					;	is found. For FB$VAR with FB$CR format, all carraige
+   1113					;	returns  and line feeds are  flushed as  this record
+   1114					;	format will have them put back later.
+   1115					;	The local buffers are allocated in CREATE and OPEN.
+   1116
+   1117
+   1118	003574				putc::	save	<r1>			; simply save r1 and call putcr0
+   1119	003576	016501 	000002 			mov	2(r5)	,r1		; to do it. putcr0 will be somewhat
+   1120	003602	005000 				clr	r0			; faster to call directly due to the
+   1121	003604	151500 				bisb	@r5	,r0		; overhead involved in setting up an
+   1122	003606	004767 	000004 			call	putcr0			; argument list.
+   1123	003612					unsave	<r1>			; pop saved r1 and exit
+   1124	003614	000207 				return				; bye
+   1125
+   1126
+   1127	003616				putcr0::save	<r1,r2,r3,r4>		; save registers we use
+   1128	003626	010102 				mov	r1	,r2		; channel number
+   1129	003630	006302 				asl	r2			; times 2 of course
+   1130	003632	026227 	000624'	000001 		cmp	filtyp(r2),#binary	; is this a binary file today ?
+   1131	003640	001403 				beq	5$			; yes, don't dump buffer on <cr>
+   1132	003642	120067 	000000G			cmpb	r0	,recdlm		; /56/ end of line time today ?
+   1133	003646	001404 				beq	10$			; yes, dump the record out
+   1134	003650	026262 	000636'	000600'	5$:	cmp	bufp(r2),bufsiz(r2)	; is the buffer full ?
+   1135	003656	103430 				blo	20$			; no, store some more characters in it
+   1136	003660	110003 			10$:	movb	r0	,r3		; yes, save the input character r0
+   1137	003662					calls	putrec	,<buflst(r2),bufp(r2),r1> ; yes, dump the buffer please
+   1138	003712	005062 	000636'			clr	bufp(r2)		; pointer := 0
+   1139	003716	005700 				tst	r0			; did it work ?
+   1140	003720	001040 				bne	100$			; no, die
+   1141	003722	016204 	000554'			mov	buflst(r2),r4		; it worked. zero the buffer now
+   1142	003726	016200 	000600'			mov	bufsiz(r2),r0		; get the buffer address and size
+   1143	003732	105024 			15$:	clrb	(r4)+			; for i := 1 to bufsiz
+   1144	003734	077002 				sob	r0	,15$		;   do buffer[i] := chr(0)
+   1145	003736	110300 				movb	r3	,r0		; ok, restore the old character
+   1146
+   1147	003740	026227 	000624'	000001 	20$:	cmp	filtyp(r2),#binary	; once again, is this a binary file ?
+   1148	003746	001415 				beq	30$			; yes, ignore checks for <LF> and ^Z.
+   1149	003750	026227 	000624'	177777 		cmp	filtyp(r2),#terminal	; terminal file today ?
+   1150	003756	001411 				beq	30$			; yes, we want cr's and lf's
+   1151	003760	120027 	000012 			cmpb	r0	,#lf		; we simply like to ignore line feeds
+   1152	003764	001415 				beq	90$			; bye
+   1153	003766	120027 	000032 			cmpb	r0	,#'Z&37		; control Z ?
+   1154	003772	001412 				beq	90$			; yes, ignore the control Z's please
+   1155	003774	120027 	000015 			cmpb	r0	,#cr		; carraige return today ?
+   1156	004000	001407 				beq	90$			; yes, ignore it
+   1157	004002	016201 	000636'		30$:	mov	bufp(r2),r1		; get the current buffer pointer
+   1158	004006	066201 	000554'			add	buflst(r2),r1		; and point to a new home for the
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 17-1
+Putc	put a single character to an rms file
+
+   1159	004012	110011 				movb	r0	,@r1		; the input character in r0
+   1160	004014	005262 	000636'			inc	bufp(r2)		; pointer := succ( pointer )
+   1161
+   1162	004020	005000 			90$:	clr	r0			; no errors
+   1163	004022				100$:	unsave	<r4,r3,r2,r1>
+   1164	004032	000207 				return
+   1165
+   1166	004034					GLOBAL	<recdlm>		; /56/
+   1167
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 18
+Flush
+
+   1169						.sbttl	flush
+   1170
+   1171
+   1172	004034	011500 			flush:	mov	@r5	,r0		; get the internal channel number
+   1173	004036	006300 				asl	r0			; times 2 for indexing
+   1174	004040	005760 	000636'			tst	bufp(r0)		; anything in the buffer
+   1175	004044	001420 				beq	100$			; no
+   1176	004046	005760 	000662'			tst	mode(r0)		; writing today ?
+   1177	004052	001415 				beq	100$			; no
+   1178	004054					calls	putrec	,<buflst(r0),bufp(r0),@r5> ; yes, dump it
+   1179	004104	000207 				return
+   1180	004106	005000 			100$:	clr	r0
+   1181	004110	000207 				return
+   1182
+   1183
+   1184
+   1185
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 19
+Lookup	do a filename lookup, wildcarding supported
+
+   1187						.sbttl	lookup	do a filename lookup, wildcarding supported
+   1188						.enabl	gbl
+   1189
+   1190
+   1191					;	L O O K U P
+   1192					;
+   1193					;	input:	@r5	arg count	(DEC standard Fortran convention)
+   1194					;		2(r5)	address of input string
+   1195					;		@4(r5)	flag word for initializing with a $PARSE
+   1196					;		6(r5)	address of output string
+   1197					;
+   1198					;	output:	r0	RMS error code
+   1199					;
+   1200					;
+   1201					;	clr	index
+   1202					;10$:	calls	lookup	,<#3,#inbuf,#index,#outbuf>
+   1203					;	tst	r0
+   1204					;	bne	100$
+   1205					;	do something
+   1206					;	br	10$
+   1207
+   1208
+   1209
+   1210
+   1211						.mcall	$parse	,$search,$store	,$fetch	,$compare
+   1212						.mcall	fab$b	,fab$e	,nam$b	,nam$e
+   1213						.mcall	$off	$testbits				;RBD01
+   1214
+   1215						.save
+   1216	006616					.psect	rmssup	,d
+   1217
+   1218
+   1219
+   1220	006616				fab:	fab$b				; argument fab
+   1221	006736					 f$nam	nam			; link to nam		;RBD01--
+   1222	006736					 f$lch	1			; a dummy channel for the i/o op
+   1223	006736					fab$e
+   1224
+   1225	006736				nam:	nam$b				; nam definition
+   1226	006776					 n$esa	expstr			; exp str address
+   1227	006776					 n$ess	64.			; exp str length
+   1228	006776					 n$rsa	resstr			; res str address
+   1229	006776					 n$rss	64.			; res str length
+   1230	006776					nam$e
+   1231
+   1232	006776				expstr:	.blkb	64.			; context must be preserved here
+   1233	007076				resstr:	.blkb	64.			; a temp place for the result
+   1234
+   1235	004112					.restore
+   1236
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 20
+The real work of lookup
+
+   1238						.sbttl	the real work of lookup
+   1239
+   1240	000000					.psect	$rwdat
+   1241										; Make this <> 0 if you can't do CALFIP
+   1242	000000	000000 			fu$dir::.word	0			; style wildcarding on your non-standard
+   1243										; RSTS system.  Could cause side effects
+   1244										; with remote decnet nodes.
+   1245	004112					.psect	$code
+   1246
+   1247	004112	005767 	000000G		lookup::tst	rsx32			; /56/ Ancient RSX today?
+   1248	004116	001417 				beq	4$			; /56/ No
+   1249	004120	012700 	000000G			mov	#ER$NMF	,r0		; /56/ Yes, preset No More Files
+   1250	004124	005775 	000004 			tst	@4(r5)			; /56/ Second call?
+   1251	004130	001011 				bne	3$			; /56/ Yes, die
+   1252	004132					STRCPY	6(r5)	,2(r5)		; /56/ No just return the passed string
+   1253	004146	005275 	000004 			inc	@4(r5)			; /56/ Note that we have been here
+   1254	004152	005000 				clr	r0			; /56/ No errors
+   1255	004154	000207 			3$:	return				; /56/ Exit
+   1256										;
+   1257	004156				4$:	save	<r1,r2,r3,r4,r5>	; Save these please
+   1258	004170	012701 	006616'			mov	#fab	,r1		; map the target fab	;RBD01--
+   1259	004174	005767 	000000G			tst	fu$def			; do we really need a default device?
+   1260	004200	001406 				beq	5$			; no
+   1261	004202					$store	#sydisk,DNA,r1		; yes, please stuff the def device name
+   1262	004210					$store	#sylen ,DNS,r1		; and the length of it also please
+   1263	004216				5$:	strlen	#defdir			; anything in the Kermit default dir?
+   1264	004226	005700 				tst	r0			; if <> then use it
+   1265	004230	001405 				beq	10$			; nothing there to use. Let system do it
+   1266	004232					$store	#defdir	,DNA,r1		; something was there, stuff it in
+   1267	004240					$store	r0	,DNS,r1		; and the length of the default
+   1268	004244	010100 			10$:	mov	r1	,r0		; save it for later
+   1269	004246	012703 	006736'			mov	#nam	,r3		; map the target nam
+   1270	004252	005775 	000004 			tst	@4(r5)			; first time thru needs a parse
+   1271	004256	001064 				bne	40$			; not the first time
+   1272
+   1273	004260	105067 	006776'			clrb	expstr			; clear the expanded name and
+   1274	004264	105067 	007076'			clrb	resstr			; the resultant string
+   1275	004270	016504 	000002 			mov	2(r5)	,r4		; point to the filename passed
+   1276	004274	010401 				mov	r4	,r1		; and save the pointer
+   1277	004276	105721 			20$:	tstb	(r1)+			; and get the length of the name
+   1278	004300	001376 				bne	20$			; for an .asciz string
+   1279	004302	160401 				sub	r4	,r1		; compute the length of the string
+   1280	004304	005301 				dec	r1			; which is off by one
+   1281	004306					$store	#lun.sr,lch,r0		; channel number please
+   1282	004314					$store	r1,fns,r0		; stuff the filename length
+   1283	004320					$store	r4,fna,r0		; and the filename address
+   1284	004324					$parse	r0			; parse the strings
+   1285	004350					$fetch	r4,sts,r0		; get error codes
+   1286
+   1287	004354	022704 	000000G			cmp	#ER$UIN,r4		; Maybe a remote file spec?    ;RBD01+
+   1288	004360	001021 				bne	30$			; (no)
+   1289	004362					$testbits  #<nb$wve!nb$wty!nb$wna!nb$wdi>,fnb,r3    ; Anything wild?
+   1290	004370	001104 				bne	90$			; (wild remote files no good)
+   1291	004372					$testbits  #nb$nod,fnb,r3	; Remote file?
+   1292	004400	001500 				beq	90$			; (ER$UIN with no node???)
+   1293	004402					$off	#nb$wch,fnb,r3		; Make succeeding $search's act nice
+   1294	004410					$fetch	r0,esl,r3		; Pass back expanded string
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 20-1
+The real work of lookup
+
+   1295	004416					$fetch	r2,esa,r3		;  and skip the $search.
+   1296	004422	000456 				br	70$						       ;RBD01-
+   1297
+   1298	004424	005704 			30$:	tst	r4			; < 0 ?
+   1299	004426	100465 				bmi	90$			; yes, error
+   1300
+   1301					;	This added edit 2.12 by BDN for those RSTS systems that totally
+   1302					;	disallow directory lookups by modify the executive for non-priv
+   1303					;	users.
+   1304
+   1305	004430	005767 	000000'		40$:	tst	fu$dir			; in case george w. @ purdue
+   1306	004434	001420 				beq	50$			; needs this due to a hacked up exec
+   1307	004436					$testbits  #<nb$wve!nb$wty!nb$wna!nb$wdi>,fnb,r3    ; Anything wild?
+   1308	004444	001014 				bne	50$			; yes, let the $search go on
+   1309	004446	005775 	000004 			tst	@4(r5)			; if no wildcarding and we have
+   1310	004452	001403 				beq	45$			; already been here then return
+   1311	004454	012704 	000000G			mov	#ER$NMF	,r4		; no more files and exit
+   1312	004460	000450 				br	90$			; bye
+   1313	004462				45$:	$fetch	r0,esl,r3		; no, skip the $search and get the
+   1314	004470					$fetch	r2,esa,r3		; expanded string from $parse
+   1315	004474	000431 				br	70$			; and copy it over now
+   1316
+   1317					;	End of option tp skip lookups for non-wildcarded filenames.
+   1318
+   1319
+   1320	004476				50$:	$search	r0			; get a matching file
+   1321	004522					$fetch	r4,sts,r0		; get error codes
+   1322						;							       ;RBD01+
+   1323						; The following shouldn't have been necessary, as I
+   1324						; banged off the NB$WCH bit above. But ...
+   1325						;
+   1326	004526	020427 	000000G			cmp	r4,#ER$UIN		; Remote file hacking?
+   1327	004532	001003 				bne	60$			; (no)
+   1328	004534	012704 	000000G			mov	#ER$FNF,r4		; Yes, no "more" files
+   1329	004540	000420 				br	90$			; and exit
+   1330
+   1331	004542	005704 			60$:	tst	r4			; < 0 ?			       ;RBD01-
+   1332	004544	100416 				bmi	90$			; yes, error
+   1333	004546					$fetch	r0,rsl,r3		; get the string length
+   1334	004554					$fetch	r2,rsa,r3		; get the string address
+   1335
+   1336	004560	016501 	000006 		70$:	mov	6(r5)	,r1		; where to return the string
+   1337	004564	112221 			80$:	movb	(r2)+	,(r1)+		; copy it over
+   1338	004566	077002 				sob	r0	,80$		; for however the long it is
+   1339	004570	105011 				clrb	@r1			; insure .asciz please
+   1340	004572	005000 				clr	r0			; no errors
+   1341	004574	005275 	000004 			inc	@4(r5)			; say we have at least one file
+   1342	004600	000402 				br	100$			; and exit
+   1343
+   1344	004602	010400 			90$:	mov	r4	,r0		; error, return it please
+   1345	004604	000400 				br	100$			; exit
+   1346
+   1347	004606				100$:	unsave	<r5,r4,r3,r2,r1>
+   1348	004620	000207 				return
+   1349
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 21
+The real work of lookup
+
+   1351
+   1352						.save
+   1353	000000					.psect	rendat	,rw,d,lcl,con,lcl
+   1354
+   1355						.mcall	$compare,$fetch	,$parse	,$search,$set	,$store
+   1356						.mcall	fab$b	,nam$b	,$rename
+   1357
+   1358					;	24-Jan-86  14:01:48 Rename, Delete and GMCR code moved to overlay
+   1359
+   1360
+   1361	000000				RNFAB1::FAB$B				; Old file name
+   1362	000120					 F$NAM	RNNAM1			; Link to RNNAM1	       ;RBD01--
+   1363	000120					 F$LCH	1			; Channel 1 (a dummy, filled in later)
+   1364	000120					FAB$E
+   1365
+   1366	000120				RNNAM1::NAM$B				; NAM definition
+   1367	000160					NAM$E
+   1368
+   1369
+   1370	000160				RNFAB2::FAB$B				; New file name
+   1371	000300					 F$NAM	RNNAM2			; Link to RNNAM2	       ;RBD01--
+   1372	000300					 F$LCH	1			; a dummy channel
+   1373	000300					FAB$E
+   1374
+   1375	000300				RNNAM2::NAM$B				; NAM definition
+   1376	000340					NAM$E
+   1377
+   1378
+   1379	004622					.restore
+   1380
+   1381
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 22
+Fparse	parse filename and fill in with defaults
+
+   1383						.sbttl	fparse	parse filename and fill in with defaults
+   1384
+   1385						.mcall	$compar	,$fetch	,$off	,$parse	,$store
+   1386						.mcall	tlog$s
+   1387
+   1388		000000'			parfab	=	rnfab1
+   1389		000120'			parnam	=	rnnam1
+   1390
+   1391
+   1392					;	F P A R S E
+   1393					;
+   1394					;	input:	@r5	input filename,     .asciz
+   1395					;		defdir	the default directory name string to use
+   1396					;
+   1397					;	output:	2(r5)	expanded filename, .asciz, maximum length 63 bytes
+   1398					;		r0	error codes
+   1399
+   1400
+   1401	004622				tlog::	save	<r1,r2,r3>		; /46/ Save registers
+   1402	004630	162706 	000200 			sub	#200	,sp		; /46/ Allocate a buffer
+   1403	004634	010603 				mov	sp	,r3		; /46/ And a pointer to it please
+   1404	004636	004767 	001222 			call	getsys			; /46/ Is this RSTS/E ?
+   1405	004642	120027 	000004 			cmpb	r0	,#SY$RSTS	; /46/ If so, don't try TLOG$S out
+   1406	004646	001446 				beq	100$			; /46/ Skip, must be RSTS/E
+   1407	004650					strlen	(r5)			; /46/ Get length of input string
+   1408	004656					TLOG$S	#0,ln$mk1,#0,(r5),r0,r3,#77,#tlogda,#tlogda+2
+   1409	004734	123727 	000000G	000000G		cmpb	@#$DSW,#IS.SUC		; /46/ Did we get a translation?
+   1410	004742	001010 				bne	100$			; /46/ No, exit this
+   1411	004744	010302 				mov	r3	,r2		; /46/ Setup to make it asciz
+   1412	004746	066703 	000002'			add	tlogda	,r3		; /46/ Add the translated string length
+   1413	004752	105013 				clrb	(r3)			; /46/ in and insure it's .asciz
+   1414	004754					strcpy	(r5)	,r2		; /46/ Copy new name over and exit
+   1415	004764	062706 	000200 		100$:	add	#200	,sp		; /46/ Pop local buffer
+   1416	004770					unsave	<r3,r2,r1>		; /46/ Exit
+   1417	004776	005000 				clr	r0			; /46/ No errors
+   1418	005000	000207 				return				; /46/ Exit
+   1419
+   1420						.save
+   1421	000002					.psect	$RWDAT
+   1422	000002	000000 	000000 		tlogda:	.word	0,0			; /46/ Returned data
+   1423	000006	000000 			ln$mk1::.word	0
+   1424	005002					.restore
+   1425
+   1426
+   1427	005002	005767 	000000G		Fparse::tst	rsx32			; /56/ Old, old RSX?
+   1428	005006	001407 				beq	1$			; /56/ No
+   1429	005010					STRCPY	2(r5)	,@r5		; /56/ Yes, just copy the thing over
+   1430	005022	005000 				clr	r0			; /56/ Success
+   1431	005024	000207 				return				; /56/ Quick exit
+   1432	005026				1$:	save	<r1,r2,r3,r4>		; /46/ save registers we may overwrite
+   1433	005036	011504 				mov	@r5	,r4		; /46/ Assume input from source
+   1434	005040	004767 	001020 			call	getsys			; /46/ Is this RSTS/E ?
+   1435	005044	120027 	000004 			cmpb	r0	,#SY$RSTS	; /46/ If so, don't try TLOG$S out
+   1436	005050	001444 				beq	2$			; /46/ Skip, must be RSTS/E
+   1437	005052	016503 	000002 			mov	2(r5)	,r3		; /46/ Address of a buffer to use
+   1438	005056					strlen	r4			; /46/ Get length of input string
+   1439	005064					TLOG$S	#0,ln$mk1,#0,r4,r0,r3,#77,#tlogda,#tlogda+2
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 22-1
+Fparse	parse filename and fill in with defaults
+
+   1440	005142	123727 	000000G	000000G		cmpb	@#$DSW,#IS.SUC		; /46/ Did we get a translation?
+   1441	005150	001004 				bne	2$			; /46/ No, exit this
+   1442	005152	010304 				mov	r3	,r4		; /46/ We did, set a new source address
+   1443	005154	066703 	000002'			add	tlogda	,r3		; /46/ Add the translated string length
+   1444	005160	105013 				clrb	(r3)			; /46/ in and insure it's .asciz
+   1445	005162	012701 	000000'		2$:	mov	#parfab	,r1		; point to the fab we use       ;RBD01--
+   1446	005166					$store	#0,DNS,r1		; /42/ PLEASE clear this OUT!
+   1447	005172	005767 	000000G			tst	fu$def			; do we need a defualt device string?
+   1448	005176	001406 				beq	3$			; no
+   1449	005200					$store	#sydisk,DNA,r1		; yes, please put it where we need it
+   1450	005206					$store	#sylen ,DNS,r1		;      also, the length also
+   1451	005214				3$:	strlen	#defdir			; get the default directory spec
+   1452	005224	005700 				tst	r0			; was anything there ?
+   1453	005226	001405 				beq	4$			; no
+   1454	005230					$store	#defdir,DNA,r1		; yes, stuff that in for the default
+   1455	005236					$store	r0     ,DNS,r1		; name string, and stuff the length.
+   1456	005242				4$:	$store	#lun.sr,LCH,r1		; a channel number to use for $PARSE
+   1457	005250					$off	#fb$fid,FOP,r1		; we want an implicit $SEARCH
+   1458	005256	012702 	000120'			mov	#parnam	,r2		; also point to the NAME block
+   1459	005262	162706 	000100 			sub	#100	,sp		; allocate result name string
+   1460	005266					$store	sp  ,RSA,r2		; set up the pointer to name string
+   1461	005272					$store	#100,RSS,r2		; and set the size of the string
+   1462	005300	162706 	000100 			sub	#100	,sp		; allocate result expanded name string
+   1463	005304					$store	sp  ,ESA,r2		; set up the pointer to expanded name
+   1464	005310					$store	#100,ESS,r2		; and set the size of the string
+   1465	005316					$store	#ER$FNM ,STS,r1		; preset a bad filename error
+   1466	005324					strlen	r4			; /46/ get the length of the filename
+   1467	005332	005700 				tst	r0			; anything left at all ?
+   1468	005334	001462 				beq	90$			; no, fake a bad filename please
+   1469	005336					$store	r0,FNS,r1		; stuff the filename size in please
+   1470	005342					$store	r4,FNA,r1		; /46/ stuff the filename address
+   1471	005346					$parse	r1			; try to parse the filename now
+   1472
+   1473	005372					$compar	#ER$UIN,sts,r1		; Maybe a remote file spec?    ;RBD01+
+   1474	005400	001014 				bne	5$			; (no)
+   1475	005402					$testb	#<nb$wve!nb$wty!nb$wna!nb$wdi>,fnb,r2    ; Anything wild?
+   1476	005410	001034 				bne	90$			; (wild remote files no good)
+   1477	005412					$testb	#nb$nod,fnb,r2	; Remote file?
+   1478	005420	001430 				beq	90$			; (ER$UIN with no node???)
+   1479	005422					$off	#nb$wch,fnb,r2		; Make succeeding $search's act nice
+   1480	005430	000403 				br	7$			; Go ahead with it	       ;RBD01-
+   1481
+   1482	005432				5$:	$compar	#0  ,STS,r1		; did the parse of the name work ?
+   1483	005436	002421 				blt	90$			; no, exit and return STS in r0
+   1484
+   1485	005440	016501 	000002 		7$:	mov	2(r5)	,r1		; where we will copy the name to
+   1486	005444	116200 	000035 			movb	o$esl(r2),r0		; the length of the new name
+   1487	005450	001411 				beq	30$			; can't happen unless you fubar
+   1488	005452	020027 	000077 			cmp	r0	,#77		; truncate names that are too long
+   1489	005456	101402 				blos	10$			; it's ok
+   1490	005460	012700 	000077 			mov	#77	,r0		; too long, please set it to 63 (10)
+   1491	005464	016202 	000032 		10$:	mov	o$esa(r2),r2		; where the name is coming from
+   1492	005470	112221 			20$:	movb	(r2)+	,(r1)+		; copy a byte at a time please
+   1493	005472	077002 				sob	r0	,20$		; next please
+   1494	005474	105011 			30$:	clrb	@r1			; insure .asciz please
+   1495	005476	005000 				clr	r0			; no errors please
+   1496	005500	000402 				br	100$			; bye
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 22-2
+Fparse	parse filename and fill in with defaults
+
+   1497
+   1498	005502				90$:	$fetch	r0,STS,r1		; error from parse, return in r0
+   1499	005506	062706 	000200 		100$:	add	#200	,sp		; pop local nameblock buffers
+   1500	005512				110$:	unsave	<r4,r3,r2,r1>		; /46/ pop registers
+   1501	005522	000207 				return				; bye
+   1502
+   1503
+   1504	005524					global	<defdir>
+   1505	005524					GLOBAL	<RSX32>			; /56/
+   1506
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 23
+Fparse	parse filename and fill in with defaults
+
+   1508					;	F I X W I L D
+   1509					;
+   1510					;	FIXWILD will replace % with ? for RSTS/E
+   1511					;
+   1512					;	input:	@r5	Address of string to process
+   1513
+   1514
+   1515	005524	000240 			fixwil::nop				; in case we want to patch to 207
+   1516	005526					save	<r2>			; save a register we use here
+   1517	005530					calls	getsys			; is this RSTS ?
+   1518	005534	120027 	000004 			cmpb	r0	,#sy$rsts	;
+   1519	005540	001012 				bne	100$			; no
+   1520	005542	011502 				mov	@r5	,r2		; get the string address
+   1521	005544	105712 			10$:	tstb	@r2			; done with the filename yet ?
+   1522	005546	001407 				beq	100$			; yes, exit
+   1523	005550	121227 	000045 			cmpb	@r2	,#'%		; check for a % character
+   1524	005554	001002 				bne	20$			; no
+   1525	005556	112712 	000077 			movb	#'?	,@r2		; yes, replace with question mark
+   1526	005562	005202 			20$:	inc	r2			; next please
+   1527	005564	000767 				br	10$			; back again
+   1528	005566				100$:	unsave	<r2>			; pop r2
+   1529	005570	005000 				clr	r0			; no errors
+   1530	005572	000207 				return				; bye
+   1531
+   1532
+   1533
+   1534	005574				iswild::save	<r1,r2>			; save a register we may use
+   1535	005600	012702 	000000'			mov	#parfab,r2		; get a fab to use for this
+   1536	005604	005767 	000000G			tst	fu$def			; do we need a defualt device string?
+   1537	005610	001406 				beq	5$			; no
+   1538	005612					$store	#sydisk,DNA,r2		; yes, please put it where we need it
+   1539	005620					$store	#sylen ,DNS,r2		;      also, the length also
+   1540	005626				5$:	strlen	#defdir			; get the default directory spec
+   1541	005636	005700 				tst	r0			; was anything there ?
+   1542	005640	001405 				beq	10$			; no
+   1543	005642					$store	#defdir,DNA,r2		; yes, stuff that in for the default
+   1544	005650					$store	r0     ,DNS,r2		; name string, and stuff the length.
+   1545	005654				10$:	$store	@r5,FNA,r2		; filename address
+   1546	005660					strlen	@r5			; length
+   1547	005666					$store	r0,FNS,r2		; into the FAB please
+   1548	005672					$fetch	r1,NAM,r2		; get NAM block address
+   1549	005676	005061 	000032 			clr	O$ESA(r1)		; no expanded string address
+   1550	005702	005061 	000002 			clr	O$RSA(r1)		; no resultant string address
+   1551	005706	105061 	000034 			clrb	O$ESS(r1)		; no length fields either
+   1552	005712	105061 	000004 			clrb	O$RSS(r1)		; no length fields either
+   1553	005716					$parse	r2			; parse the filename
+   1554	005742					$fetch	r0,STS,r2		; get the status
+   1555	005746	100407 				bmi	90$			; exit on error please
+   1556	005750					$testbi #NB$WVE!NB$WTY!NB$WNA!NB$WDI,FNB,r1 ; any wildcarding today ?
+   1557	005756	001403 				beq	90$			; no
+   1558	005760	012700 	000001 			mov	#1	,r0		; yes, return(true)
+   1559	005764	000401 				br	100$			; exit
+   1560	005766	005000 			90$:	clr	r0
+   1561	005770				100$:	unsave	<r2,r1>			; pop reg and exit
+   1562	005774	000207 				return				; exit
+   1563
+   1564
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 23-1
+Fparse	parse filename and fill in with defaults
+
+   1565
+   1566
+   1567
+   1568
+   1569
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 24
+Return current task size and return exec
+
+   1571						.sbttl	return current task size and return exec
+   1572
+   1573						.mcall	gtsk$s	,gtim$s
+   1574
+   1575
+   1576
+   1577	005776				second::save	<r2,r3>			; /43/ Get seconds past midnight
+   1578	006002	162706 	000040 			sub	#40	,sp		; /43/ Used for reporting transfer
+   1579	006006	010602 				mov	sp	,r2		; /43/ statistics
+   1580	006010					gtim$s	r2			; /43/ One should really get the time
+   1581	006020	016203 	000010 			mov	g.timi(r2),r3		; /43/ in the 64 bit klunk format to
+   1582	006024	070327 	000074 			mul	#60.	,r3		; /43/ avoid 24 hour rollover, but
+   1583	006030	066203 	000012 			add	g.tisc(r2),r3		; /43/ I really think this is
+   1584	006034	016200 	000006 			mov	g.tihr(r2),r0		; /43/ sufficient
+   1585	006040	005001 				clr	r1			; /43/ multiply hour of day by 3600
+   1586	006042	070027 	007020 			mul	#60.*60.,r0		; /43/ which has to be 32 bits in
+   1587	006046	060301 				add	r3	,r1		; /43/ size, then add in minutes*60
+   1588	006050	005500 				adc	r0			; /43/ + seconds.
+   1589	006052	062706 	000040 			add	#40	,sp		; /43/ Pop buffer and exit
+   1590	006056					unsave	<r3,r2>			; /43/ Pop registers
+   1591	006062	000207 				return				; /43/ Bye
+   1592
+   1593					;	G E T S Y S
+   1594					;
+   1595					;	output:	r0	operating system
+   1596					;
+   1597					;	sy$11m	(1)	for rsx11m
+   1598					;	sy$ias	(3)	for ias
+   1599					;	sy$rsts	(4)	for rsts
+   1600					;	sy$mpl	(6)	for m+
+   1601					;	sy$rt	(7)	for rt11 ????
+   1602
+   1603
+   1604	006064	162706 	000040 		getsys::sub	#40	,sp		; use the stack for a buffer
+   1605	006070	010600 				mov	sp	,r0		; and point to it please
+   1606	006072					gtsk$s	r0			; simple
+   1607	006102	016000 	000034 			mov	g.tssy(r0),r0		; return exec
+   1608	006106	062706 	000040 			add	#40	,sp		; pop buffer and exit
+   1609	006112	000207 				return				; bye
+   1610
+   1611
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 25
+Gsa	get space for i/o buffers
+
+   1613						.sbttl	gsa	get space for i/o buffers
+   1614
+   1615
+   1616					;	Modified from sample GSA from RMS v2 distribution
+   1617					;	by Brian Nelson  05-Jan-84  10:22:06
+   1618					;
+   1619					;
+   1620					;  Interface:
+   1621					;    Request space:
+   1622					;      R0 ->  RMS/user Pool list head (maintained by RL/CQB)
+   1623					;      R1 :=  Amount of space requested (bytes)
+   1624					;      R2 :=  0 (differentiates between request and release)
+   1625					;
+   1626					;    Release space:
+   1627					;      R0 ->  RMS Pool list head (maintained by RL/CQB)
+   1628					;      R1 :=  Amount of space to be released (bytes)
+   1629					;      R2 ->  Base address (for release)
+   1630					;
+   1631					;
+   1632					;  Returns:
+   1633					;    C-Bit "set"   if an error has occurred (failure)
+   1634					;    C-Bit "clear" if no error has occurred (success)
+   1635					;
+   1636
+   1637
+   1638						.Mcall	Extk$S
+   1639
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 26
+Control block definitions
+
+   1641						.Sbttl	Control block definitions
+   1642
+   1643	000000					.Psect	GSA$$D,RW,D
+   1644
+   1645					;
+   1646					; GSA internal data:
+   1647					;
+   1648					;   GSABAS - Base address for the next memory allocation.
+   1649					;            Initially set to zero, it will be assigned
+   1650					;            the first address outside of the task's
+   1651					;            current address limits.
+   1652					;   GSAMIN - Decimal value reflecting the minimum size
+   1653					;            (in bytes) to extend the task in order to
+   1654					;            provide space to the pool.
+   1655					;   GSAREQ - Requested pool block number.  If a request
+   1656					;            for the 'GSAMIN' fails, then the original
+   1657					;            allocation size will be attempted.  If that
+   1658					;            fails, then there is no more memory left.
+   1659					;
+   1660
+   1661	000000				GSABAS::			; GSA base address
+   1662	000000	000000 				.Word	000000		; (for next allocation)
+   1663	000002				GSAMIN::			; Minimum allocation
+   1664	000002	000010 				.Word	512./64.	; (in 32-word blocks)
+   1665	000004				GSAREQ::			; Size of this request
+   1666	000004	000000 				.Word	000000		; (if 'GSAMIN' extends fail)
+   1667
+   1668
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 27
+GSA Initialization code
+
+   1670						.Sbttl	GSA Initialization code
+   1671
+   1672	000000					.Psect	GSA$$I,RO,I
+   1673
+   1674
+   1675						.mcall	extk$s	,gtsk$s
+   1676
+   1677	000000				GSAINI:
+   1678	000000	010046 				Mov	R0,-(SP)	; R0-2 will be used to
+   1679	000002	010146 				Mov	R1,-(SP)	; communicate with $INIDM
+   1680	000004	010246 				Mov	R2,-(SP)	; NOTE: $INIDM uses EXTSK.
+   1681	000006	010046 				mov	r0	,-(sp)	; save r0
+   1682	000010	162706 	000040 			sub	#40	,sp	; check for 512 boundary
+   1683	000014	010600 				mov	sp	,r0	; get the current task size and see
+   1684	000016					gtsk$s	r0		; if we are at a boundary. if so, then
+   1685	000026	016000 	000032 			mov	g.tsts(r0),r0	; extend a little bit to get INIDM to
+   1686	000032	062706 	000040 			add	#40	,sp	; behave itself
+   1687	000036	042700 	177000 			bic	#^c777	,r0	; strip all the high crap
+   1688	000042	020027 	000776 			cmp	r0	,#776	; should we extend a little bit?
+   1689	000046	103406 				blo	10$		; no
+   1690	000050					extk$s	#1		; yes, get 64 more bytes please
+   1691	000064	012600 			10$:	mov	(sp)+	,r0	; restore r0
+   1692
+   1693	000066	004767 	000000'			Call	$INIDM		; Initialize dynamic memory
+   1694	000072	010167 	000000'			Mov	R1,GSABAS	; Setup the "free" address
+   1695	000076	012602 				Mov	(SP)+,R2	; Restore the registers
+   1696	000100	012601 				Mov	(SP)+,R1	;
+   1697	000102	012600 				Mov	(SP)+,R0	;
+   1698	000104	000207 				Return			; And return to GSA
+   1699
+   1700
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 28
+GSA Mainline code
+
+   1702						.Sbttl	GSA Mainline code
+   1703
+   1704	000000					.Psect	GSA$$M,RO,I
+   1705
+   1706					;
+   1707					; GSA Mainline
+   1708					;
+   1709					;   Entry point is "GSA", with registers 0-2 loaded as
+   1710					;   described above.
+   1711					;
+   1712
+   1713	000000				GSA::
+   1714	000000				gsax:
+   1715
+   1716					;
+   1717					; First, determine if dynamic memory has been initialized.
+   1718					; GSABAS (initially set to zero) will be non-zero if $INIDM
+   1719					; has been called and the memory list initialized.  On RSX
+   1720					; based systems it is possible to install tasks with an
+   1721					; extension (/INCREMENT).  $INIDM will detect this and setup
+   1722					; the first memory entry in the pool list.
+   1723					;
+   1724					; A point to note: If the RSX task has been installed with
+   1725					; the non-checkpointable (/-CP) flag, then EXTKs will not
+   1726					; return success.  If it is necessary to install the task
+   1727					; non-checkpointable, then the task should be installed with
+   1728					; and increment value.
+   1729					;
+   1730
+   1731	000000	005767 	000000'			Tst	GSABAS		; Dynamic memory initialized?
+   1732	000004	001002 				Bne	10$		; Yes if NE, proceed
+   1733	000006	004767 	000000'			Call	GSAINI		; Otherwise, initialize pool
+   1734	000012	005701 			10$:	Tst	R1		; Real memory?
+   1735	000014	001001 				Bne	20$		; Yes if NE, then process it
+   1736	000016	000207 				Return			; Otherwise return with success
+   1737
+   1738
+   1739	000020	005702 			20$:	Tst	R2		; Address specified? (release)
+   1740	000022	001402 				Beq	30$		; No if EQ, then it's a request
+   1741	000024	000167 	000000G			Jmp	$RLCB		; Otherwise it's a release; do it
+   1742	000030	010046 			30$:	Mov	R0,-(SP)	; save pool list head
+   1743	000032	010146 				Mov	R1,-(SP)	; save size of request
+   1744	000034	010246 				Mov	R2,-(SP)	; save entry flag
+   1745	000036	004767 	000000G			Call	$RQCB		; Try the allocation
+   1746	000042	103061 				Bcc	70$		; CC signifies success
+   1747	000044	016601 	000002 			Mov	2(SP),R1	; Obtain the request size
+   1748	000050	062701 	000077 			Add	#63.,R1		; Round the request
+   1749	000054	006201 				Asr	R1		; to a 32-word boundary
+   1750	000056	006201 				Asr	R1		; Then convert the value
+   1751	000060	006201 				Asr	R1		; to the number of
+   1752	000062	006201 				Asr	R1		; 32-word blocks.
+   1753	000064	006201 				Asr	R1
+   1754	000066	006201 				Asr	R1
+   1755	000070	010167 	000004'			Mov	R1,GSAREQ	; Save the real size
+   1756	000074	020167 	000002'			Cmp	R1,GSAMIN	; Smaller than minimum?
+   1757	000100	101002 				Bhi	40$		; No if HI, use it as is
+   1758	000102	016701 	000002'			Mov	GSAMIN,R1	; Otherwise use GSAMIN
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 28-1
+GSA Mainline code
+
+   1759	000106				40$:	Extk$S	R1		; Extend the task
+   1760	000120	103010 				Bcc	60$		; CC if successful
+   1761	000122	020167 	000004'			Cmp	R1,GSAREQ	; Is this request?
+   1762	000126	101403 				Blos	50$		; Yes if LOS, the end
+   1763	000130	016701 	000004'			Mov	GSAREQ,R1	; Otherwise try to use
+   1764	000134	000764 				Br	40$		; the actual request
+   1765	000136	000261 			50$:	Sec			; Mark failure
+   1766	000140	000422 				Br	70$		; And exit
+   1767
+   1768	000142	016600 	000004 		60$:	Mov	4(SP),R0	; Setup the PLH
+   1769	000146	006301 				Asl	R1		; Convert the real
+   1770	000150	006301 				Asl	R1		; size to the actual
+   1771	000152	006301 				Asl	R1		; 16-bit size that
+   1772	000154	006301 				Asl	R1		; was allocated.
+   1773	000156	006301 				Asl	R1		; The virtual address
+   1774	000160	006301 				Asl	R1		; should be after the
+   1775	000162	016702 	000000'			Mov	GSABAS,R2	; task (which is now
+   1776	000166	060167 	000000'			Add	R1,GSABAS	; part of the task)
+   1777	000172	004767 	177602 			Call	GSAX		; Call ourself to release
+   1778	000176	012602 				Mov	(SP)+,R2	; Restore our registers
+   1779	000200	012601 				Mov	(SP)+,R1	; to the initial state
+   1780	000202	012600 				Mov	(SP)+,R0	; upon entry, and reenter
+   1781	000204	000675 				Br	GSAX		; as if it's a new request
+   1782
+   1783	000206	005226 			70$:	Inc	(SP)+		; These won't alter the
+   1784	000210	032626 				Bit	(SP)+,(SP)+	; C-bit, so status remains
+   1785	000212	000207 				Return			; unchanged upon return
+   1786
+   1787
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 29
+Corrected version of $INIDM
+
+   1789						.sbttl	Corrected version of $INIDM
+   1790
+   1791					;	 Re-do $INIDM to use the  actual task top address,  not
+   1792					;	that which was stored by TKB from the .LIMIT directive.
+   1793					;	This is required because we have already done a EXTK$S.
+   1794					;
+   1795					;	17-Feb-87  07:11:21  BDN edit 3.56
+   1796
+   1797						.mcall	GPRT$	,GTSK$	,DIR$	,GTSK$S
+   1798						.Save
+   1799	000000					.psect	IMPURE	,d
+   1800
+   1801	000000	000000 	000000 		Limit:	.Limit
+   1802	000004				pdpb:	GPRT$	tbuf
+   1803	000014				tdpb:	GTSK$	tbuf
+   1804
+   1805	000020				tbuf:	.blkw	20
+   1806
+   1807	000214					.Restore
+   1808
+   1809	000000					.Psect	PURE$I	,RO,I,LCL,REL,CON
+   1810
+   1811					;	Inidm
+   1812					;
+   1813					;	Input:	r0	Address of free code pool listhead
+   1814					;	Output:	r0	First address in task
+   1815					;		r1	Address following task
+   1816					;		r2	Size of core pool
+   1817
+   1818	000000				$Inidm::DIR$	#tdpb			; We already did an EXTK$S so
+   1819	000006	016702 	000052'			mov	tbuf+G.TSTS,r2		; want to use the CURRENT topmem
+   1820	000012	062702 	000003 			add	#3	,r2		; Round up to next 4 byte boundary
+   1821	000016	042702 	000003 			bic	#3	,r2		; ...
+   1822	000022	010210 				mov	r2	,@r0		; Set base address of pool
+   1823	000024					EXTK$S	#1			; Ask for just a little bit more
+   1824	000040					DIR$	#pdpb			; Get partition parameters
+   1825	000046	016700 	000000G			mov	$DSW	,r0		; Save starting address of partition
+   1826	000052					DIR$	#tdpb			; Get task parameters
+   1827	000060	010246 				mov	r2	,-(sp)		; Save starting address
+   1828	000062	005022 				clr	(r2)+			; Clear out first word
+   1829	000064	016712 	000052'			mov	tbuf+G.TSTS,(r2)	; Set physical size of task
+   1830	000070	160016 				sub	r0	,(sp)		; Compute apparent size of task
+   1831	000072	010001 				mov	r0	,r1		; Copy base address
+   1832	000074	061201 				add	(r2)	,r1		; Next address after task
+   1833	000076	162612 				sub	(sp)+	,(r2)		; Set size of free pool
+   1834	000100	011202 				mov	(r2)	,r2		; Get size
+   1835	000102	000207 				return				; And exit
+   1836
+   1837		000001 				.end
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 29-1
+Symbol table
+
+APPEND  000572RG    004	FAB2EN  000240R     006	FCREAT  000666RG    004	G.PRFW= 000004   	LUN3  = 000003
+ASNAME  001440RG    006	FAB3    000240R     006	FF    = 000014   	G.PRPB= 000000   	LUN4  = 000004
+ATRFIN= ****** G 	FAB3EN  000360R     006	FGETCR  003340RG    004	G.PRPN= 000002   	L$LEN = ****** G
+AT$PR0= ****** G 	FAB4    000360R     006	FILNAM  001260RG    006	G.PRPS= 000002   	L$TTYO= ****** G
+BIGBUF  000612R     006	FACC  = 000003   	FILSIZ= 000156 G 	G.TICP= 000016   	L$WROC= ****** G
+BINARY= 000001   	FAPND   000646RG    004	FILTYP  000624R     006	G.TICT= 000014   	MAXLNG= 001130
+BINFIL  001724RG    004	FBRW  = 000057   	FIXWIL  005524RG    004	G.TIDA= 000004   	MAXLUN= 000004
+BINLSI= 000140 G 	FB$ACK= 000100   	FLUSH   004034R     004	G.TIHR= 000006   	MAXSIZ= ****** G
+BINTYP  002060RG    006	FB$BID= 000003   	FOPEN   000630RG    004	G.TIMI= 000010   	MODE    000662R     006
+BLKNUM  000674R     006	FB$BIO= 000040   	FPARSE  005002RG    004	G.TIMO= 000002   	MOUT  = ****** G
+BUFDEF  000566R     006	FB$BLK= 000010   	FU$DEF= ****** G 	G.TISC= 000012   	NAM     006736R     006
+BUFLST  000554R     006	FB$BLN= 000120   	FU$DIR  000000RG    003	G.TIYR= 000000   	NAMLEN  000530RG    006
+BUFP    000636R     006	FB$CCL= 000002   	F$AMAX= 000031   	G.TSBA= 000002   	NAMLN1= 000532R     006
+BUFS    000650R     006	FB$CR = 000002   	F$AVBN= 000030   	G.TSDU= 000036   	NAMLN2= 000534R     006
+BUFSIZ  000600R     006	FB$CTG= 000200   	F$BDBP= 000014   	G.TSFW= 000024   	NAMLN3= 000536R     006
+BUFX    004472R     006	FB$DBM= 000100   	F$BKSZ= 000050   	G.TSGC= 000017   	NAMLN4= 000540R     006
+BUF1    004472R     006	FB$DEL= 000004   	F$BLSZ= 000024   	G.TSMT= 000022   	NAMLST  000516RG    006
+BUF2    004472R     006	FB$DFW= 020000   	F$DEQ = 000054   	G.TSNL= 000020   	NAM1    002574R     006
+BUF3    004472R     006	FB$DLK= 000020   	F$DVBN= 000030   	G.TSPC= 000016   	NAM2    002674R     006
+BUF4    004472R     006	FB$FID= 010000   	F$DVCH= 000006   	G.TSPN= 000004   	NAM3    002774R     006
+CAPA.A= 000010   	FB$FIX= 000001   	F$FACC= 000007   	G.TSPR= 000014   	NAM4    003074R     006
+CAPA.L= 000002   	FB$FMX= 000100   	F$FFBY= 000046   	G.TSRN= 000010   	NB$BLN= 000040
+CAPA.S= 000004   	FB$FTN= 000001   	F$FORG= 000032   	G.TSSY= 000034   	NB$NOD= 000400
+CHKEXT= ****** G 	FB$GET= 000002   	F$HDSZ= 000051   	G.TSTN= 000000   	NB$WCH= ****** GX
+CLOSE   001514RG    004	FB$HSH= 000060   	F$HEOF= 000042   	G.TSTS= 000032   	NB$WDI= ****** GX
+CON$ES= 000034   	FB$IDX= 000040   	F$HMRN= 000026   	G.TSVA= 000026   	NB$WNA= ****** GX
+CR    = 000015   	FB$JNL= 000040   	F$HVBN= 000036   	G.TSVL= 000030   	NB$WTY= ****** GX
+CREATE  000534RG    004	FB$MDI= 000010   	F$IDXP= 000024   	IF$BLN= 000060   	NB$WVE= ****** GX
+C$BID = 000000   	FB$MKD= 004000   	F$IFAB= 000016   	ISWILD  005574RG    004	NOLIB   006444R     006
+C$BKP1= 000001   	FB$NEF= 001000   	F$KBSZ= 000026   	IS.SUC= ****** GX	NORMS   000340R     004
+C$NIRB= 000002   	FB$NIL= 000100   	F$LCHN= 000005   	ITSOPE  000706R     006	OPEN    000476RG    004
+DATXB1  006206R     006	FB$NOA= 040000   	F$LEOF= 000044   	JOB$BA  000001   	O$AID = 000004
+DATXB2  006254R     006	FB$POS= 000010   	F$LMRN= 000024   	JOB$IN  000000   	O$ALN = 000010
+DATXB3  006322R     006	FB$PRN= 000004   	F$LVBN= 000040   	K11INC= 000001   	O$ALQ = 000012
+DATXB4  006370R     006	FB$PUT= 000001   	F$MRS = 000052   	LASTCN= ****** GX	O$ALQ0= 000012
+DECNAT= 000002   	FB$REA= 000042   	F$POOL= 000020   	LASTLI= ****** GX	O$ALQ1= 000014
+DEFDIR  000720RG    006	FB$REC= 000001   	F$RATT= 000033   	LF    = 000012   	O$AOP = 000011
+DEL   = 000177   	FB$REL= 000020   	F$RSIZ= 000034   	LIMIT   000000R     015	O$BDT = 000036
+DF$RAT  002566RG    006	FB$RWC= 000002   	F$RTDE= 000056   	LM.USR= 000200   	O$BID = 000000
+DF$RFM  002570RG    006	FB$RWO= 000001   	F$UBSZ= 000004   	LNCNT$= ****** G 	O$BKS = 000061
+DRPPRV= ****** G 	FB$SDI= 000020   	GD.LOG= 000005   	LN$ALL= 000012   	O$BKT = 000046 G
+EN$SIZ  002572RG    006	FB$SEQ= 000000   	GETATR  002360RG    004	LN$CNT= 000005   	O$BKT0= 000046
+ER$FNF= ****** GX	FB$SQD= 000040   	GETC    003330RG    004	LN$MAX= 000120   	O$BKT1= 000050
+ER$FNM= ****** GX	FB$STM= 000004   	GETCDT  002264RG    004	LN$MK1  000006RG    003	O$BKZ = 000005
+ER$NMF= ****** GX	FB$SUP= 000400   	GETCR0= ****** GX	LOG$AL= 000077   	O$BLN = 000001
+ER$UIN= ****** GX	FB$TMD= 006000   	GETPRO  002242RG    004	LOG$CO= 000004   	O$BLS = 000056
+ESC   = 000033   	FB$TMP= 002000   	GETREC  002764RG    004	LOG$FI= 000002   	O$BPA = 000032
+EXPSTR  006776R     006	FB$TRM= 000004   	GETSIZ  002222RG    004	LOG$IO= 000040   	O$BPS = 000034
+EX$ERR= 000002   	FB$TRN= 000020   	GETSYS  006064RG    004	LOG$OP= 100000   	O$CDT = 000016
+EX$SEV= 000004   	FB$UDF= 000000   	GETUIC= ****** GX	LOG$PA= 000001   	O$COD = 000000
+EX$SUC= 000001   	FB$UPD= 000010   	GSA     000000RG    014	LOG$RP= 000020   	O$CTX = 000002
+EX$WAR= 000000   	FB$UPI= 000040   	GSABAS  000000RG    012	LOG$ST= 000010   	O$DAN = 000015
+FAB     006616R     006	FB$VAR= 000002   	GSAINI  000000R     013	LOOKUP  004112RG    004	O$DBS = 000063
+FABLST  000504RG    006	FB$VFC= 000003   	GSAMIN  000002RG    012	LT.USR= 000002   	O$DCT = 000046
+FAB1    000000R     006	FB$WAT= 000004   	GSAREQ  000004RG    012	LUN.SR= ****** GX	O$DCT0= 000046
+FAB1EN  000120R     006	FB$WRI= 000015   	GSAX    000000R     014	LUN1  = 000001   	O$DCT1= 000050
+FAB2    000120R     006	FB$WRT= 000041   	G.PRBA= 000006   	LUN2  = 000002   	O$DEQ = 000016
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 29-2
+Symbol table
+
+O$DEV = 000062   	O$MRS = 000036   	O$RT6 = 000070   	P.VEND= 000017   	SD.TI = 000006
+O$DFL = 000010   	O$NAM = 000046   	O$RT7 = 000072   	P.WIND= 000012   	SECOND  005776RG    004
+O$DID = 000022   	O$NOA = 000005   	O$RT8 = 000074   	RABLST  000542RG    006	SETTYP  001222RG    004
+O$DNA = 000052   	O$NOK = 000004   	O$RT9 = 000076   	RAB1    005474R     006	SOH   = 000001
+O$DNS = 000055   	O$NOR = 000006   	O$RVB = 000052   	RAB2    005614R     006	SPACE = 000040
+O$DTP = 000017   	O$NSG = 000064   	O$RVN = 000004   	RAB3    005734R     006	SRCNAM  001100RG    006
+O$DVB = 000056   	O$NUL = 000012   	O$SHR = 000021   	RAB4    006054R     006	STRCPY= ****** G
+O$DVI = 000006   	O$NXT = 000002   	O$SIZ = 000042   	RB$ASY= 000200   	SYDISK  000500RG    006
+O$EDT = 000026   	O$ORG = 000025   	O$SIZ0= 000042   	RB$BID= 000001   	SYDSKA= 000500RG    006
+O$ESA = 000032   	O$POS = 000022   	O$SIZ1= 000043   	RB$BK1= 000010   	SYDSKL= 000003 G
+O$ESL = 000035   	O$POS0= 000022   	O$SIZ2= 000044   	RB$BK3= 000020   	SYLEN = 000003 G
+O$ESS = 000034   	O$POS1= 000024   	O$SIZ3= 000045   	RB$BLL= 000240   	SY$IAS= 000003
+O$FAB = 000044   	O$POS2= 000026   	O$SIZ4= 000046   	RB$BLN= 000120   	SY$MPL= 000006
+O$FAC = 000020   	O$POS3= 000030   	O$SIZ5= 000047   	RB$EOF= 000001   	SY$POS= 000011
+O$FBDB= 000106   	O$POS4= 000032   	O$SIZ6= 000050   	RB$FDL= 010000   	SY$PRO= 000011
+O$FBD0= 000102   	O$POS5= 000034   	O$SIZ7= 000051   	RB$HSH= 000010   	SY$RST= 000004
+O$FBD1= 000104   	O$POS6= 000036   	O$STS = 000006   	RB$KEY= 000001   	SY$RT = 000007
+O$FID = 000014   	O$POS7= 000040   	O$STV = 000010   	RB$KGE= 002000   	SY$VMS= 000005
+O$FIOS= 000114   	O$PRG = 000004   	O$TKS = 000065   	RB$KGT= 004000   	SY$11M= 000001
+O$FIO2= 000116   	O$PRJ = 000006   	O$UBF = 000026   	RB$LOA= 000020   	TBL     006436R     006
+O$FLG = 000016   	O$PRO = 000010   	O$USZ = 000024   	RB$LOC= 000100   	TBUF    000020R     015
+O$FNA = 000050   	O$PVN = 000010   	O$VOL = 000006   	RB$LOK= 000040   	TCREAT  000700R     004
+O$FNB = 000030   	O$RAC = 000020   	O$WCC = 000036   	RB$MAS= 000002   	TDPB    000014R     015
+O$FNS = 000054   	O$RASY= 000120   	O$WDI = 000012   	RB$NKC= 000001   	TERMIN= 177777
+O$FOP = 000022   	O$RAT = 000026   	O$XAB = 000030   	RB$NK3= 000002   	TER$BI= 000004
+O$FOVL= 000110   	O$RBDB= 000106   	PACKET  003174RG    006	RB$NW1= 000040   	TER$CC= 000001
+O$FPAR= 000112   	O$RBD0= 000102   	PARFAB= 000000R     011	RB$ORG= 000004   	TER$PA= 000010
+O$FSZ = 000060   	O$RBD1= 000104   	PARNAM= 000120R     011	RB$RAH= 000400   	TER$XO= 000002
+O$FT0 = 000070   	O$RBF = 000032   	PAR$EV= 000002   	RB$RCN= 040000   	TEXT  = 000000
+O$FT1 = 000072   	O$RDT = 000006   	PAR$MA= 000003   	RB$RFA= 000002   	TLOG    004622RG    004
+O$FT2 = 000074   	O$REF = 000004   	PAR$NO= 000005   	RB$RLK= 000004   	TLOGDA  000002R     003
+O$FT3 = 000076   	O$RFA = 000012   	PAR$OD= 000001   	RB$SEQ= 000000   	TMPERR= ****** GX
+O$FT4 = 000100   	O$RFI = 000026   	PAR$SP= 000004   	RB$UIF= 020000   	TOP     004424R     006
+O$HAL = 000005   	O$RFI0= 000026   	PDPB    000004R     015	RB$ULK= 000040   	TOTP.R  002222RG    006
+O$IAN = 000013   	O$RFI1= 000030   	PROXAB  006174R     006	RB$WAT= 000004   	TOTP.S  002404RG    006
+O$IBS = 000062   	O$RFI2= 000032   	PRO$BA  000002   	RB$WBH= 001000   	TTBSIZ= 000040
+O$IFI = 000004   	O$RFM = 000027   	PRO$DI  000001   	RB$X1A= 000100   	TTBUF   004430R     006
+O$IFL = 000006   	O$RHB = 000042   	PRO$LO  000000   	RB$X2A= 000200   	TTY   = 000000
+O$ISI = 000004   	O$RIOS= 000114   	PRO$NE  000004   	RECDLM= ****** G 	TV$ALO= 000170
+O$ISID= 000004   	O$RIO2= 000116   	PRO$SE  000006   	RESSTR  007076R     006	TV$BLD= 000014
+O$KBF = 000034   	O$RLF = 000000   	PUTATR  002500RG    004	REWIND  001662RG    004	TV$CLC= 000160
+O$KNM = 000020   	O$ROP = 000022   	PUTC    003574RG    004	RMSCON  002620R     004	TV$CLO= 000020
+O$KRF = 000036   	O$ROVL= 000110   	PUTCDT  002314RG    004	RMSDIS  002714R     004	TV$CNT= 000020
+O$KSZ = 000021   	O$RPAR= 000112   	PUTCR0  003616RG    004	RMSINI  000000RG    004	TV$CON= 000030
+O$LAN = 000014   	O$RSA = 000002   	PUTREC  003126RG    004	RNFAB1  000000RG    011	TV$CRC= 000152
+O$LCH = 000063   	O$RSL = 000005   	P.CAPA= 000011   	RNFAB2  000160RG    011	TV$CRE= 000010
+O$LOC = 000022   	O$RSS = 000004   	P.CHKT= 000007   	RNNAM1  000120RG    011	TV$CTF= 000026
+O$LOC0= 000022   	O$RSZ = 000030   	P.EOL = 000004   	RNNAM2  000300RG    011	TV$CTR= 000030
+O$LOC1= 000024   	O$RTV = 000024   	P.MXL1= 000013   	RSX32 = ****** G 	TV$DCA= 000012
+O$LRL = 000044   	O$RT0 = 000054   	P.MXL2= 000014   	RX$IAS= 000003   	TV$DCD= 000010
+O$LVL = 000005   	O$RT1 = 000056   	P.NPAD= 000002   	RX$11D= 000000   	TV$DCM= 000004
+O$MBC = 000040   	O$RT1A= 000041   	P.PADC= 000003   	RX$11M= 000001   	TV$DCS= 000006
+O$MBF = 000037   	O$RT10= 000100   	P.QBIN= 000006   	RX$11S= 000002   	TV$DEL= 000100
+O$MRL = 000066   	O$RT2 = 000060   	P.QCTL= 000005   	SD.BYE= 000004   	TV$DIO= 000046
+O$MRN = 000040   	O$RT3 = 000062   	P.REPT= 000010   	SD.LOG= 000003   	TV$DIR= 000154
+O$MRN0= 000040   	O$RT4 = 000064   	P.SPSI= 000000   	SD.MOD= 000007   	TV$DIS= 000040
+O$MRN1= 000042   	O$RT5 = 000066   	P.TIME= 000001   	SD.MUD= 000010   	TV$DSP= 000142
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 29-3
+Symbol table
+
+TV$ERR= 000044   	XB$IN2= 000001   	Y$SETO= 000042   	$KSZ  = 000000   	$SHR  = 000002
+TV$EXI= 000042   	XB$IN4= 000003   	Y$SGSA= 000132   	$LCH  = 000001   	$STS  = 000000
+TV$EXT= 000144   	XB$KEY= 000001   	Y$SPAD= 000134   	$LRL  = 000000   	$STV  = 000000
+TV$FIN= 000110   	XB$KYL= 000070   	Y$SPDS= 000136   	$LSN  = 000000   	$TYP$ = 000001
+TV$FLH= 000016   	XB$LAL= 000034   	Y$STKR= 000052   	$MBC  = 000000   	$UBF  = 004472R     006
+TV$FLU= 000126   	XB$LBN= 000002   	Y$SYSV= 000112   	$MBF  = 000000   	$USZ  = 000000
+TV$FRE= 000122   	XB$NAM= 000012   	Y$WKQH= 000036   	$MRN0 = 000000   	$WCC  = 000000
+TV$GET= 000050   	XB$NUL= 000004   	Y$WKQT= 000040   	$MRN1 = 000000   	$XAB  = 000000
+TV$IDR= 000164   	XB$PAC= 000005   	$ALQ0 = 000000   	$MRS  = 000000   	$$    = 000000
+TV$INI= 000036   	XB$PRL= 000012   	$ALQ1 = 000000   	$NAM  = 000300R     011	$$$   = 000000R     010
+TV$MKW= 000162   	XB$PRO= 000003   	$ARGBU  001740RG    006	$NXT  = 000000   	$$$B1 = 000000
+TV$NTR= 000040   	XB$RFI= 000010   	$BID  = 000003   	$OPE1E= ****** G 	$$$B2 = 000000
+TV$NXT= 000132   	XB$SML= 000012   	$BKS  = 000000   	$ORG  = 000000   	$$$B3 = 000000
+TV$OPC= 000150   	XB$STG= 000000   	$BKT0 = 000000   	$ORG$ = 000001   	$$$B4 = 000000
+TV$OPE= 000000   	XB$SUM= 000005   	$BKT1 = 000000   	$PRG  = 000000   	$$$C  = 000000
+TV$PCD= 000022   	XB$ULB= 000006   	$BLN  = 000046   	$PRJ  = 000000   	$$$H  = 000000
+TV$PRF= 000146   	XB$USR= 000011   	$BLS  = 000000   	$PRO  = 000074   	$$$L  = 000000
+TV$PRP= 000002   	XB$VBN= 000004   	$BPA  = 000000   	$PUT1E= ****** G 	$$$OST= 000005
+TV$PUT= 000060   	Y$AST = 000014   	$BPS  = 000000   	$RAC  = 000000   	$$$T1 = 000004
+TV$RCV= 000000   	Y$ASTS= 000114   	$CLO1E= ****** G 	$RAT  = 000000   	$$1   = 000001
+TV$REA= 000136   	Y$BDBH= 000066   	$CMDBU  001620RG    006	$RBF  = 004472R     006	$$2   = 000000
+TV$REL= 000124   	Y$BFLH= 000106   	$COD  = 000002   	$RDATA= 000001   	$$5   = 000060
+TV$REW= 000130   	Y$CTXP= 000000   	$CON1E= ****** G 	$RFA  = 000000   	$$6   = 000015
+TV$SDM= 000024   	Y$DIC = 000002   	$CRE1E= ****** G 	$RFM  = 000002   	..RBLN= 000000
+TV$SDP= 000032   	Y$DSAR= 000142   	$CTX  = 000000   	$RHB  = 000000   	..TAB1= 000300R     011
+TV$SND= 000034   	Y$EFPI= 000010   	$DEL1E= ****** G 	$RLCB = ****** GX	..TAB2= 000300R     011
+TV$SPA= 000134   	Y$ENAR= 000140   	$DEQ  = 000000   	$RLF  = 000000   	..TMP0= 000002
+TV$TRU= 000120   	Y$ESCA= 000064   	$DEV  = 000000   	$RMCLO= ****** G 	..$$01= 000000R     007
+TV$UID= 000166   	Y$EXEC= 000032   	$DIS1E= ****** G 	$RMCON= ****** G 	...ARG= 000000
+TV$UPD= 000070   	Y$FATL= 000062   	$DNA  = 000000   	$RMCRE= ****** G 	...COD= 000000
+TV$WRI= 000140   	Y$GSA = 000060   	$DNS  = 000000   	$RMDIS= ****** G 	...ERR= 000000
+TV$XTD= 000156   	Y$IFAH= 000076   	$DSW  = ****** GX	$RMGET= ****** G 	...FAB= 000000
+VTPOS = 000003   	Y$IOFC= 000004   	$DUP  = 000000   	$RMINF= ****** G 	...LCB= 000000
+VTPRT1= 000004   	Y$IOST= 000012   	$ESA  = 000000   	$RMOPE= ****** G 	...LEN= 000002
+VT100 = 000001   	Y$IRAH= 000072   	$ESL  = 000000   	$RMPAR= ****** G 	...NAM= 000000
+VT200 = 000002   	Y$KEYH= 000102   	$ESS  = 000000   	$RMPUT= ****** G 	...NUM= 000001
+XB$ACC= 000013   	Y$LCHN= 000006   	$FAB  = 000360R     006	$RMREA= ****** G 	...PC1= 000340R     011
+XB$ALL= 000004   	Y$LCNT= 000124   	$FAC  = 000002   	$RMRWI= ****** G 	...POO= 000000
+XB$BN2= 000002   	Y$LINI= 000120   	$FNA  = 000000   	$RMSEA= ****** G 	...RAB= 000000
+XB$BN4= 000004   	Y$LOAD= 000130   	$FNB  = 000000   	$RMSIA= ****** G 	...RMS= 000000
+XB$CHG= 000002   	Y$LVER= 000116   	$FNS  = 000000   	$RMWRI= ****** G 	...SEQ= 000001
+XB$CTG= 000002   	Y$MBLU= 000122   	$FOP  = 000000   	$ROP  = 000000   	...SIZ= 000000
+XB$CYL= 000001   	Y$PARM= 000016   	$FSZ  = 000000   	$RQCB = ****** GX	...TAB= 000300R     011
+XB$DAT= 000002   	Y$QIO = 000002   	$GET1E= ****** G 	$RSA  = 000000   	...TBL= 000000
+XB$DTL= 000046   	Y$RELO= 000044   	$IFI  = 000000   	$RSL  = 000000   	...TMP= 000000
+XB$DUP= 000001   	Y$RMSV= 000054   	$INIDM  000000RG    016	$RSS  = 000000   	...TPC= 000040
+XB$FCB= 000007   	Y$RMS0= 000126   	$ISI  = 000000   	$RSZ  = 000000   	...TYP= 000000
+XB$HDR= 000010   	Y$RMS1= 000034   	$JFN  = 000000   	$RTV  = 000000   	...XAB= 000000
+XB$HRD= 000001   	Y$SAVO= 000056   	$KBF  = 000000   	$SDATA= 000002   	...XXX= 000000
+XB$INI= 000020   	Y$SEGD= 000046   	$KRF  = 000000
+
+. ABS.	000000    000	(RW,I,GBL,ABS,OVR)
+      	000000    001	(RW,I,LCL,REL,CON)
+$RTQUE	000000    002	(RW,D,GBL,REL,OVR)
+$RWDAT	000010    003	(RW,D,GBL,REL,CON)
+$CODE 	006114    004	(RO,I,LCL,REL,CON)
+$PDATA	000230    005	(RO,D,LCL,REL,CON)
+K11rms	rms i/o for KERMIT-11	MACRO V05.05  Monday 11-OCT-04 17:39  Page 29-4
+Symbol table
+
+RMSSUP	007176    006	(RW,D,LCL,REL,CON)
+$$RMS1	000102    007	(RW,D,GBL,REL,OVR)
+$$RMS4	000062    010	(RW,D,GBL,REL,OVR)
+RENDAT	000340    011	(RW,D,LCL,REL,CON)
+GSA$$D	000006    012	(RW,D,LCL,REL,CON)
+GSA$$I	000106    013	(RO,I,LCL,REL,CON)
+GSA$$M	000214    014	(RO,I,LCL,REL,CON)
+IMPURE	000060    015	(RW,D,LCL,REL,CON)
+PURE$I	000104    016	(RO,I,LCL,REL,CON)
+Errors detected:  0
+
+*** Assembler statistics
+
+
+Work  file  reads: 483
+Work  file writes: 384
+Size of work file: 32368 Words  ( 127 Pages)
+Size of core pool: 17708 Words  ( 68 Pages)
+Operating  system: RSX-11M/M-PLUS
+
+Elapsed time: 00:03:09.02
+K11RMS,K11RMS=K11RMS

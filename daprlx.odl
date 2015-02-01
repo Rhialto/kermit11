@@ -1,0 +1,23 @@
+;
+; DAPRLX.ODL - ODL file for use with memory-resident librarys RMSRES & DAPRES
+;
+; Note:	The entry ':RMSSYM' in the factor below globally defines all
+;	user-visible RMS symbols.  It may be deleted if any required
+;	RMS symbols are defined using the RMS macros from RMSMAC.MLB
+;
+RMSROT:	.FCTR	LB:[1,1]RMSDAP/LB:R0AULS-LB:[1,1]RMSLIB/LB
+;
+; For synchronous-only support, choose the following factor:
+;
+;RMSEXC:	.FCTR	LB:[1,1]RMSLIB/LB:R0EXSY
+;
+; For synchronous/asynchronous support, choose the following factor:
+;
+;RMSEXC:	.FCTR	LB:[1,1]RMSLIB/LB:R0EXEC-LB:[1,1]SYSLIB/LB:AUTOT
+;
+; The in-task RMS co-tree below is no longer required; the factor is
+; retained for compatibility with old ODL files, and will generate
+; no overhead if not referred to.
+;
+	.NAME	DUMCOT
+RMSALL:	.FCTR	DUMCOT

@@ -1,0 +1,152 @@
+SNDTXT.TSK;1   Memory allocation map  TKB M46.00      Page 1
+                     19-AUG-92   20:28
+
+
+
+Task    name   : ...   
+Partition name : GEN   
+Identification : 000006
+Task  UIC      : [7,14]
+Stack    limits: 000254 002253 002000 01024.
+PRG xfr address: 004432
+Total address windows: 1.
+Task  image  size  : 11104. words
+Task address limits: 000000 053277
+R-W disk blk limits: 000002 000055 000054 00044.
+
+*** Root segment: SNDTXT
+
+
+R/W mem  limits: 000000 053277 053300 22208.
+Disk blk limits: 000002 000055 000054 00044.
+
+
+Memory allocation synopsis:
+
+Section                                            Title  Ident  File
+-------                                            -----  -----  ----
+. BLK.:(RW,I,LCL,REL,CON)     002254 000000 00000.
+C$CODE:(RW,I,LCL,REL,CON)     002254 011722 05074.
+                              002254 000404 00260. SNDTXT        SNDTXT.OBJ;1
+                              002660 000032 00026. CSV$   000006 C.OLB;8
+                              002712 000114 00076. EXIT   000008 C.OLB;8
+                              003026 000306 00198. FCLOSE 000015 C.OLB;8
+                              003334 000022 00018. FEOF   000004 C.OLB;8
+                              003356 000106 00070. FGETS  000002 C.OLB;8
+                              003464 000614 00396. FOPEN  000042 C.OLB;8
+                              004300 000100 00064. PUTS   000005 C.OLB;8
+                              004400 000032 00026. PRINTF 000008 C.OLB;8
+                              004432 000052 00042. $$MAIN 000011 C.OLB;8
+                              004504 000002 00002. WRAPUP 000001 C.OLB;8
+                              004506 000032 00026. FFLUSH 000007 C.OLB;8
+                              004540 000042 00034. $$CL16 000002 C.OLB;8
+                              004602 000250 00168. MALLOC 000009 C.OLB;8
+                              005052 000030 00024. $$CLFU 000006 C.OLB;8
+                              005102 000146 00102. $$FLSH 000009 C.OLB;8
+                              005250 000166 00118. $$GETC 000006 C.OLB;8
+                              005436 000150 00104. $$FOPT 000002 C.OLB;8
+                              005606 000374 00252. $$FCSI 000002 C.OLB;8
+                              006202 000110 00072. $$FLUN 000002 C.OLB;8
+                              006312 000112 00074. $$PUTC 000012 C.OLB;8
+                              006424 001140 00608. $$PRNT 000009 C.OLB;8
+                              007564 001600 00896. $$INIT 000038 C.OLB;8
+                              011364 000034 00028. $$SVR1 000001 C.OLB;8
+                              011420 000134 00092. SBRK   000004 C.OLB;8
+                              011554 000350 00232. $$PUT  000005 C.OLB;8
+                              012124 000064 00052. $$ABUF 000003 C.OLB;8
+                              012210 000314 00204. $$GET  000011 C.OLB;8
+                              012524 000144 00100. REALLO 000005 C.OLB;8
+                              012670 000022 00018. $$FALO 000001 C.OLB;8
+                              012712 000026 00022. STRRCH 000002 C.OLB;8
+SNDTXT.TSK;1   Memory allocation map  TKB M46.00      Page 2
+SNDTXT               19-AUG-92   20:28
+
+
+
+                              012740 000400 00256. $$LTOA 000002 C.OLB;8
+                              013340 000102 00066. PERROR 000004 C.OLB;8
+                              013442 000034 00028. R50TOA 000003 C.OLB;8
+                              013476 000306 00198. $$GCMD 000007 C.OLB;8
+                              014004 000032 00026. FPRINT 000002 C.OLB;8
+                              014036 000140 00096. $$C5TA 000001 C.OLB;8
+C$DATA:(RW,I,LCL,REL,CON)     014176 001000 00512.
+                              014176 000000 00000. SNDTXT        SNDTXT.OBJ;1
+                              014176 000004 00004. EXIT   000008 C.OLB;8
+                              014202 000000 00000. FOPEN  000042 C.OLB;8
+                              014202 000044 00036. $$MAIN 000011 C.OLB;8
+                              014246 000444 00292. IOV    000017 C.OLB;8
+                              014712 000012 00010. MALLOC 000009 C.OLB;8
+                              014724 000132 00090. $$FCSI 000002 C.OLB;8
+                              015056 000010 00008. $$PRNT 000009 C.OLB;8
+                              015066 000000 00000. $$INIT 000038 C.OLB;8
+                              015066 000002 00002. $$NARG 000001 C.OLB;8
+                              015070 000104 00068. PERROR 000004 C.OLB;8
+                              015174 000002 00002. $$PRMT 000001 C.OLB;8
+C$STRN:(RW,I,LCL,REL,CON)     015176 001042 00546.
+                              015176 000222 00146. SNDTXT        SNDTXT.OBJ;1
+                              015420 000032 00026. $$FOPT 000002 C.OLB;8
+                              015452 000004 00004. $$PUT  000005 C.OLB;8
+                              015456 000026 00022. DDTOA  000003 C.OLB;8
+                              015504 000534 00348. PERROR 000004 C.OLB;8
+$FINL :(RW,I,LCL,REL,CON)     016240 000002 00002.
+                              016240 000002 00002. EXIT   000008 C.OLB;8
+$FINL$:(RW,I,LCL,REL,CON)     016242 000000 00000.
+                              016242 000000 00000. EXIT   000008 C.OLB;8
+$FINL.:(RW,I,LCL,REL,CON)     016242 000000 00000.
+                              016242 000000 00000. EXIT   000008 C.OLB;8
+$INIT :(RW,I,LCL,REL,CON)     016242 000002 00002.
+                              016242 000002 00002. $$MAIN 000011 C.OLB;8
+$INIT$:(RW,I,LCL,REL,CON)     016244 000000 00000.
+                              016244 000000 00000. $$MAIN 000011 C.OLB;8
+$INIT.:(RW,I,LCL,REL,CON)     016244 000000 00000.
+                              016244 000000 00000. $$MAIN 000011 C.OLB;8
+$$CSI$:(RO,I,LCL,REL,CON)     016244 002706 01478.
+$$FSR1:(RW,D,GBL,REL,OVR)     021152 006140 03168.
+                              021152 004100 02112. FOPEN  000042 C.OLB;8
+$$FSR2:(RW,D,GBL,REL,OVR)     027312 000364 00244.
+$$FSR3:(RW,D,GBL,REL,OVR)     027676 000000 00000.
+$$FSR4:(RW,D,GBL,REL,OVR)     027676 000000 00000.
+$$RESL:(RO,I,LCL,REL,CON)     027676 023402 09986.
+
+
+
+Global symbols:
+
+CRET$  002674-R  C$SAV  002660-R  E$$XWA 000000    FOPEN  003504-R  F.BFHD 000020    PUTS   004312-R  STDOUT 014632-R  
+CSV$   002660-R  EXIT   002722-R  FCLOSE 003026-R  FPRINT 014004-R  MAIN   002254-R  REALLO 012524-R  STRRCH 012712-R  
+C$AUTO 177772    EXITS  002712-R  FEOF   003334-R  FPUTS  004340-R  MALLOC 004602-R  R50TOA 013442-R  VF$APN 001000    
+C$PMTR 000004    E$$XER 000002    FFLUSH 004506-R  FPUTSS 004300-R  MFREE  005020-R  SBRK   011420-R  VF$CMD 000400    
+C$RET  002674-R  E$$XFA 000004    FGETS  003356-R  FREE   005020-R  PERROR 013340-R  STDERR 014634-R  VF$EOF 000020    
+C$RETS 002704-R  E$$XOK 000001    FGETSS 003370-R  FREOPE 003464-R  PRINTF 004400-R  STDIN  014630-R  VF$EOR 000060    
+SNDTXT.TSK;1   Memory allocation map  TKB M46.00      Page 3
+SNDTXT               19-AUG-92   20:28
+
+
+
+VF$ERR 000040    VF$VM1 000002    V$UIC  000020    $$C5TA 014036-R  $$FERR 014470-R  $$IOSB 014476-R  $$PPTR 014202-R  
+VF$FIL 010000    VF$WF1 000010    V$WFLG 000010    $$DFNB 015000-R  $$FLSH 005102-R  $$LMAX 000024    $$PRMT 015174-R  
+VF$MBU 000010    VF$WLD 000001    V$WILD 000012    $$DTOA 015466-R  $$FLUN 006202-R  $$LTOA 013004-R  $$PRNT 006424-R  
+VF$NBF 000004    VF$WRT 000002    WRAPUP 004504-R  $$EFDB 014272-R  $$FOPE 004254-R  $$LUNE 014706-R  $$PUT  011554-R  
+VF$NEW 004000    V$BASE 000004    $$ABUF 012124-R  $$EFNB 014432-R  $$FOPN 003526-R  $$LUNS 014636-R  $$PUTC 006312-R  
+VF$NLH 000020    V$BBUF 000016    $$ALHD 014716-R  $$EIOV 014246-R  $$FOPO 003572-R  $$MAIN 004432-R  $$RSTS 014210-R  
+VF$NOS 002000    V$BCNT 000000    $$ALOC 004606-R  $$EREC 014506-R  $$FOPT 005436-R  $$MEND 014226-R  $$STND 014220-R  
+VF$OPN 100000    V$BPTR 000002    $$ALOX 014722-R  $$ESIZ 000122    $$FOPX 004074-R  $$MLIM 014230-R  $$SVR1 011364-R  
+VF$REA 000001    V$DNAM 000022    $$ARGC 014222-R  $$EXIT 002742-R  $$FREE 005024-R  $$MTOP 014232-R  $$TASK 014236-R  
+VF$REC 040000    V$FDB  000024    $$ARGV 014224-R  $$EXST 014176-R  $$GCMD 013476-R  $$NARG 015066-R  $$TICK 014216-R  
+VF$RW  000200    V$FLAG 000006    $$CFLU 005052-R  $$FAIL 003006-R  $$GET  012210-R  $$NLUN 014472-R  $$UIC  014234-R  
+VF$STR 000100    V$LUN  000066    $$CLOS 003052-R  $$FALO 012670-R  $$GETC 005250-R  $$OFIL 014504-R  $$VMS  014212-R  
+VF$TTY 020000    V$RBSZ 000014    $$CL16 004540-R  $$FCLS 003170-R  $$IFIL 014502-R  $$OPSY 014206-R  .NLUNS 014474-R  
+VF$VER 000004    V$SIZE 000164    $$CSIB 014724-R  $$FCSI 005606-R  $$INIT 010034-R  $$POS  014214-R  
+
+
+
+
+*** Task builder statistics:
+
+    Total work file references: 62639.
+    Work  file  reads: 0.
+    Work  file writes: 0.
+    Size of core pool: 5962. words (23. pages)
+    Size of work file: 4608. words (18. pages)
+
+    Elapsed time:00:00:28

@@ -1,0 +1,37 @@
+2009-02-19
+
+This is T3.63 of KERMIT-11.
+This version have been made by Johnny Billquist <bqt@softjar.se>
+and have only been tested on RSX.
+Several problems with attribute packets, memory layout and
+library useage have been fixed.
+Three versions are provided as precompiled binaries, and
+should also be possible to compile from scratch:
+
+K11RSX - A plain KERMIT-11 with no fancy stuff at all. Usable on all
+	 variants.
+
+K11IDM - I/D space version compiled with /MU and with RMSRES as a
+	 supervisor library.
+
+K11IDD - I/D space version compiled with /MU and with RMSRES as a
+	 supervisor library, and RMSDAP as a resident library.
+
+If any other versions are made to compile, and tested, please give
+the changes back to me, and I'll try to keep this up to date.
+
+The compiled versions are provided as encoded files. The old
+scheme of HEX files have not been used. The programs to encode/decode
+HEX files are still around, but the encode format is superior since
+it both result is much smaller files, and it also restores files
+to the right format.
+
+The build system have been changed to using a makefile. The old
+command files are still around, but are not used normally any longer.
+If people want to build without using MKE, they should use information
+from the makefile for the correct way to compile and link anyway.
+
+Both MKE and COD (the tools used) are available for free from the
+internet, and can be found at ftp://ftp.update.uu.se/pub/pdp11/rsx/tools
+
+	Johnny Billquist

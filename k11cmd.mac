@@ -1,14 +1,14 @@
 	.title	k11cmd	command level for kermit-11
-	.ident	/3.60/
+	.ident	/3.63/
 	.enabl	gbl
 
 	baselev	==	3		; baseline level
-	edit	==	60.		; edit (independent of base_level)
+	edit	==	63.		; edit (independent of base_level)
 	release	==	'T&137		; T for test, V for release
 
 	.save
 	.psect	ident	,ro,d,gbl,rel,con
-lasted::.ascii	/  Last edit: 21-Mar-89 /
+lasted::.ascii	/  Last edit: 3-Oct-06 /
 	.ascii	/ /
 	.byte	0
 	.even
@@ -31,7 +31,18 @@ $beep2:	.byte	CR,LF,7,7,0
 	PRINT	#$beep2
 	.endm	BEEP2
 
-
+;	Johnny Billquist 17-Oct-96 13:30:40
+;
+; 63 03-Oct-06  20:00:00  K11M41.MAC	Bugfix with outstanding QIOs
+;					QIOWs was done without event flags.
+;					Fixed by Oleg Safiullin
+;
+; 62 21-Oct-04            K11RMS.MAC	Changed psect attributes, and
+;					RMS allocator, to make RMSDAP work.
+;
+; 61 17-Oct-96  13:13:40  K11ATR.MAC	Bugfix when attribute packets was
+;					zero length.
+;
 ;	Brian Nelson  01-Dec-83  13:19:14
 ;
 ;	Change Software, Toledo, Ohio
