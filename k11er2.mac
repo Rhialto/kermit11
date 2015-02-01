@@ -1,0 +1,127 @@
+	.title	rmser2	overlay 2 for rms error text
+	.psect
+
+
+
+	.macro	save	list
+	.if b , <list>
+	.ift
+	 save	<r0,r1,r2,r3,r4,r5>
+	.iff
+	.irp	x,<list>
+	 mov	x,-(sp)
+		.endr
+	.endc
+	.endm	save
+
+
+	.macro	unsave	list
+	.if b , <list>
+	.ift
+	unsave	<r5,r4,r3,r2,r1,r0>
+	.iff
+	.irp	x,<list>
+	 mov	(sp)+,x
+		.endr
+	.endc
+	.endm	unsave
+
+
+rmser2::save	<r0,r1,r2>		; be nice to our caller
+	mov	4(r5)	,r1		; return buffer address
+	mov	r1	,r2		; save buffer address
+	clrb	(r1)+			; make first char .asciz
+	mov	#77	,r0		; clear it out first
+10$:	movb	#40	,(r1)+		; fill rest of buffer with spaces
+	sob	r0	,10$		; next please
+	mov	#dsp	,r0		; get the index table for errors
+20$:	tst	@r0			; hit the end yet ?
+	beq	100$			; yes, exit with no text
+	cmp	@2(r5)	,@r0		; type indexentry = record
+	beq	30$			;       errnum: integer
+	cmp	(r0)+	,(r0)+		;	errtxt: textaddress
+	br	20$			;      end ;
+
+30$:	mov	2(r0)	,r0		; get the error text address
+	mov	#77	,r1		; maxlength of 77 (8) bytes
+40$:	movb	(r0)+	,(r2)+		; copy until 63 characters or a
+	beq	50$			; null byte is found
+	sob	r1	,40$		; next please
+50$:	clrb	@r2			; insure .asciz for output text
+
+100$:	unsave	<r2,r1,r0>		; pop our registers and exit
+	return
+
+
+
+
+	.psect	dsp	,ro,d,lcl,rel,con
+dsp:
+	.psect	msgtxt	,ro,d,lcl,rel,con
+	.macro	$ioer$	nam,code,txt
+
+	.psect	msgtxt
+	$$ = .
+	.ascii	#nam#
+	.ascii	#  #
+	.asciz	#txt#
+	.psect	dsp
+	.word	code,$$
+	nam	=	code
+	.psect
+	.endm
+
+
+
+
+$IOER$	ER$EXT,-624.,<FILE EXTEND FAILURE(STV=SYS ERR CODE)>
+$IOER$	ER$FAB,-640.,<NOT A VALID FAB>
+$IOER$	ER$FAC,-656.,<RECORD OPERATION NOT SUPPORTED IN FAB FAC>
+$IOER$	ER$FAL,-664.,<REMOTE NODE DOES NOT SUPPORT OPERATION>
+$IOER$	ER$FEX,-672.,<FILE ALREADY  EXISTS >
+$IOER$	ER$FID,-168.,<INVALID FILE-ID>
+$IOER$	ER$FLG,-688.,<INVALID FLAG-BITS COMBINATION(STV=@XAB)>
+$IOER$	ER$FLK,-704.,<FILE IS LOCKED BY OTHER USER>
+$IOER$	ER$FNA,-712.,<ZERO FNA WITH NON-ZERO FNS>
+$IOER$	ER$FND,-720.,<RSX-F11ACP "FIND" FUNCTION FAILED(STV=SYS ERR CODE)>
+$IOER$	ER$FNF,-736.,<FILE NOT FOUND>
+$IOER$	ER$FNM,-752.,<ERROR IN FILE NAME>
+$IOER$	ER$FOP,-768.,<INVALID FILE OPTIONS>
+$IOER$	ER$FSS,-776.,<SYSTEM ERROR DURING FNA/DNA STRING PARSE>
+$IOER$	ER$FUL,-784.,<DEVICE/FILE FULL>
+$IOER$	ER$IAN,-800.,<INDEX AREA NUMBER INVALID(STV=@XAB)>
+$IOER$	ER$IDX,-816.,<INDEX NOT INITIALIZED(STV ONLY,STS=ER$RNF)>
+$IOER$	ER$IFI,-832.,<INVALID IFI VALUE,OR UNOPENED FILE>
+$IOER$	ER$IMX,-848.,<TOO MANY XABS OF A GIVEN TYPE(STV=@XAB)>
+$IOER$	ER$INI,-864.,<THIS ERROR CODE NO LONGER USED>
+$IOER$	ER$IOP,-880.,<OPERATION ILLEGAL,OR INVALID FOR FILE ORG.>
+$IOER$	ER$IRC,-896.,<ILLEGAL RECORD ENCOUNTERED(SEQ. FILES ONLY)>
+$IOER$	ER$ISI,-912.,<INVALID ISI VALUE, OR UNCONNECTED RAB>
+$IOER$	ER$KBF,-928.,<BAD KEY BUFFER ADDRESS(KBF=0)>
+$IOER$	ER$KEY,-944.,<INVALID KEY FIELD(KEY=0/NEG)>
+$IOER$	ER$KRF,-960.,<INVALID KEY-OF-REFERENCE($GET/$FIND)>
+$IOER$	ER$KSZ,-976.,<KEY SIZE=0,OR TOO LARGE(IDX)/NOT=4(REL)>
+$IOER$	ER$LAN,-992.,<LOWEST-LEVEL-INDEX AREA NUMBER INVALID(STV=@XAB)>
+$IOER$	ER$LBL,-1008.,<NOT ANSI LABELED TAPE>
+$IOER$	ER$LBY,-1024.,<LOGICAL CHANNEL BUSY>
+$IOER$	ER$LCH,-1040.,<LOGICAL CHANNEL NUMBER TOO LARGE>
+$IOER$	ER$LEX,-1048.,<LOGICAL EXTEND ERROR>
+$IOER$	ER$LIB,-1052.,<OLD/INCONSISTENT LIBRARY CONFIGURATION(CRASH)>
+$IOER$	ER$LOC,-1056.,<"LOC" FIELD INVALID(STV=@XAB)>
+$IOER$	ER$MAP,-1072.,<BUFFER MAPPING ERROR>
+$IOER$	ER$MEM,-1080.,<FNA, DNA, ESA, OR RSA STRING WRAPPED TO ZERO>
+$IOER$	ER$MKD,-1088.,<F11ACP COULD NOT MARK FILE FOR DELETION>
+$IOER$	ER$MRN,-1104.,<MRN VALUE=NEG/REL.KEY GT MRN>
+$IOER$	ER$MRS,-1120.,<ILLEGAL FAB MRS VALUE>
+$IOER$	ER$NAE,-1128.,<UNMAPPABLE NETWORK ACCESS ERROR>
+$IOER$	ER$NAM,-1136.,<"NAM" BLOCK ADDRESS ZERO OR ODD>
+$IOER$	ER$NEF,-1152.,<NOT POSITIONED TO EOF(SEQ. FILES ONLY)>
+$IOER$	ER$NET,-1160.,<LINK OR NETWORK ABORTED>
+$IOER$	ER$NID,-1168.,<THIS ERROR CODE NO LONGER IN USE>
+$IOER$	ER$NMF,-1172.,<NO MORE FILES MATCHING WILD-CARD SPECIFICATION>
+$IOER$	ER$NOD,-1176.,<ERROR IN NODE NAME (OR IMBALANCED NODES FOR $RENAME)>
+
+	.psect	dsp
+	.word	0,0			; mark end of text
+
+	.end

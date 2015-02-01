@@ -1,0 +1,77 @@
+	.title	rmserr	get rms11 error text
+	.ident	/82.01/
+	.psect
+
+
+
+;	Copyright (C) 1983 Brian Nelson for the MINITAB project
+;
+;
+;	R M S E R R
+;
+;	byte errtext(64)
+;	integer errnum
+;	call rmserr(errnum,errtext)
+;
+;	module size: 14450 (8) bytes, 3220 (10) words
+;
+;
+;	 Return RMS11 error text to MINITAB, just as the
+;	modules FCSERR and FIPERR do for RSX11M and RSTS
+
+	.sbttl	get the error text
+
+rmserr::cmp	@2(r5)	,#-624.
+	ble	10$
+	call	rmser1
+	return
+10$:	cmp	@2(r5)	,#-1184.
+	ble	20$
+	call	rmser2
+	return
+20$:	call	rmser3
+	return
+
+	.globl	rmser1	,rmser2	,rmser3
+
+
+	.mcall	qiow$s
+
+rmserp::mov	r1	,-(sp)		;save fab addr
+	mov	r2	,-(sp)		;brian is a fanatic
+	mov	r5	,-(sp)
+	sub	#102	,sp		;error text buffer
+	mov	sp	,r1		;pointer to e.t.buffer
+	mov	r0	,-(sp)		;put error code on stack
+	mov	sp	,r2		;point to it
+	mov	r1	,-(sp)		;"new" 
+	mov	r2	,-(sp)		;pointers to pointers
+	mov	#2	,-(sp)		;number of args
+	mov	sp	,r5		;point to pointers to pointers
+	call	rmserr			;picks up arg list ptr from r5
+	add	#4*2	,sp		;pop args
+	qiow$s	#io.wlb,#5,#13,,,,<r1,#100>	;print msg
+	add	#102	,sp		;restore stack pointer
+	mov	(sp)+	,r5
+	mov	(sp)+	,r2		;   "     reg 2
+	mov	(sp)+	,r1		;   "      "  1
+	return
+
+
+
+rmserx::mov	#77-5	,r1		; maxlength of 77 (8) bytes
+	movb	#'E	,(r2)+
+	movb	#'R	,(r2)+
+	movb	#'$	,(r2)+
+	movb	(r0)+	,(r2)+		; copy error name over
+	movb	(r0)+	,(r2)+		; copy until 63 characters or a
+	movb	(r0)+	,(r2)+		; copy until 63 characters or a
+	movb	#40	,(r2)+
+	movb	#40	,(r2)+
+40$:	movb	(r0)+	,(r2)+		; copy until 63 characters or a
+	beq	50$			; null byte is found
+	sob	r1	,40$		; next please
+50$:	clrb	@r2			; insure .asciz for output text
+	return
+
+	.end

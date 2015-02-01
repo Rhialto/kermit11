@@ -1,0 +1,134 @@
+	.title	k11tra	transfer to remote without kermit
+	.ident	/2.0.01/
+
+
+;	07-Mar-84  11:42:22   Brian Nelson
+;
+;	Copyright (C) 1984 Change Software, Inc.
+
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.endc
+
+	.psect	$code
+
+	.iif ndf	,k11inc	,.error	;include for K11MAC.MAC is missing
+	.enabl	gbl
+
+
+;	Transfer  a  file  without  the  blessing  of  any
+;	protocal to another system. What this  amounts  to
+;	is  to  send  a  single  character from a file and
+;	then wait for it's echo to show up.  Timeout  will
+;	be  10  seconds.  It  is  presumed  the  the other
+;	system is running some sort of  program  like  PIP
+;	to  get  the  data. Line feeds will never be sent,
+;	thus this  is  only  good  for  text  files.  This
+;	option  will  hopefully  be  of some assistance in
+;	getting initial bootstraps onto other systems.  If
+;	the  value  in 2(r5) is <> 0 then assume the other
+;	system will not echo else assume so. 
+;
+;	Usage:
+;
+;	Use the  SET LINE, SET SPEED  and CONNECT commands
+;	to  initiate the  receiving  program on  the other
+;	system. Then 'escape' back to Kermit-11 and simply
+;	type TRA filename.type.
+;
+;
+;	T R A N S F (%loc filename, %val echoflag )
+;
+;	Input:	@r5	addess of the .asciz filename to send
+;		2(r5)	if <> 0 then don't wait for echoing of the data
+;	Output:	r0	any system or RMS11 error codes
+
+	.save				; /47/
+	.psect	rwdata	,rw,d,lcl,rel,con;/47/
+isecho:	.word	0
+noecho:	.word	0
+	.restore
+
+
+;	10-Mar-86  10:10:15  BDN	Improve echo waiting logic
+
+
+
+	.sbttl	the real (and simple) work of transfer
+
+;	A simple brute force transfer of a file.
+
+
+transf::clr	r2			; input_open := false
+	clr	r3			; terminal_set := false
+	mov	#3	,isecho		; /47/ Countdown on read timeouts
+	mov	2(r5)	,noecho		; /47/ Default for echoing
+	tst	remote			; if remote
+	beq	10$			;  then ttname := ourname
+	calls	gttnam	,<#ttname>	; get the terminal name here
+10$:	calls	ttyini	,<#ttname,#lun.ti,#ter$xo>
+	tst	r0
+	bne	20$
+	calls	ttysav	,<#ttname>	; save terminal settings
+	calls	ttyset	,<#ttname>	; set some things now
+	tst	r0			; terminal setup work out ?
+	bne	20$			; no
+	mov	sp	,r3		; yes
+
+20$:	calls	open	,<@r5,#lun.in,#text>
+	tst	r0			; did the open work today?
+	bne	90$			; no
+	mov	sp	,r2		; flag that the file is open
+	mov	#200	,r4		; start of things
+
+
+30$:	tst	cccnt			; /47/ Control C today?
+	bne	90$			; /47/ Yes, exit please
+	calls	getc	,<#lun.in>	; get the next ch in the file
+	tst	r0			; did that work ?
+	bne	90$			; no
+	dec	r4			; time for the remote to dump a block?
+	bne	40$			; no
+	calls	suspend	,<#1,#0>	; yes, sleep for 1 second
+	calls	cantyp	,<#ttname,#lun.ti> ; /47/ Dump pending typeahead
+	mov	#200	,r4		; and re-init the count
+40$:	cmpb	r1	,#lf		; a line feed we don't need ?
+	bne	50$			; no
+	calls	suspend	,<#0,#6>	; wait 1/10 sec please
+	calls	xbinrea	,<#lun.ti,#-1>	; eat perhaps a line feed (no wait)
+	br	60$
+50$:	mov	r1	,-(sp)		; yes, now send it to the other
+	mov	sp	,r1		; point to it please
+	calls	binwri	,<r1,#1,#lun.ti>; simple to put a single char.
+	tst	(sp)+			; pop the tiny buffer now please.
+	tst	r0			; did that work out ?
+	bne	90$			; no
+	tst	noecho			; yes, should we try to eat echoes?
+	bne	60$			; no
+	calls	xbinrea	,<#lun.ti,#2>	; /47/ yes, try for the echo please
+	tst	r0			; /47/ did we ever get anything back?
+	beq	55$			; /47/ Yes, keep going
+	dec	isecho			; /47/ Shoud we give up looking for
+	bne	60$			; /47/ data being echoed?
+	mov	sp	,noecho		; /47/ Yes, forget about the echoing
+55$:	mov	#3	,isecho		; /47/ Start the counter for echoing
+60$:	br	30$			; next please
+
+
+90$:	cmp	r0	,#ER$EOF	; RMS end of file today ?
+	beq	100$			; yes, that ok
+	direrr	r0			; no, print the error out and exit
+100$:	tst	r2			; input file still open ?
+	beq	110$			; no
+	calls	close	,<#lun.in>
+110$:	tst	r3			; should we put the terminal back ?
+	beq	120$			; no
+	calls	ttyfin	,<#ttname,#lun.ti>
+	calls	ttyrst	,<#ttname>	; yes
+120$:	return
+
+
+	.end

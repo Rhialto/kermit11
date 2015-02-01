@@ -1,0 +1,305 @@
+	.title	k11dsp	dispatch to correct terminal i/o for RT11, PRO/RT,TSX
+	.ident	/2.24/
+
+	
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.endc
+
+	.enabl	gbl
+
+;	08-Nov-84  16:16:40  Brian Nelson
+;
+;	Collect K11PRT, K11RTT and K11TSX into separete overlays in
+;	the same region (either disk or virtual).  Dispatch to  the
+;	correct one based on (1)  the exectype flag  set at program
+;	entry in XINIT, or (2) force PRO/350 mode  if the device is
+;	X?: (checked in  ASSDEV  below).  While the cost in address
+;	space is a bit  to create  overlay table entries for all of
+;	the ept's in each module is about 300 words,  doing so will
+;	save me the need to create multiple save images  every time
+;	I  change Kermit-11.  Additionally,  one save image for all
+;	systems sounds like a nice idea to me.
+;
+;	12-Sep-86  11:20:20 BDN Changed around to separate I/D space
+;				Not needed for RT but may as well be
+;				consistant.
+
+
+	.macro	ENTRY	ep
+	.enabl	lsb
+ep::	mov	#200$	,r0
+	jmp	dispat
+	.save
+	.psect	$PDATA	,D
+200$:	.word	M.'EP,X.'EP,T.'EP
+	.restore
+	.dsabl	lsb
+	.endm	ENTRY
+
+	.macro	CALLDSP	ep
+	.enabl	lsb
+	mov	#200$	,r0
+	call	dispat
+	return
+	.save
+	.psect	$PDATA	,D
+200$:	.word	M.'ep,X.'ep,T.'ep
+	.restore
+	.dsabl	lsb
+	.endm	CALLDSP
+
+
+	.save
+	.psect	packet	,rw,d,lcl,rel,con
+packet::.blkb	MAXLNG+20
+	.even
+	.even
+	.psect	rttda
+consav::.blkb	50
+ttparm::.blkb	50
+	.restore
+
+
+
+	JSW	=	44
+	.MCALL	.TTINR
+
+dispatch:
+	tst	proflg			; is this a pro/350 today?
+	bne	pro			; yes
+	tst	tsxflg			; is this tsx/tsx+
+	bne	tsx
+	jsr	pc	,@(r0)		; no, it plain old RT11. Use
+	return				; multiple terminal service for i/o
+
+pro:	tst	(r0)+			; pro/rt11, do the right thing
+	jsr	pc	,@(r0)		; simple
+	return
+
+tsx:	cmp	(r0)+	,(r0)+		; tsx
+	jsr	pc	,@(r0)		; call the routine
+	return				; and exit
+
+
+
+
+	ENTRY	TTYSAV
+	ENTRY	TTYRST
+	ENTRY	DEADEV
+
+
+Assdev::mov	@r5	,r0		; get the first character of the name
+	cmpb	@r0	,#'0		; if a digit, then insure proflag is
+	blo	5$			; is turned off (in case this is a
+	cmpb	@r0	,#'9		; normal 11 with MT and XL service.
+	bhi	5$			; not a mt line setting
+	clr	proflg			; turn off the XC/XL flag please
+	tst	tsxsave			; /59/ TSX+
+	beq	5$			; /59/ No
+	mov	#ER$LIN	,r0		; /59/ Yes, error
+	return				; /59/
+5$:	cmpb	@r0	,#'C&137	; /44/ CLn: and TSX+?
+	beq	6$			; /44/ Yes
+	cmpb	@r0	,#'K&137	; /56/ KL?
+	beq	6$			; /56/ Yes
+	cmpb	@r0	,#'X&137	; if XC or XL, then treat as a PRO/350
+	bne	10$			; no
+6$:	tst	tsxflg			; are we tsx?
+	beq	7$			; no
+	mov	sp	,tsxcl		; and set tsx and cl mode
+7$:	clr	tsxflg			; shut off tsx mode, enable PRO
+	mov	sp	,proflg		; simple to do
+	br	100$			; and dispatch to the correct thing
+10$:	cmpb	@r0	,#'T&137	; /39/ SET LIN TT: ?
+	bne	30$			; /39/ no
+	clr	proflg			; /39/ yes, for RT11 use console then
+	tst	tsxflg			; /39/ already been here or real TSX+
+	bne	20$			; /39/ yes, leave things alone then
+	mov	#-1	,tsxflg		; /39/ flag to use TSX tt handling
+	cmpb	parity	,#PAR$NONE	; /39/ no parity?
+	beq	15$			; /39/ yes, fake space parity then
+	tstb	parity			; /39/ parity already set up?
+	bne	20$			; /39/ yes
+15$:	mov	#PAR$SPACE,parity	; /39/ need 8bit quoting also
+20$:	movb	#60.	,setrec+p.spsiz	; /39/ console port won't do XON/XOFF
+	movb	#60.	,setsen+p.spsiz	; /39/ fast enough to avoid data loss
+	movb	#60.	,senpar+p.spsiz	; /43/ Here for safety.
+30$:
+100$:	CALLDSP	ASSDEV
+110$:	return
+
+	.enabl	lsb
+
+Ttyini::CALLDSP	TTYINI
+	tst	r0
+	beq	iniend
+	mov	r0	,r1
+	message	<Line init failure - >
+	direrr	r1
+	mov	r1	,r0
+iniend:	return
+
+	ENTRY	TTYFIN
+	
+
+
+
+
+
+	ENTRY	XBINREAD
+	ENTRY	BINREAD
+	ENTRY	BINWRITE
+
+	PAKREA	==	BINREAD
+	PAKWRI	==	BINWRITE
+
+	ENTRY	CANTYP
+	ENTRY	TTXON
+	ENTRY	SENBRK
+	ENTRY	TTPARS
+	ENTRY	GTTNAM
+	ENTRY	SETSPD
+	ENTRY	TTSPEED
+	ENTRY	TTYSET
+	ENTRY	TTRFIN
+	ENTRY	TTRINI
+	ENTRY	FINRT
+	ENTRY	TTYDTR
+	ENTRY	TTYHAN
+	ENTRY	KBREAD
+
+tidias::
+tidiar::return
+
+rstsrv::clr	r0
+	return
+
+inqdtr::mov	#-1	,r0
+	return
+
+inqpar::clr	r0
+	return
+
+
+
+
+	.MCALL	.TTINR	,.TTYIN	,.TTYOU
+
+clrcns::call	chkabo
+	tst	r0
+	bne	clrcns
+	return
+
+	.mcall	.SERR	,.HERR	,.TTINR	,.TWAIT
+
+read1c::mov	@#JSW	,-(sp)
+	.SERR
+5$:	bis	#40000!10000!100,@#JSW
+	tst	tsxsav
+	ble	10$
+	mov	#tsxon	,r0
+	EMT	375
+	mov	#tsxsin	,r0
+	EMT	375
+10$:	.TTINR
+	bcc	90$
+	.TWAIT	#rtwork,#tsxwai
+	br	5$
+90$:	bic	#^C<40000!10000!100>,@#JSW
+	mov	r0	,-(sp)
+	.HERR
+	tst	tsxsav
+	ble	100$
+	mov	#tsxoff	,r0
+	EMT	375
+100$:	mov	(sp)+	,r0
+	bis	(sp)+	,@#JSW
+	return
+
+	.save
+	.psect	$pdata	,d
+tsxon:	.byte	0,152
+	.word	'U&137,0
+tsxsin:	.byte	0,152
+	.word	'S&137,0
+tsxoff:	.byte	0,152
+	.word	'T&137,0
+tsxwai:	.word	0,3
+	.restore
+
+Wrtall::mov	r1	,-(sp)		; /56/ Save registers
+	mov	r0	,-(sp)		; /56/ Ditto
+	mov	6(sp)	,r1		; /56/ Get string address
+10$:	tstb	@r1			; /56/ All done?
+	beq	100$			; /56/ Yes, exit
+	.TTYOU	(r1)+			; /56/ No, dump
+	br	10$			; /56/ Next please
+100$:	mov	(sp)+	,r0		; /56/ Pop registers
+	mov	(sp)+	,r1		; /56/ Ditto
+	mov	(sp)+	,(sp)		; /56/ Move return address up
+	return				; /56/ And exit
+
+
+chkabo::
+	mov	@#JSW	,-(sp)
+	bis	#40000!10000!100,@#JSW	; enable special input modes
+	.ttinr				; check for ^z or ^x
+	bcc	100$			; no
+	clr	r0			; nothing, return a null
+100$:	bic	#^C<40000!10000!100>,@sp;
+	bis	(sp)+	,@#JSW
+	return				; return( failure )
+
+
+
+	.if ne	,0
+	.ift				; Moved to region
+
+$CBTA::	JSR	R5,$SAVRG
+	MOVB	R2,R5
+	CLRB	R2
+	SWAB	R2
+	ASR	R2
+	BCC	E00134
+	TST	R1
+	BPL	E00134
+	NEG	R1
+	MOVB	#55,(R0)+
+E00134:	MOV	R0,R4
+	ROR	R2
+	ROR	R2
+	ROR	R3
+	CLRB	R3
+	BISB	R2,R3
+	CLRB	R2
+	BISB	#60,R2
+	MOV	R1,R0
+E00160:	MOV	R0,R1
+	CLR	R0
+	DIV	R5,R0
+	CMP	R1,#11
+	BLOS	E00200
+	ADD	#7,R1
+E00200:	ADD	R2,R1
+	MOV	R1,-(SP)
+	DECB	R3
+	BLE	E00234
+	TST	R0
+	BNE	E00230
+	TST	R2
+	BPL	E00234
+	TST	R3
+	BPL	E00230
+	BIC	#20,R2
+E00230:	CALL	E00160
+E00234:	MOVB	(SP)+,(R4)+
+	MOV	R4,R0
+	RETURN
+
+	.endc
+
+	.end

@@ -1,0 +1,13 @@
+	.title	K11FB	Dummy epts only for SJ/FB RT11
+
+	.mcall	.EXIT
+	.psect
+xmflow	==	0
+xmftop	==	0
+
+	.psect
+fbstar::call	mapini
+	call	kermit
+	.EXIT
+
+	.end

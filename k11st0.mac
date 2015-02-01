@@ -1,0 +1,1184 @@
+	.title	k11st0	the SET command,overlay zero
+	.ident	/2.0.05/
+
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.include	/IN:K11CDF.MAC/
+	.endc
+
+
+	.enabl	gbl
+	.enabl	lc
+	.psect	$code
+
+	$cmglob	=	0
+
+;	Copyright (C) 1984  Change Software, Inc.
+;
+;	31-Jan-84  15:13:45  Brian Nelson
+;
+;	Removed SET command code from K11CMD.MAC for space saving via
+;	placement into an overlay.
+
+
+
+	.psect	$code
+
+
+	.sbttl	set a line for dilaing out and speed
+
+
+	.enabl	lsb
+
+
+set$li::mov	sp	,doallo		; /58/ Assume exclusive owner
+	mov	#ttname	,r1		; /58/ Destination
+	mov	argbuf	,r0		; /58/ Source
+10$:	cmpb	(r0)	,#'/		; /58/ Included /[NO]ALLOCATE
+	beq	20$			; /58/ Yes, exit
+	movb	(r0)+	,(r1)+		; /58/ No, just copy
+	bne	10$			; /58/ Next please
+	br	40$			; /58/ Skip qualifier processing
+20$:	clrb	(r1)			; /58/ Insure .asciz
+	inc	r0			; /58/ Skip past the '/'
+	cmpb	(r0)	,#'N&137	; /58/ Was it /N
+	bne	30$			; /58/ No
+	clr	doallo			; /58/ Yes, say so then
+	br	40$			; /58/ Continue on
+30$:	cmpb	(r0)	,#'A&137	; /58/ Try /A
+	bne	110$			; /58/ Error
+40$:	STRCPY	#ttdial	,#ttname	; /58/ Copy device name here also
+	tst	doallo			; /58/ Should we take the device?
+	beq	50$			; /58/ No
+	calls	assdev	,<#ttname>	; try to get the exec to allocate it
+	tst	r0			; did the allocation work ?
+	beq	60$			; no
+	message	<Error from device assignment >
+	direrr	r0			; print out the directive error
+	return				; and exit
+50$:	calls	noecho	,<#ttname>	; try to disable echoing
+60$:	clr	remote			; no longer are we remote
+	calls	ttpars	,<#ttname>	; see if the terminal is KB: or TI:
+	cmpb	r0	,#377		; well ?
+	bne	100$			; no
+	mov	sp	,remote		; yes, we are now the remote system
+	calls	gttname	,<#ttname>	; get our local terminal number
+	copyz	#ttname	,#ttdial	; and update it please
+	message	<Kermit-11 no longer running in LOCAL mode>,cr
+100$:	call	linsts
+	clr	r0
+110$:	return
+
+
+	.dsabl	lsb
+
+	.enabl	lsb
+
+linsts:	tst	infomsg			; /41/ Print this info today?
+	beq	100$			; /41/ No
+	message	<Link device: >		; /40/ format info about link status
+	print	#ttname			; /40/ name
+	calls	ttspeed	,<#ttname>	; /40/ current speed
+	tst	r0			; /40/ Is speed settable?
+	bne	10$			; /40/ yes
+	message	<   Speed not settable>	; /40/ no
+	br	20$			; /40/ next please
+10$:	message	<   Speed: >		; /40/ dump it
+	decout	r0			; /40/
+20$:	calls	inqdtr	,<#ttname>	; /40/ see if dtr or cd is up
+	tst	r0			; /40/ if < 0 , then not supported
+	bmi	40$			; /40/ no good
+	bgt	30$			; /40/ Dtr's up
+	message	<   DTR/CD not currently present> ; /40/ a message
+	br	40$			; /40/ next
+30$:	message	<   DTR/CD present>	; /40/ it's there
+40$:	message				; /40/ all done
+	calls	inqpar	,<#ttname>	; /53/ Check for parity
+	tst	r0			; /53/ Set?
+	beq	100$			; /53/ NO
+	movb	#PAR$SPACE,parity	; /53/ Force 7bit mode
+	message	<Parity is set, forcing 7bit mode>,CR
+100$:	return				; /40/ exit
+
+	global	<infomsg,ttname>
+	global	<INQPAR,INQDTR,DOALLO>
+
+	.dsabl	lsb
+
+
+
+	.sbttl	more terminal setting options
+	.enabl	lsb
+
+set$sp::calls	l$val	,<argbuf>	; get the speed into decimal
+	tst	r0			; ok ?
+	bne	30$			; yes
+	call	ttchk			; is a line assigned now ?
+	bcs	100$			; no
+	calls	setspd	,<#ttname,r1,#lun.co>; set the speed please
+	tst	r0			; did it work ?
+	beq	100$			; yes, exit
+	cmp	r0	,#377		; bad speed ?
+	beq	30$
+	direrr	r0
+	br	100$
+30$:	message	<Bad value for speed or speed not settable>,cr
+
+100$:	clr	r0
+	return
+
+	global	<argbuf	,lun.co>
+
+	.dsabl	lsb
+
+
+
+ttchk:	tstb	ttname			; insure a line is set
+	beq	10$			; ok
+	clc
+	return
+10$:	message	<Please use the SET LINE command>,cr
+	sec
+	return
+
+
+
+	global	<argbuf	,modem	,remote	,ttdial	,ttname>
+
+
+
+	.sbttl	set debug whatever
+
+
+set$de::calls	getcm0	,<argbuf,#dbglst>; find out which option was given
+	tst	r0			; did we find one
+	bmi	110$			; no
+	calls	getcm1	,<argbuf,#dbglst,r0>
+	tst	r0			; now get arguement if needed
+	bmi	110$			; oops
+	jsr	pc	,@r1		; dispatch now
+	return				; bye
+110$:	call	sd$hel			; error, print a help and exit
+	clr	r0			; say we have no errors
+	return				; bye
+
+
+
+	.enabl	lsb			; for message macro in SDOPEN
+
+sdopen:	bit	#log$op	,trace		; a logfile open ?
+	bne	200$			; yes
+	message	<Please use the SET LOGFILE command first>,cr
+	clr	r0			; and exit with carry set
+	sec				; error exit
+	return				; bye
+200$:	clc				; return with file status open
+	return				; bye
+
+	.dsabl	lsb
+
+
+	$cmglob	=	0		; don't make these routines global
+
+	command	dbglst	,ALL	,3	,sd$all
+	command	dbglst	,CONSOLE,3	,sd$con
+	command	dbglst	,CONNECT,3	,sd$con
+	command	dbglst	,FILE	,3	,sd$fil
+	command	dbglst	,HELP	,3	,sd$hel
+	command	dbglst	,NONE	,3	,sd$none
+	command	dbglst	,OFF	,3	,sd$off
+	command	dbglst	,ON	,2	,sd$on
+	command	dbglst	,PACKET	,3	,sd$pak
+	command	dbglst	,RAW	,3	,sd$raw
+	command	dbglst	,RPACK	,3	,sd$rpa
+	command	dbglst	,STATE	,3	,sd$sta
+	command	dbglst	,TERMINAL,3	,sd$ter
+	command	dbglst	,NOTERMINAL,3	,sd$not
+	command	dbglst
+
+
+
+
+
+	.sbttl	routines for SET DEBUG
+	.enabl	lsb
+
+
+sd$none:
+sd$off::bic	#log$al	,trace		; clear all debug bits now
+	bit	#log$op	,trace		; is there a log file open ?
+	beq	20$			; no
+	calls	close	,<#lun.lo>	; close it
+	bic	#log$op	,trace		; say it's closed please
+	tst	infomsg			; /41/ Inform the user?
+	beq	20$			; /41/ No
+	message	<Log_file closed>,cr	; /41/ Call it Log file now
+20$:	clr	r0
+	return
+
+
+sd$all:
+sd$on:	bic	#log$al	,trace		; insure previous logfile closed
+	call	rawchk			; disallow other logging if raw logging
+	bcs	100$			; oops
+	call	sdopen			; a debug file already open ?
+	bcs	100$			; no
+	bis	#log$al	,trace		; set debug on turns the world on
+	clr	r0
+100$:	return
+
+
+sd$ter:	mov	sp	,debug		; i/o to local kermit terminal
+	clr	r0
+	return
+
+sd$not:	clr	debug
+	clr	r0
+	return
+
+	global	<argbuf	,debug	,lun.lo	,trace	,errtxt	,logfil>
+
+	.dsabl	lsb
+
+
+
+
+	.sbttl	more set debug routines
+
+
+;	SD$CON	enable logging of virtual connect i/o to disk file
+;
+;	SD$PAK	enable logging of all packets to disk file
+;
+;	SD$STA	enable logging of all states to disk file
+
+
+sd$con:	call	sdopen			; logfile open ?
+	bcs	100$			; no
+	bis	#log$co	,trace		; yes, set console emulation logging
+	clr	r0
+100$:	return
+
+
+sd$fil:	call	sdopen			; logfile open ?
+	bcs	100$			; no
+	call	rawchk			; disallow other logging if raw logging
+	bcs	100$			; oops
+	bis	#log$fi	,trace		; yes, set file opens and creates
+	clr	r0
+100$:	return
+
+
+
+sd$pak:	call	sdopen			; logfile open
+	bcs	100$			; no
+	call	rawchk			; disallow other logging if raw logging
+	bcs	100$			; oops
+	bis	#log$pa	,trace		; yes, set packet logging on
+	clr	r0
+100$:	return
+
+
+
+sd$sta:	call	sdopen			; logfile open
+	bcs	100$			; no
+	call	rawchk			; disallow other logging if raw logging
+	bcs	100$			; oops
+	bis	#log$st	,trace		; yes, set state logging on
+	clr	r0
+100$:	return
+
+
+
+	.sbttl	check for oding raw terminal i/o dumps
+	.enabl	lsb
+
+sd$raw:	call	sdopen			; logfile open
+	bcs	100$			; no
+	mov	trace	,r0
+	bic	#log$op	,r0
+	tst	r0
+	beq	10$
+	message	<Can't do RAW i/o disk logging with other DEBUG options set>
+	message
+	br	100$
+10$:	bis	#log$io	,trace		; yes, set state logging on
+	calls	close	,<#lun.lo>
+	calls	create	,<#logfil,#lun.lo,#binary> ; redo as image file
+	message	<Old logfile closed and new logfile created in BINARY mode>,cr
+100$:	clr	r0
+	return
+
+
+rawchk:	bit	#log$io	,trace
+	beq	200$
+	message	<Can't do disk logging with RAW i/o logging on>,cr
+	sec
+	return
+200$:	clc
+	return
+
+
+sd$rpa:	bis	#log$rp	,trace
+	clr	r0
+	return
+
+
+
+sd$hel:	message
+	message	<To enable:>,cr
+	message	<    Connection logging   SET DEBUG CONSOLE>,cr
+	message <    File opens/creates   SET DEBUG FILE>,cr
+	message	<    Packet traffic       SET DEBUG PACKET>,cr
+	message	<    Raw terminal i/o	  SET DEBUG RAW>,cr
+        message <    State transitions    SET DEBUG STATE>,cr
+	message
+	message	<Connection logging can be controlled by  typing your>,cr
+	message	<escape character followed by a R to resume or a Q to>,cr
+	message	<stop logging.>,cr
+	message
+	return
+
+
+	.dsabl	lsb
+
+
+	.sbttl	set parity here
+	.enabl	lsb
+
+set$pa::calls	getcm0	,<argbuf,#parlst>; find out which option was given
+	tst	r0			; did we find one
+	bmi	110$			; no
+	jsr	pc	,@r1		; dispatch now
+20$:	mov	r0	,parity		; save for the show command
+	cmpb	r0	,#par$no	; no parity?
+	beq	100$			; yes, no problem
+	message	<Kermit-11 will have to request 8 Bit quoting for the>,cr
+	message	<transmission of  binary files.  If  the other Kermit>,cr
+	message	<does  not support this, information for binary files>,cr
+	message	<will be lost.>,cr
+100$:	clr	r0			; exit with no error set
+	return
+
+110$:	message	<Unknown parity>,cr
+	return
+
+	.dsabl	lsb
+
+
+	cm$glob	=	0
+
+	command	parlst	,EVEN	,3	,spa$ev
+	command	parlst	,ODD	,3	,spa$od
+	command	parlst	,MARK	,3	,spa$ma
+	command	parlst	,SPACE	,3	,spa$sp
+	command	parlst	,NONE	,3	,spa$no
+	command	parlst
+
+
+spa$ev:	mov	#par$ev	,r0		; set parity even
+	return
+
+spa$od:	mov	#par$od	,r0		; set parity odd
+	return
+
+spa$ma:	mov	#par$ma	,r0		; set parity mark
+	return
+
+spa$sp:	mov	#par$sp	,r0		; set parity space
+	return
+
+spa$no:	mov	#par$no	,r0		; set parity none
+	return
+
+	global	<Argbuf	,parity>
+
+
+	.sbttl	set handshake
+
+	squote	=	47
+	dquote	=	42
+
+;	03-Aug-84  09:36:52  Allow literal characters like SET HAN '?
+
+set$ha::call	ttchk			; insure a line is set
+	bcs	100$			; no, they must set line first
+	mov	argbuf	,r0		; get the address of argbuf
+	cmpb	@r0	,#squote	; a literal quoted character?
+	beq	10$			; yes, use the next character as the
+	cmpb	@r0	,#dquote	; handshake character. Look for " also
+	bne	20$			; no
+10$:	movb	1(r0)	,r0		; get the handshake character please
+	br	30$			; and copy it please
+20$:	calls	getcm0	,<r0,#hanlst>	; find out which option was given
+	tst	r0			; did we find one
+	bmi	110$			; no
+	jsr	pc	,@r1		; dispatch now
+30$:	movb	r0	,handch		; save for the show command
+100$:	clr	r0			; exit with no error set
+110$:	return
+
+
+
+
+	cm$glob	=	0
+
+	command	hanlst	,NONE		,3	,sha$no
+	command	hanlst	,XON		,3	,sha$xn
+	command	hanlst	,XOFF		,3	,sha$xf
+	command	hanlst	,CARRIAGE-RETURN,3	,sha$cr
+	command	hanlst	,CARRIAGE_RETURN,3	,sha$cr
+	command	hanlst
+
+
+sha$no:	clrb	r0			; no handshake (the default)
+	return
+
+sha$xn:	movb	#'Q&37	,r0		; wait for an XON
+	return
+
+sha$xf:	movb	#'S&37	,r0		; wait for an XOFF (??)
+	return
+
+sha$cr:	movb	#cr	,r0		; wait for a carriage return
+	return
+
+
+	.sbttl	set DUPLEEX and SET LOCAL
+
+;	 Provide both SET DUPLEX FULL/HALF and SET LOCAL ON/OFF
+;	to provide user's with compatibility with the different
+;	ways other Kermits do this.
+
+
+set$lc::mov	#lcelst	,r5
+	br	dulc
+
+set$du::mov	#duplst	,r5
+dulc:	call	ttchk			; insure a line is set
+	bcs	100$			; no, they must set line first
+10$:	calls	getcm0	,<argbuf,r5>	; find out which option was given
+	tst	r0			; did we find one
+	bmi	110$			; no
+	jsr	pc	,@r1		; dispatch now
+100$:	clr	r0			; exit with no error set
+110$:	return
+
+
+sdu$ha:	mov	sp	,duplex		; simple
+	return
+
+sdu$fu:	clr	duplex			; the default
+	return
+
+	$cmglob	=	0
+
+	command	duplst	,FULL	,2	,sdu$fu
+	command	duplst	,HALF	,2	,sdu$ha
+	command	duplst
+	command	lcelst	,ON	,2	,sdu$ha
+	command	lcelst	,OFF	,2	,sdu$fu
+	command	lcelst
+
+
+
+	global	<argbuf	,duplex	,handch>
+
+
+	.sbttl	set ibm (may be site dependent)
+
+
+set$ib::calls	getcm0	,<argbuf,#ibmlst>; find out which option was given
+	tst	r0			; did we find one
+	bmi	110$			; no
+	jsr	pc	,@r1		; dispatch now
+100$:	clr	r0			; exit with no error set
+110$:	return
+
+
+	$cmglob	=	0
+
+	command	ibmlst	,ON	,2	,sib$on
+	command	ibmlst	,OFF	,2	,sib$of
+	command	ibmlst
+
+
+sib$on:	mov	sp	,duplex		; half duplex
+	mov	#par$ma	,parity		; mark parity
+	movb	#'Q&37	,handch		; XON handshaking
+	message	<SET DUPLEX HALF, SET PARITY MARK, SET HANDSHAKE XON done>,cr
+	return				; bye
+
+
+sib$of:	clr	duplex			; full duplex
+	mov	#par$no	,parity		; no parity
+	clrb	handch			; no handshaking
+	message	<SET DUPLEX FULL, SET PARITY NONE, SET HANDSHAKE NONE done>,cr
+	return
+
+
+
+	.sbttl	set [no]quiet
+
+set$qu::clr	infomsg			; /41/ Disallow full info messages
+	clr	tkecho			; /41/ No command file echoing
+	clr	r0			; /41/ Return( success )
+	return				; /41/ Exit
+
+set$nq::mov	sp	,infomsg	; /41/ Allow full info messages
+	mov	sp	,tkecho		; /41/ Command file echoing
+	clr	r0			; /41/ Return( success )
+	return				; /41/ Exit
+
+	global	<infomsg,tkecho>
+
+
+
+	.sbttl	set logout_string
+
+;	Accept a string sequence as in SET LOGO BYE<15><12>
+;
+;	Added edit /41/ 27-Dec-85  12:01:05 BDN re Steve Heflin's mods.
+
+set$ls::prsbuf	#logstr
+	return
+
+
+	global	<argbuf,logstr>
+
+
+
+
+
+	.sbttl	set update value
+
+
+set$nu::clr	blip
+	clr	r0
+	return
+
+set$up::calls	l$val	,<argbuf>	; get the interval into decimal
+	tst	r0			; ok ?
+	bne	100$			; no
+	mov	r1	,blip		; yes, set it up please
+	clr	r0
+	return
+100$:	mov	#1	,r0
+	return
+
+
+set$po::calls	getcm0	,<argbuf,#poslst>; find out which option was given
+	tst	r0			; did we find one
+	bmi	110$			; no
+	jsr	pc	,@r1		; dispatch now
+	clr	r0
+110$:	return
+
+
+	$cmglob	=	0
+
+	command	poslst	,NODTE	,2	,spo$nd
+	command	poslst	,DTE	,2	,spo$dt
+	command	poslst
+
+spo$nd:	clr	procom
+	return
+
+spo$dt:	mov	sp	,procom
+	return
+
+	global	<procom>	
+
+
+
+
+	.sbttl	SET RSX
+
+
+set$rx::calls	getcm0	,<argbuf,#rsxlst>; find out which option was given
+	tst	r0			; did we find one
+	bmi	110$			; no
+	jsr	pc	,@r1		; dispatch now
+110$:	return
+
+
+	$cmglob	=	0
+
+	command	rsxlst	,CHARIO	,2	,srx$ch
+	command	rsxlst	,LINEIO	,2	,srx$li
+	command	rsxlst	,TC.DLU	,2	,srx$tc
+	command	rsxlst	,CONNECT,2	,srx$co
+	command	rsxlst
+
+
+srx$ch:	mov	sp	,chario
+	clr	r0
+	return
+	
+srx$li:	clr	chario
+	clr	r0
+	return
+
+
+	.enabl	lsb
+
+
+srx$tc:	mov	argbuf	,r0		; attempt to resolve the tc.dlu
+10$:	tstb	@r0			; question for connecting to a
+	beq	90$			; modem.
+	cmpb	(r0)+	,#40		; scan for a trailing space
+	bne	10$			; not found yet
+20$:	movb	@r0	,r1		; found space, next character must
+	sub	#'0	,r1		; be a digit from 0..2
+	bmi	90$			; no good
+	cmp	r1	,#2		; check for upper limit now
+	bhi	90$			; no good
+	mov	r1	,tcdlu		; save it
+	clr	r0			; and exit
+	br	100$
+90$:	message	<SET RSX TC.DLU value, where value is 0..2>,cr
+	mov	#1	,r0
+100$:	return
+
+
+	.dsabl	lsb
+	.enabl	lsb
+
+
+srx$co:	call	nextarg			; next one please
+20$:	cmpb	@r1	,#'D&137	; SET RSX CONNECT DEFAULT
+	bne	30$			; no
+	clr	con$dsp			; /44/ yes, clear ALTCON then
+	br	100$
+30$:	cmpb	@r1	,#'A&137	; SET RSX CONNECT ALTERNATE
+	bne	90$			; no
+	mov	altcon	,con$dsp	; /44/
+	br	100$
+90$:	message	<?Error - SET RSX CON [DEF][ALT]>,cr
+100$:	clr	r0
+	return
+
+	.dsabl	lsb
+
+	global	<altcon	,chario	,tcdlu>
+	global	<con$dsp>	; /44/
+
+
+
+
+	.sbttl	SET RT11 (10-Sep-85  13:11:38)
+
+
+;	SET RT11 FLOW_CONTROL ON
+;	SET RT11 FLOW_CONTROL OFF
+;	SET RT11 [NO]FLOW_CONTROL
+;	SET RT11 [NO]VOLUME_VERIFY
+;	SET RT11 CREATE_SIZE n
+;	SET RT11 BREAK [LONG][SHORT]
+;	SET RT11 [NO]WILDCARD
+
+set$rt::calls	getcm0	,<argbuf,#rtlist>
+	tst	r0
+	bmi	110$
+	jsr	pc	,@r1
+110$:	return
+
+
+srt$wc:	clr	nowild			; /51/ Clear it
+	clr	r0			; /51/ Success
+	return
+
+srt$nw:	mov	sp	,nowild		; /51/ Set it
+	clr	r0			; /51/ Success
+	return				; /51/ Exit
+
+srt$cr:	call	nextarg			; see if another arg present
+	tstb	@r1			; well?
+	beq	90$			; no
+	calls	l$val	,<r1>		; yes, see if a good number
+	tst	r0			; well ?
+	bne	90$			; no
+	mov	r1	,en$siz		; yes, save it please
+	return				; exit
+90$:	message	<%SET-W SET RT11 CREATE_SIZE decimal_value>,cr
+	return
+
+srt$fl:	call	nextarg			; get third argument in command
+	tstb	@r1			; did we find one or stop on null
+	beq	90$			; null, assume SET RT11 FLOW_CONTROL
+	cmpb	(r1)+	,#'O&137	; must be 'O' next
+	bne	110$			; not 'O', error
+	clr	r0			; assume no flow control
+	cmpb	(r1)+	,#'F&137	; 'F' --> SET RT11 FLOW OFF
+	beq	100$			; ok
+90$:	mov	sp	,r0		; not off, assume ON
+100$:	mov	r0	,rtflow		; store the value and exit
+	clr	r0
+	return
+110$:	message	<%SET-W SET RT11 FLOW [ON][OFF]>,cr
+	mov	#1	,r0
+	return
+
+
+srt$br:	call	nextarg			; /43/ Get third argument in command
+	mov	#17.	,r0		; /43/ Assume short break
+	tstb	@r1			; /43/ Did we find one or stop on null
+	beq	100$			; /43/ Assume SET RT11 BREAK SHORT
+	cmpb	@r1	,#'S&137	; /43/ 'SHORT' ?
+	beq	100$			; /43/ Yes, exit
+	cmpb	@r1	,#'L&137	; /43/ 'LONG' ?
+	bne	110$			; /43/ No, error
+	mov	#60.*3	,r0		; /43/ Yes, set three second break
+100$:	mov	r0	,brklen		; /43/ Store the value and exit
+	clr	r0
+	return
+110$:	message	<%SET-W SET RT11 BREAK [SHORT][LONG]>,cr
+	mov	#1	,r0
+	return
+
+
+srt$vo:	mov	sp	,rtvol
+	clr	r0
+	return
+
+srt$nv:	clr	rtvol
+	clr	r0
+	return
+
+srt$nf:	clr	rtflow
+	clr	r0
+	return
+
+	cm$glob	=	0
+	command	rtlist	,FLOW_CONTROL	,2	,srt$fl
+	command	rtlist	,NOFLOW_CONTROL	,2	,srt$nf
+	command	rtlist	,NOVOLUME_VERIFY,3	,srt$nv
+	command	rtlist	,VOLUME_VERIFY	,3	,srt$vo
+	command	rtlist	,CREATE_SIZE	,2	,srt$cr
+	command	rtlist	,BREAK		,2	,srt$br
+	command	rtlist	,WILDCARDING	,2	,srt$wc
+	command	rtlist	,NOWILDCARDING	,3	,srt$nw
+	command	rtlist
+
+	global	<argbuf	,en$siz	,rtflow	,rtvol	,brklen	,nowild>
+
+
+
+	.sbttl	disable xon/xoff flow control for RT11 (old command)
+
+;	SET RTFLOW ON
+;	SET RTFLOW OFF
+;
+;	We need this because some modems (like the VADIC 212) can't
+;	handle XON's and XOFF's comming from the connect code. Thus
+;	we need a way to disable this. We need flow control for the
+;	connect command for RT11 due to the speed limitations of MT
+;	service.
+
+set$cf::calls	getcm0	,<argbuf,#cflst>; find out which option was given
+	tst	r0			; did we find one
+	bmi	110$			; no
+	jsr	pc	,@r1		; dispatch now
+	mov	r0	,conflow	; save for the show command
+100$:	clr	r0			; exit with no error set
+110$:	return
+
+
+	cm$glob	=	0
+	command	cflst	,OFF	,3	,scf$of
+	command	cflst	,ON	,2	,scf$on
+	command	cflst	,NONE	,3	,scf$of
+	command	cflst
+
+
+scf$of:	clr	r0
+	return
+
+scf$on:	mov	sp	,r0
+	return
+
+
+
+	.sbttl	set server
+
+
+set$sv::calls	getcm0	,<argpnt,#svlst>; find out which option was given
+	tst	r0			; did we find the option ?
+	bmi	100$			; no
+	calls	getcm1	,<argpnt,#svlst,r0> ; yes, look for value clause now
+	tst	r0			; find it (or read it?)
+	bmi	100$			; no
+	mov	argbuf	,argpnt		; yes. GETCM1 always returns in ARGBUF
+	jsr	pc	,@r1		; dispatch to correct action
+	br	110$			; and exit
+100$:	mov	#1	,r0		; exit on error
+110$:	mov	argbuf	,argpnt		; insure argpnt is reset to default
+	return				; exit
+
+srv$ti:	calls	l$val	,<argbuf>
+	tst	r0
+	bne	100$
+	mov	r1	,serwait
+	clr	r0
+100$:	return
+
+
+srv$nt:	mov	#60.*120.,serwait	; wait a couple of hours
+	clr	r0			; success
+	return
+
+srv$dd:	call	ttchk			; /45/ MUST do a SET LINE first
+	bcc	10$			; /45/ It's ok
+	clr	srvprot			; /45/ Insure it's off
+	mov	#1	,r0		; /45/ Not ok, return status
+	return				; /45/ Exit
+10$:	mov	sp	,srvprot	; /45/ Insure that REMOTE FIN and
+	clr	r0			; /45/ REMOTE BYE can't function.
+	return				; /45/ Exit, success
+
+srv$nd:	clr	srvprot			; /45/ Undo SET SERVER DEDICATED
+	clr	r0			; /45/ Success
+	return				; /45/ Exit
+
+srv$dt:	mov	sp	,srvdet		; /45/ Flag for detaching server
+	clr	r0			; /45/ Success
+	return				; /45/ Exit
+
+command	svlst	,TIME_OUT	,2	,srv$ti	,<Server_Idle timeout? >,decnum
+command	svlst	,NOTIME_OUT	,3	,srv$nt
+command	svlst	,TIME-OUT	,2	,srv$ti	,<Server_Idle timeout? >,decnum
+command	svlst	,NOTIME-OUT	,3	,srv$nt
+command	svlst	,DEDICATED	,3	,srv$dd
+command	svlst	,NODEDICATED	,3	,srv$nd
+command	svlst	,DETACH		,3	,srv$dt
+command	svlst
+
+	global	<serwait>
+
+
+
+
+
+	.sbttl	SET EOF [NO]EXIT
+
+
+set$ef::calls	getcm0	,<argbuf,#eflist>
+	tst	r0
+	bmi	110$
+	jsr	pc	,@r1
+110$:	return
+
+
+	command	eflist	,NOEXIT	,2	,sef$ne
+	command	eflist	,EXIT	,2	,sef$ex
+	command	eflist
+
+sef$ne:	clr	exieof
+	clr	r0
+	return
+
+sef$ex:	mov	sp	,exieof
+	clr	r0
+	return
+
+
+	global	<exieof>
+
+
+
+	.sbttl	SET DIAL commands
+	.enabl	lsb
+
+;	Assumed: SET MODEM USER_DEFINED already done
+;
+;	SET DIAL WAKEUP get_modems_attention	(VA212PA: "\05\015")
+;	SET DIAL PROMPT modems_prompt		(VA212PA: "*")
+;	SET DIAL INIT   dial_initiate		(VA212PA: "D\015")
+;	SET DIAL FORMAT dial_formatter		(VA212PA: "%s")
+;	SET DIAL CONFIRM number_confirm		(VA212PA: "\015")
+;	SET DIAL SUCCESS on_line_string		(VA212PA: "ONLINE")
+;	SET DIAL INFO    ringing_message	(VA212PA: "RINGING")
+;	SET DIAL FAILURE failed_call		(VA212PA: "BUSY")
+;
+;	The first 5 are permanent fields in the modem descriptor.
+;	The SUCCESS, INFO and FAILURE fields are built as linked
+;	lists, thus you can have as many as desired.
+;
+;	The CONFIRM and INFO fields are optional.
+
+
+set$di::mov	#dialst	,r3
+	sub	#140	,sp		; A temp buffer
+	mov	sp	,r4		; A pointer to this buffer
+	calls	getcm0	,<argbuf,r3>	; Find out which option was given
+	tst	r0			; Did we find the option ?
+	bmi	100$			; No
+	calls	getcm1	,<argbuf,r3,r0>; Yes, look for value clause now
+	tst	r0			; Find it (or read it?)
+	bmi	100$			; No
+	jsr	pc	,@r1		; Dispatch to correct action
+	tst	r0
+	beq	100$
+	message	<%SET-W Unknown option in SET DIAL>,cr
+100$:	add	#140	,sp		; Pop buffer
+	return
+
+	.dsabl	lsb
+
+command	dialst	,WAKEUP		,2	,ss$wak,<String: >,string
+command	dialst	,WAKE_STRING	,6	,ss$wak,<String: >,string
+command	dialst	,PROMPT		,2	,ss$pro,<String: >,string
+command	dialst	,INITIATE	,2	,ss$ini,<String: >,string
+command	dialst	,FORMAT		,2	,ss$for,<String: >,string
+command	dialst	,SUCCESS	,2	,ss$suc,<Connect acknowledge: >,string
+command	dialst	,INFORMATION	,2	,ss$inf,<Ringing acknowledge: >,string
+command	dialst	,FAILURE	,2	,ss$fai,<Failure acknowledge: >,string
+command	dialst	,CONFIRM	,2	,ss$con,<String: >,string
+command	dialst	,WAKE_RATE	,6	,ss$wra,<Delay in milliseconds: >,decnum
+command	dialst	,DIAL_RATE	,6	,ss$dra,<Delay in milliseconds: >,decnum
+command	dialst	,DIAL_PAUSE	,6	,ss$pau,<Pause character(s): >,string
+command	dialst	,TIMEOUT	,2	,ss$tmo,<Timeout in seconds: >,decnum
+command	dialst	,TIME_OUT	,2	,ss$tmo,<Timeout in seconds: >,decnum
+command	dialst
+
+
+
+	.sbttl	More SET DIAL commands
+
+
+;	MODEM type data structure. Taken directly from K11DIA.MAC
+
+
+	mod.next	=:	0	; next modem in list
+	mod.str		=:	2	; address of name of modem
+	mod.val		=:	4	; numeric value for dispatching
+	dial.time	=:	6	; value of dial time
+	wake.string	=:	10	; address of wakeup string
+	wake.rate	=:	12	; value of delay
+	wake.prompt	=:	14	; address of wakeup prompt
+	dmod.string	=:	16	; address of dial dial string
+	dmod.prompt	=:	20	; address of prompt returned for dial
+	dial.string	=:	22	; address of formatting string for dial
+	dial.rate	=:	24	; value of delay
+	wake.ack	=:	26	; address of wakeup response
+	dial.ack	=:	30	; 1st = waitfor, 2nd to confirm number
+	dial.online	=:	32	; online ack string
+	dial.busy	=:	34	; busy ack
+	dial.wait	=:	36	; Pause string
+	dial.confirm	=:	40	; string to confirm number for dialing
+	dial.go		=:	42	; ie, va212 returns "DIALING\n"
+	res.bin		=:	44	; if <>, returns status with \n
+					; otherwise a binary response (DF03)
+	dial.echo	=:	46	; if <>, numbers are echoed immediately
+	mod.comment	=:	50	;
+	res.head	=:	52	; 
+	ext.dial	=:	54	; if ne, address of external dialer
+	dial.xabort	=:	56	; /45/ To abort call from modem
+	dial.idle	=:	60	; /45/ Place modem in IDLE state
+	dial.pulse	=:	62	; /45/ Switch to pulse dialing
+	dial.nopulse	=:	64	; /45/ Switch to tone dialing
+	def.guard	=:	66	; /45/ last thing (unused)
+
+
+	
+
+	.sbttl	set dial, cont'd
+
+
+ss$pau:	mov	#dial.wait,r5		; Pause character(s)
+	call	sd.chk			; Insert
+	return				; and exit
+
+ss$wak:	mov	#wake.string,r5		; Offset to setup
+	call	sd.chk			; Convert to binary and check
+	return
+
+ss$for:	mov	#dial.string,r5		; Formatting for dialing
+	call	sd.chk			; Convert, check and copy
+	return				; Exit
+
+ss$pro:	mov	#wake.prompt,r5		; String modem returns for wakeup,
+	call	sd.chk			; as in "HELLO: I'M READY"
+	return				; Exit
+
+ss$ini:	mov	#dmod.string,r5		; Could be part of SET DIAL FORMAT
+	call	sd.chk			; Used as in VA212 (D\015)
+	return
+
+ss$con:	mov	#dial.confirm,r5	; As in VA212PA, to confirm the
+	call	sd.chk			; number is actually correct
+	return
+
+ss$suc:	mov	#1	,r3		; Message class
+	call	sd.res			; Insert response string
+	return
+
+
+ss$inf:	clr	r3			; Message class
+	call	sd.res			; Insert response string
+	return
+
+
+ss$fai:	mov	#-1	,r3		; Message class
+	call	sd.res			; Insert response string
+	return
+
+ss$dra:	mov	#dial.rate,r5		; Stuff the value in now
+	call	sd.val			; ....
+	return				; exit
+
+ss$wra:	mov	#wake.rate,r5		; Stuff the value in now
+	call	sd.val			; ....
+	return				; exit
+	
+ss$tmo:	calls	l$val	,<argbuf>	; This goes into a global
+	tst	r0			; Success
+	bne	100$			; No
+	mov	r1	,diatmo		; Yes, exit
+100$:	return				; Bye
+
+
+	global	<argbuf,diatmo>
+
+
+
+	.sbttl	SET DIAL, cont'd
+
+	.enabl	lsb
+
+
+
+sd.chk:	prsbuf	r4			; Expand and copy string to workbuffer
+	tst	r0			; Successful?
+	bne	100$			; No
+	strlen	r4			; Get the length of the result
+	inc	r0			; Plus one for the null terminator
+	inc	r0			; Insure NEXT is even address
+	bic	#1	,r0		; Even address boundary
+	malloc	r0			; Ask for the allocation
+	add	umddef	,r5		;
+	mov	r0	,(r5)		; Insert the new buffer address
+	strcpy	(r5)	,r4		; Copy the string and exit
+	clr	r0			; Success
+	br	100$			; Exit
+80$:	message	<Insufficient space to contain string>,cr
+100$:	return
+
+	.dsabl	lsb
+	.enabl	lsb
+
+sd.res:	prsbuf	r4			; Expand and copy string to workbuffer
+	tst	r0			; Successful?
+	bne	100$			; No
+	strlen	r4			; Get the length of the result
+	add	#2	,r0		; Plus one for the null terminator
+	bic	#1	,r0		; Insure on a word boundary
+	add	#4	,r0		; Space for link and status
+	mov	umddef	,r5		; Get base address of structure
+	add	#res.hea,r5		; Link to first entry
+10$:	tst	(r5)			; End of the chain yet?
+	beq	20$			; Yes
+	mov	(r5)	,r5		; No, get the next one please
+	br	10$			; And recheck
+20$:	malloc	r0			; Ask for an allocation
+	tst	r0			; Did we get it
+	beq	80$			; No, exit
+	mov	r0	,(r5)		; Yes, insert the address
+	beq	80$			; /59/ Overflowed
+	mov	(r5)	,r5		; Point directly to new area
+	clr	(r5)+			; No link to next
+	mov	r3	,(r5)+		; Message class type
+	strcpy	r5	,r4		; Insert the string and exit
+	clr	r0			; Success
+	br	100$			; Exit
+80$:	message	<Insufficient space to contain string>,cr
+	inc	r0			; Error
+100$:	return
+
+	.dsabl	lsb
+
+
+sd.val:	add	umddef	,r5		; Point directly to the field
+	calls	l$val	,<argbuf>	; Anything there thats any good?
+	tst	r0			; Success?
+	bne	100$			; No
+	mov	r1	,(r5)		; Yes, insert the value and exit
+100$:	return
+
+
+	global	<argbuf>
+
+
+	.sbttl	set PHONE
+
+;	added /45/ along with SET DIAL
+
+
+set$ph::calls	getcm0	,<argbuf,#pholst>; Find out which option was given
+	tst	r0			; Did we find the option ?
+	bmi	100$			; No
+	calls	getcm1	,<argbuf,#pholst,r0>; Yes, look for value clause now
+	tst	r0			; Find it (or read it?)
+	bmi	100$			; No
+	jsr	pc	,@r1		; Dispatch to correct action
+100$:	return				; Exit
+
+
+command	pholst	,NUMBER	,2	,sph$nu,<Name and phonenumber: >,string
+command	pholst	,PULSE	,2	,sph$pu
+command pholst	,TONE	,2	,sph$to
+command	pholst	,BLIND	,2	,sph$bl
+command	pholst
+
+
+sph$to:	mov	#1	,pulse
+	clr	r0
+	return
+
+sph$pu:	mov	#-1	,pulse
+	clr	r0
+	return
+
+sph$bl:	mov	#1	,blind
+	clr	r0
+	return
+
+sph$nu:	mov	#pnhead	,r5		; Get listhead for phone numbers
+10$:	tst	(r5)			; Found the last entry yet ?
+	beq	20$			; Yes, insert new element here
+	mov	(r5)	,r5		; No, check the next one
+	br	10$			; Keep looking
+20$:	strlen	argbuf			; Get total length of data
+	add	#4	,r0		; Add in space for nulls and insure
+	bic	#1	,r0		; even length, also link next field
+	malloc	r0			; Ask for the space please
+	mov	r0	,(r5)		; Insert the address
+	beq	90$			; No space
+	clr	(r0)+			; This is now the tail
+	strcpy	r0	,argbuf	; Stuff the data in and exit
+	clr	r0			; Success
+	return				; Bye
+90$:	message	<No space left for numbers>,cr
+	inc	r0			; Exit with error
+	return				; Bye
+									
+	global	<PNHEAD>		; List header
+	global	<PULSE>			; /54/
+	global	<BLIND>			; /54/
+
+
+
+
+nextarg:mov	argbuf	,r1
+10$:	tstb	@r1
+	beq	100$
+	cmpb	(r1)+	,#40
+	bne	10$
+100$:	return
+
+
+
+	.end

@@ -1,0 +1,488 @@
+KERMIT-11 KNOWN PROBLEMS
+
+  NOTE: For RT-11 and TSX+ (and soon RSTS/E), see the KRT*.* files
+  instead of the K11*.* files.
+
+------------------------------
+
+From: Johnny Billquist <bqt@update.uu.se>
+Newsgroups: vmsnet.pdp-11
+Subject: Bugfix in KERMIT-11...
+Date: Thu, 17 Oct 1996 14:05:24 +0200 (MET DST)
+
+I don't know how many of you have noticed, but KERMIT-11 won't talk
+nicely with C-Kermit. This have annoyed me for a long time, and the
+only solution has been to turn off attribute packets.
+
+Well, I finally sat down and tracked the bug.
+
+Here is a fix for it. (I've also added Billy Yodelman's bugfix, posted
+some time ago, concerning communication RSX -> VMS...)
+
+Both files are provided as .SLP files, to be used by SLP.
+You can also find a K11IDM.HEX at ftp.update.uu.se:/pub/pdp11/rsx
+
+--------------------<k11cmd.slp>-------------
+-2,2,/;BQT/
+	.ident	/3.61/
+-6,6,/;BQT/
+	edit	==	61.		; edit (independent of base_level)
+-11,11,/;BQT/
+lasted::.ascii	/  Last edit: 17-Oct-96 /
+-34,34,/;BQT/
+;	Johnny Billquist 17-Oct-96 13:30:40
+;
+; 61 17-Oct-96  13:13:40  K11ATR.MAC	Bugfix when attribute packets was
+;					zero length.
+;
+/
+-----------<k11atr.slp>-------------------
+-2,4,/;BQT/
+	.ident	/1.0.03/
+	.enabl	gbl
+
+;	17-Oct-96  13:29:10 Johnny Billquist
+;				Corrected a bug if attribute packets
+;				was zero length.
+;
+-223,231,/;BQT/
+sn.typ: movb    #42     ,(r4)+          ; attribute type
+        movb    #41     ,(r4)+          ; /49/ Length of what follows
+        movb    #'A&137 ,@r4            ; assume ascii
+        cmpb    image   ,#binary        ; already decided that it's binary?
+        bne     10$                     ; no
+        movb    #'B&137 ,@r4            ; yes, say it's BINARY mode today
+10$:    clrb    1(r4)                   ; insure .asciz
+        clr     r0                      ; flag success and exit
+        return                          ; bye
+
+-296,296,/;BQT/
+	ble	90$			; /49/ Again, nothing was there
+/
+-----------------------------------------------------------
+
+	Johnny
+
+Johnny Billquist                  || "I'm on a bus
+                                  ||  on a psychedelic trip
+email: bqt@update.uu.se           ||  Reading murder books
+pdp is alive!                     ||  tryin' to stay hip" - B. Idol
+
+------------------------------
+
+Date: Thu, 24 Nov 1994 11:28:05 -0500 (EST)
+From: billy@mix.com
+Subject: Re: Problem with Kermit filenames
+Sender: YOUDELMAN@Eisner.DECUS.Org
+
+> > I am a new user of Kermit and have a problem with the exchange of filenames
+> > between two systems.
+> > 
+> > I am running MS-Kermit (V3.13 patch 17) on a PC connected via RS232 to a DEC
+> > PDP/RSX-11M system running Kermit-11 (Ver T3.60 21-Mar-89).
+> > 
+> > I login to the DEC from the PC and initiate a Kermit server. I can GET
+> > binary and ASCII files from the DEC without any problem, apart from certain
+> > filenames which contain four identical contiguous characters - eg :
+> > 
+> > If I GET AAAA.LOG the DEC systems replies with a file not found error and
+> > returns the filename as AAAAA.LOG.
+> > 
+> > It appears that the PC adds an extra character to the filename when it sees
+> > four repeated characters.
+> > 
+> > I created a file on the DEC called AAAAA.LOG and retrived this successfully
+> > by GETting AAAA.LOG !
+> > 
+> > Is there something obvious that I missing here, or is this a bug?
+> 
+This problem is caused by a non-initialized repeat count buffer, and is
+very easy to fix for anyone that has an RSX system on which to recompile
+Kermit-11.  First in the source module KRTPAK.MAC locate the BUFUNP
+(unpack a buffer) sub-routine.  Then add the one line slugged /BBS/ in
+its comment as is shown in the example BUFUNP appended to this letter
+(following your original letter, below).  Then simply assemble Kermit's
+source modules and relink.  All K11's sources are available by anonymous
+ftp from kermit.columbia.edu in the kermit/b directory.
+
+Here's the repaired BUFUNP code -
+
+        .sbttl  Like bufemp, but return data to a buffer
+
+;       input:    (r5)  = source buffer, .asciz
+;       output:  2(r5)  = destination buffer
+;                  r0   = zero (no errors are possible)
+;                  r1   = string length
+;
+;       No 8-bit prefixing will be done.  This routine
+;       used for decoding strings received for generic
+;       commands to the server.
+
+bufunp::save    <r2,r3,r4,r5>
+        mov     @r5     ,r2             ; input record address
+        clr     r3                      ; length := 0
+        mov     2(r5)   ,r4             ; resultant string
+
+10$:    clr     r0                      ; get the next character
+        bisb    (r2)+   ,r0             ; into a convenient place
+        beq     100$                    ; all done
+        bic     #^c177  ,r0             ; /53/ always seven bit data
+        mov     #1      ,r5             ; /53/ assume character not repeated
+        tst     dorpt                   ; /53/ repeat processing off?
+        beq     20$                     ; /53/ yes, ignore
+        cmpb    r0      ,rptquo         ; /53/ is this a repeated char?
+        bne     20$                     ; /53/ no, normal processing
+        clr     r5                      ; /BBS/ init to copy repeat count!
+        bisb    (r2)+   ,r5             ; /53/ yes, get the repeat count
+        bic     #^c177  ,r5             ; /53/ always seven bit data
+        unchar  r5      ,r5             ; /53/ get the value
+        tst     r5                      ; /53/ good data
+        bgt     15$                     ; /53/ yes
+        mov     #1      ,r5             ; /53/ no, fix it
+15$:    clr     r0                      ; /53/ avoid sign extension
+        bisb    (r2)+   ,r0             ; /53/ now get the real data
+        bic     #^c177  ,r0             ; /53/ always seven bit data
+20$:    cmpb    r0      ,senpar+p.qctl  ; is this a quoted character?
+        bne     30$                     ; no
+        clr     r0                      ; yes, get the next character
+        bisb    (r2)+   ,r0             ; must be one you know
+        clr     r1                      ; must avoid sign extension here
+        bisb    r0      ,r1             ; check low 7 bits against quote
+        bic     #^c177  ,r1             ; drop 7..15
+        cmpb    r1      ,senpar+p.qctl  ; if ch <> myquote
+        beq     30$                     ;  then
+        ctl     r0      ,r0             ;   ch := ctl(ch)
+
+30$:    movb    r0      ,(r4)+          ; copy the byte over now
+        inc     r3                      ; length := succ(length)
+        sob     r5      ,30$            ; /53/ perhaps data was repeated
+        br      10$                     ; next character please
+
+100$:   clrb    @r4                     ; make the string .asciz
+        mov     r3      ,r1             ; return the length
+        clr     r0                      ; fake no errors please
+        unsave  <r5,r4,r3,r2>
+        return
+
+Regards,
+
+Billy Youdelman
+billy@mix.com
+Maintainer of the RT-11 Kermit
+
+------------------------------
+
+28-Oct-1993
+
+Kermit-11 for RSX, IAS, and RSTS/E are no longer being developed.  The last
+release was 3.60 in June 1989.
+
+Kermit-11 for RT and TSX+, on the other hand, had a major new release in
+September 1993 which fixed many of the problems noted below.  The new RT and
+TSX+ versions are in files with the KRT prefix, rather than K11.  PDP-11
+programmers who have access to RSX, IAS, and/or RSTS/E systems are encouraged
+to come forward and help merge the divergent K11 and KRT versions.
+
+Notably, among the bugs fixed in the KRT version is a problem with Attribute
+Packets in the K11 version which can prevent successful file transfer when K11
+is used in conjunction with another Kermit program, such as C-Kermit 5A,
+MS-DOS Kermit, or IBM Mainframe Kermit-370, that also uses Attribute Packets.
+If you are using the K11 and experience such problems, tell one or both Kermit
+programs to SET ATTRIBUTES OFF.
+
+Minimum set of files for the KRT version:
+
+    KRT.DOC     -  Installation and Release Notes
+    KRT.SAV     -  Unmapped (FB,SB,SJ) executable image
+    KRTTSX.SAV  -  Mapped (XM or TSX) executable image
+    KRTHLP.HLP  -  Help text
+    KRT.INI     -  Sample initialization file
+
+07-Apr-1986 09:37 (Pending)
+
+ On  RT11 FB systems with a large number of devices, Kermit can displace
+the USR (force it to swap) and crash when accessing  the  USR  from  the
+higher  addressed  overlays  in  Kermit. The fix for something like this
+may not be practical; it can be worked around by UNLOADING and  REMOVING
+unneeded  device  drivers  from  lowest  address to higher addresses (to
+prevent fragmentation of background memory). If you run K11RT4.SAV on  a
+FB  system  and find either (1) The program crashes on file transfers or
+(2) KMON says the save image is too  large,  then  remove  the  unneeded
+drivers and set the USR to swap. 
+
+24-MAR-1986 14:23 (Fixed in version 3.49)
+
+ Attribute processing is incorrect for some attribute types. This  dates
+back  to  April 1984 when support was first added, but no other versions
+were available to test against.  The  correction,  made  to  K11ATR.MAC,
+will  cause  V3.49  or later of Kermit-11 to have compatability problems
+with previous versions  of  Kermit-11.  The  main  problem  will  be  in
+informing  each  other of binary file arrival; the only workaround is to
+explicitly force two communicating Kermit-11's  into  binary  mode  with
+the SET FILE command. See K11INS.DOC for further information. 
+
+ The  specific  problem is that the protocol requires the attribute TYPE
+field to be  followed  by  a  LENGTH  byte  to  specify  the  number  of
+characters  following.  Kermit-11  was  not  always inserting the LENGTH
+field. The new  version,  3.49,  will  be  able  to  tell  if  an  older
+Kermit-11  is sending in the incorrect format by virtue of the fact that
+the first attribute packet that is  sent  is  the  system  id  code  and
+operating  system. Since this attribute will always be a short one (2 or
+3 characters at most) it is a simple matter to detect the presence of  a
+'D'  (for  DEC)  in  the  position  of  the  LENGTH field and set a flag
+accordingly. However, in the case of the corrected Kermit-11 sending  to
+a  pre  3.49 version, this will not be the case and all attempts to rely
+on the transfer of attribute packets will fail. 
+
+brian@uoft02.bitnet
+
+------------------------------
+
+        .sbttl  getcm1  check for additional input needed
+
+;       G E T C M 1
+;
+;       input:  @r5     current command buffer
+;               2(r5)   command table address
+;               4(r5)   index of the current command
+;
+;       output: r0      index of current command or < 0 for error
+;               argbuf  any additional input or rest of the command line
+
+        .enabl  lsb                     ; /55/
+
+getcm1: save    <r1,r2,r3>              ; Save registers that we destroy
+        sub     #100    ,sp             ; /55/ Allocate a small buffer for
+        mov     sp      ,r2             ; /55/ saving the command prompt.
+        tst     wasnul                  ; /45/ Was the command for ?
+        beq     10$                     ; /45/ No
+        clr     wasnul                  ; /45/ Not null anymore
+        clr     r0                      ; /45/ Yes, return index 0
+        br      110$                    ; /45/ Exit
+10$:    mov     @r5     ,r1             ; Get command line address
+        scan    #40     ,r1             ; Look for a space that might delimit
+        tst     r0                      ; the command name from an argument
+        beq     30$                     ; Nothing there
+        add     r1      ,r0             ; Point to the string after the space
+        COPYZ   r0,argbuf,#200          ; Copy the command arg over please
+        br      100$                    ; And exit
+
+30$:    mov     4(r5)   ,r3             ; Get the command index
+        mul     #$listl*2,r3            ; If no arg given, see if one is needed
+        add     2(r5)   ,r3             ; Add in base address of command table
+        mov     .cmdar(r3),r3           ; Get the argument prompt now
+        tstb    @r3                     ; Anything there that is required ?
+        beq     100$                    ; No, so take a normal exit then.
+        STRCPY  r2      ,r3             ; /55/ Copy the prompt over now
+40$:    CALLS   kbredi  ,<r2,argbuf>    ; /55/ Read a command from the keyboard
+        tst     r0                      ; And exit if it failed for whatever
+        bne     90$                     ; The read failed (control Z typed).
+        tst     cccnt                   ; No, but is there a Control C?
+        bne     90$                     ; Yes, treat as end of file
+        CALLS   cvt$$,<argbuf,r1,#cvtarg>;Remove junk, convert to upcase
+        tst     r0                      ; Is there anything left ?
+        beq     40$                     ; No, reprompt and try again
+        mov     r0      ,r1             ; Something is left, point to the
+        add     argbuf  ,r1             ; end of the line and null terminate
+        clrb    @r1                     ; ...
+        br      100$                    ; Take normal exit
+
+
+90$:    MESSAGE                         ; /55/ Insure a carriage return
+        mov     #cmd$ab ,r0             ; Control Z on keyboard read.
+        br      110$                    ; And exit
+100$:   mov     4(r5)   ,r0             ; Return command index
+110$:   add     #100    ,sp             ; /55/ Pop the temporary buffer
+        unsave  <r3,r2,r1>              ; Restore registers we used
+        return                          ; And exit
+
+        .dsabl  lsb                     ; /55/
+
+        global  <argbuf ,cmdadr ,cmdbuf ,cmdnum>
+
+------------------------------
+
+Date: Mon, 23 Mar 87  13:00 EST
+From: Lewis M. Dreblow - PSYCH at UFFSC
+Subject: Kermit-11 Problem Discovered and Solved
+Keywords: Kermit-11
+
+  I wish to inform the user community of a problem which occurred with the
+K11 release of Kermit. I was trying to use kermit on a 11/23 running RTV5
+and TSXV5. I had no trouble using the release as a server, but kept getting
+hung whenever I tried to do a get or send to another remote server. It
+didn't matter what machine was on the server end. After about a month of
+tearing my hair out I discovered that I had TSGENed IOABT = 0 which caused
+TSX to wait for IO completion on jobs. This seemed fine at TSGEN time, but
+due to the .ABTIO MCALL in K11PRT caused kermit to hang for two minutes at
+every get or send command.
+
+  Thus, users should be aware that they have to either (1) TSGEN IOABT = 1
+or (2) at the command line (or in a command file) prior to running kermit
+issue the SET IO ABORT command. You may want to remember to SET IO NOABORT
+after running kermit as well.
+
+------------------------------
+
+Date: Fri 17 Jul 87 12:46:56-EDT
+From: Christine M Gianone <SY.CHRISTINE@CU20B.COLUMBIA.EDU>
+Subject: K11 Kermit and MS-DOS Kermit at 9600 Baud
+Keywords: K11 Kermit, MS-DOS Kermit
+
+Randy Rushton (215) 628-4530 is trying to transfer a text file from the
+PDP11 to the IBM PC (Using the latest versions of Kermit I believe).  It
+works fine at 2400 baud but not at 9600.  Is this because of the PDP11's
+front end buffer size?  Is there a work-around?
+
+Date:     Tue, 28 Jul 87 10:23 EDT
+From:     <BRIAN@UOFT02.BITNET> (Brian Nelson)
+Subject:  k11
+
+This is really dependant on about 10,000 things. I run 9600 all the time
+and have no problems. Maybe its RT11 and multi-terminal support? If so
+then the max speed for that runs around 4800, but real thruput is down
+around 100 cps due to extremely high overhead. If thats what they are
+using they should switch to a dl11 or clone interface and use the xl
+handler from rt 5.1 or later.
+
+Anyway, thats the only case where I know there is a restriction. As far
+as the other exec's go, xon/xoff works pretty good. M+ has buffering
+to 255 chars, rsts 9.x has buffering settable up to 7K or so.
+
+Brian
+
+------------------------------
+
+Date:     Sun, 7 Dec 86 18:41 GMT
+From:     <KERMIT@CZHETH5A.BITNET> (H.Wipf)
+Subject:  News, and ask for files
+
+
+Regards,
+Wipf Hansruedi
+
+Odesstech
+Consulting Office
+Mainroad 26
+CH-2542 Pieterlen / Swiss
+
+Telephon       : +41(32)87 33 42  (office/privat: 8.00AM-8.00PM/GMT)
+Electronic Mail: kermit@czheth5a.bitnet
+MailBox        : +41(32)87 33 43 (24 Hour, 7 Day per week)
+                 300_1200/75_1200_2400Baud/8_Bit/NoParity/1_Stopbit
+
+Just for a info: We (by means "I") in Switzerland have improved
+a  bit  Kermit-11 for RT-11 (as I'm specialist for that system),
+according with Brian Nelson.
+
+      Now because of a miss-understand with Brian  we  have  two  dif-
+      ferent  kermit-11  of version 3.54, one in the USA distribued by
+      Brian and one (a field-test version) in  european  (specialy  in
+      Switzerland and in German) which are not completely command com-
+      patible, I have added some what such as:
+
+        -- CAPTURE filnam, a command which do the same as the  command
+           sequence "SET LOG FILE filnam\SET DEBUG CONSOL";
+        -- SET TRANSMIT [NO]LF, used to control Xmit of <LF> when pre-
+           ceded by a <CR>;
+        -- SET TRANSMIT [NO]EOF, used to control Xmit of <ctrl-Z> when
+           EOF whas detected;
+        -- SET TRANSMIT [NO]ECHOPLEX, used to control echoplex  (which
+           mean  of  a  transfer protocol which wait for the echo of a
+           character transmitted, trying 8 time to correct any differ-
+           ences of Xmit-Char's and Rcvd-Char's).  This whas very use-
+           full for message down-loading to to mailbox systems in ter-
+           minal emulation mode of kermit.
+
+      Howere, most other modifications are transparent to user,  exept
+      that  "my"  version can be assembled with either RT11 V4's MACRO
+      assembler or with the new feature of MACRO-11 from RT11  V5  and
+      later.
+
+      I have also adaped some command's like the server log-off  "BYE"
+      command  to  be  recognized  and  exected  under  SHARE-Plus and
+      SHARE-11.
+
+
+      Please can you edit a bit this P.S. for your digest infos!
+
+------------------------------
+
+Date: Fri 18 Sep 87 15:12:42-EDT
+From: Frank da Cruz <SY.FDC@CU20B.COLUMBIA.EDU>
+Subject: K11 install procedure
+
+Somebody sent me about 50 pages of DCL procedures, etc, for installing
+K11 on RSX (printed).  I'll forward them to you.  You might want to contact
+the guy (who says he is "enthralled" with the latest release), and get
+the stuff in machine-readable form, check it out, and we'll include it with
+the distribution.  In case it gets lost in the mail, he's Dean Fejes of
+Lin-Dea Inc, phone 813-597-2291.  - Frank
+
+------------------------------
+
+Date:     Tue, 14 Feb 89 12:09 EST
+From: <TLEWIS%UTKVX1.BITNET@cuvmb.cc.columbia.edu>
+Subject:  Kermit on RSTS 7.2
+
+Just got Kermit working this morning (Feb. 14), seems to work fine.  We are
+running 2 PDP 11/70's, one under RSTS 8.0 and the other under 7.2 due to the
+way in which some of our programs are written.  They won't run under 8.0.
+We've had kermit running under 8.0 for a few years but I've always been told
+by others on our staff that it wouldn't run under 7.2.  Well, we are looking
+at shutting down the 11/70 with the 8.0 version of RSTS and I had to start
+digging on finding a version of kermit for 7.2 or something like it.  I then
+found in the documentation that it would run under 7.2.
+
+Looks like kermit is running fine, the only difference I can find so far, and
+I haven't looked at it much, is that I have to set attributes off before I can
+send anything from the micro to the 11/70.  I can receive files without doing
+this but cannot send them to the host.  Anyway as long as I know what to do,
+I'm in good shape.
+
+Thanks for your reply!
+
+Terry Lewis
+University of Tennessee at Martin
+
+------------------------------
+
+Date: Tue, 14 Feb 89 14:37 EDT
+From: Brian Nelson <BRIAN%UOFT02.BITNET@cuvmb.cc.columbia.edu>
+Subject: RE: [<TLEWIS%UTKVX1.BITNET@cuvmb.cc.columbia.edu>: Kermit on RSTS 7.2]
+
+Thanks. Re attributes on/off, there was something I sent to you a while
+back with msdos kermit and retry limits, xfer would fail on attribute
+packets unless I set the retry cound up on the pc past the default to
+account for the # of atribute packets I send.
+
+There are other problems with k11 on 7.2 that can show up, perhaps
+it would be a good idea for me to document them.
+
+brian
+
+------------------------------
+
+Date: Wed, 27 Nov 91 20:59:33 -0500
+From: billy@mix.com
+Subject: Kermit-11 floppy swapping problem solved
+To: brian@uoft02.utoledo.edu
+
+Problem: RT Kermit does not notice when you remove a diskette and then
+insert another one.  Here's the fix, in the opndev routine in K11RTD:
+
+;       force USR to re-read dir segment, allowing one to swap floppies..
+
+        BLKEY   =       256             ; /BBS/ RMON dir seg number in memory
+
+        .lock                           ; /BBS/ lock the USR in memory, then
+        .pval   #rtwork ,#BLKEY ,#0     ; /BBS/ force it to re-read the dir
+        .lookup #rtwork ,#lun.sr,r1     ; open the DEVICE for input
+        .unlock                         ; /BBS/ now release the USR..
+        bcs     100$                    ; can not find it
+        clr     r0                      ; no errors
+
+Billy Y..
+
+------------------------------
+(End)

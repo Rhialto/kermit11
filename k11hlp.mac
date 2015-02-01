@@ -1,0 +1,461 @@
+	.title	k11hlp
+	.ident	/2.0.01/
+
+
+;	Copyright (C) 1986 Brian Nelson
+;
+;	26-Mar-86  18:41:25
+;
+;	 This is a complete rewrite of Kermit-11's help. It is a bit more
+;	intelligent,  in that it understands wildcarding (ie, HELP SET *)
+;	and can build subtopic prompting strings and process accordingly.
+;	 I had not planned to rewrite it, but after a few requests it was
+;	only about half a days work to do.  This version  also happens to
+;	be a lot more readable. Alas, it's probably larger. This does not
+;	hurt anything as far as overlays go,  but I have no  idea at this
+;	time how I'm going to get the  RT11 FB version to fit on a PDT150
+;	RX01 system disk.
+
+
+
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.endc
+
+	.enabl	gbl
+
+
+	cvtarg	=	4 ! 10 ! 20 ! 40
+
+
+	.psect	$code	,ro,i,lcl,rel,con
+	.save
+	.psect	rwdata	,rw,d,lcl,rel,con
+	.even
+ptopic:	.asciz	/ Topic ? /		; For promtping
+	.even
+fill5:	.byte	40,40,40,40,40,0	; More filler
+filler:	.byte	40,0			; For formatting
+topics:	.blkw	20			; List of topic/subtopic addresses
+topbuf:	.blkb	200			; Pointers in TOPICS point into here
+hlpbuf:	.blkb	200			; A read/write buffer for the file
+htopic:	.blkb	200			; The current topic
+toplev:	.blkw	1			; Level of current topic
+wild:	.blkw	1			; If topic wildcarded
+idxbuf:	.blkb	200			; Private buffer for HINDEX
+ttbuff:	.blkb	200			; Terminal read buffer
+idxdmp:	.word	0			; Index was dumped
+prbuff:	.blkb	200			; Prompting buffer
+	.restore
+
+
+
+
+
+	.sbttl	the HELP command
+	.psect	$code	,ro,i,lcl,rel,con
+	.enabl	lsb
+
+;	Main loop is here.
+;
+;	(1) Try to open help file; failure --> print internal overlayed help
+;	(2) Parse the command line, filling in the pointer array 'TOPICS'.
+;	(3) Find and print (if found) the requested help topic+[subtopic(s)]
+;	(4) If not found, build a new command line from the 'TOPICS' pointer
+;	    array, prompt and concatenate the requested topic.
+;	(5) Go back to (2).
+;	(6) When done, close help file as we don't have the buffer space to
+;	    keep it open.
+
+
+
+c$help::call	hlpopn			; Locate and open the help file
+	tst	r0			; Did we ever find the help file?
+	beq	10$			; Yes, process the command
+					; Error.
+	MESSAGE				; opened. Sleep a moment and then
+	MESSAGE	<Printing default internal help>,cr
+	CALLS	suspend	,<#4,#0>	; Print some default text
+	call	defhlp			; Simple to do	
+	jmp	100$			; Exit now
+
+10$:	mov	argbuf	,r5		; Parse the help line
+	clr	idxdmp			; Index has not been dumped yet
+	clr	wild			; Clear the wildcarding flag next
+	clr	topics			; Clear out the pointers
+	tstb	@r5			; Anything passed on line?
+	beq	60$			; No, dump root index
+	call	parse			; And do so, setting up pointers
+	clr	cccnt			; Clear the control C count flag
+	call	hfind			; Now locate the desired text.
+	tst	r0			; Did we find anything help text?
+	bmi	100$			; We got a fatal RMS read error.
+	beq	20$			; Yes, let's go and dump the text
+	dec	r0			; Ok, was it a code of 1 or 2?
+	beq	50$			; It returned 1, which means not found
+	mov	sp	,wild		; It returned 2, which means it found
+					; something, and it was wildcarded.
+20$:	call	hprint			; Dump the help text out now
+	br	70$			; Exit
+
+50$:	MESSAGE	<Help not found for the requested topic>,cr
+	clr	topics			; Clear out arg pointers
+60$:	MESSAGE				; An extra cr/lf
+	mov	#'1	,-(sp)		; Dump the index out now
+	call	hindex			; Print it and return
+
+70$:	tst	idxdmp			; Did we ever print topic/subtopic list
+	beq	100$			; No, just exit
+	mov	#prbuff	,r3		; Prompt buffer address
+	mov	argbuf	,r4		; Yes, construct a prompt/parse buffer
+	mov	#topics	,r5		; Pointers into the parse pointers
+	clrb	@r3			; Start off with an asciz string
+75$:	mov	(r5)+	,r2		; Get the parsed argument
+	beq	80$			; All done, exit
+	cmpb	(r2)	,#'*		; Wildcard argument ? If so, we are done
+	beq	80$			; Done
+	STRCAT	r3	,r2		; Add in the previous topic/subtopic
+	STRCAT	r3	,#filler	; Add in a delimiter now.
+	br	75$			; Next please
+80$:	STRCPY	r4	,r3		; Copy the new command line
+	STRCAT	r3	,#ptopic	; Finish creating the prompt
+	MESSAGE				; A cr/lf
+	PRINT	r3			; Dump the prompt out now
+	CALLS	kbread	,<#ttbuff>	; Read a line from KB:
+	tst	r0			; Successful terminal read?
+	bne	100$			; No, exit asap
+	CALLS	cvt$$	,<#ttbuff,r1,#CVTARG> ; Remove garbage, LC to UC.
+	tst	r0			; Anything left over ?
+	beq	100$			; No, exit please
+	clrb	ttbuff(r0)		; It was successfull, insure .ASCIZ
+	STRCAT	r4	,#ttbuff	; Append the data just read please.
+	jmp	10$			; And parse the command all over again
+					;
+					;
+100$:	call	hlpclo			; Close up the file and exit
+	return
+
+
+	.dsabl	lsb
+
+
+
+	.sbttl	Parse HELP's command line
+
+
+;	PARSE
+;
+;	Passed:	r5	Command line, minus 'HELP', assumed to be .asciz
+;	Return:	In topics, addresses to each topic/subtopic
+;
+;	Extra imbedded spaces are removed
+
+
+
+parse:	save	<r3,r4,r5>		; Save temp please
+	mov	#topbuf	,r4		; Where to copy the text to
+	mov	#topics	,r3		; Where to place the pointers
+	clr	@r3			; Assume nothing was passed
+					;
+10$:	tstb	@r5			; All done ?
+	beq	100$			; Yes, exit this routine
+	cmpb	@r5	,#40		; While (*ch && *ch == 40) ch++ ;
+	bne	15$			; Not a space, exit
+	inc	r5			; A space found, check next one
+	br	10$			; Next
+15$:	mov	r4	,(r3)+		; Insert current address
+	clr	@r3			; Insure NEXT is cleared out
+20$:	tstb	@r5			; All done with this line ?
+	beq	30$			; Yes, exit
+	cmpb	@r5	,#40		; Space delimiter found ?
+	beq	30$			; Yes, setup for next one
+	movb	(r5)+	,(r4)+		; No, copy some data over
+	br	20$			; Next please
+30$:	clrb	(r4)+			; Insure .asciz please
+	br	10$			; Next subtopic
+100$:	unsave	<r5,r4,r3>		; Pop registers and exit
+	return
+
+
+
+
+
+	.sbttl	find the topic in the help file
+	.enabl	lsb
+
+;	Input:	topics	list of addresses of text to match
+;	Return:	R0	zero for success, 1 for not found, else RMS error code
+;			two  for match and wildcarded topic/subtopic
+
+
+hfind:	save	<r2,r3,r4,r5>		; Save registers we may trash here
+	CALLS	rewind	,<#LUN.IN>	; Rewind to start of the file
+	mov	#topics	,r5		; Point to the help topic list
+	mov	#'1	,r2		; Current topic level
+	clrb	htopic			; Clear header out
+					;
+10$:	tst	@r5			; Anything to look for ?
+	beq	100$			; No, just leave pointing at beginning
+	mov	#hlpbuf	,r4		; Pointer to buffer to use
+	tst	cccnt			; Control C typed?
+	bne	90$			; Yes, please exit this loop
+	clrb	@r4			; Preset to a null string
+	CALLS	getrec	,<r4,#LUN.IN>	; Read a record from the file
+	tst	r0			; Errors on the read ?
+	beq	20$			; no
+	cmp	r0	,#ER$EOF	; End of file reached ?
+	beq	90$			; Yes, return(1)
+20$:	clrb	hlpbuf(r1)		; Insure .asciz please
+	cmpb	@r4	,r2		; Topic levels match up?
+	bne	80$			; No, read another record then
+	inc	r4			; Skip over the level flag now
+30$:	tstb	@r4			; End of the line
+	beq	80$			; Yes, read another record
+	cmpb	@r4	,#40		; No, skip over spaces now
+	bne	40$			; No more spaces, time to check topic
+	inc	r4			; Spaces, skip over please
+	br	30$			; Next please
+40$:	mov	(r5)	,r3		; Get pointer to text to match up
+	cmpb	(r3)	,#'*		; Wildcarding ?
+	beq	85$			; Yes, return(2)
+					;
+50$:	tstb	(r3)			; Found the end of the desired topic?
+	beq	70$			; Yes, check for next level topic needed
+	tstb	(r4)			; End of the line yet ?
+	beq	80$			; Yes.
+	movb	(r4)+	,r0		; Convert to upper case
+	cmpb	r0	,#'a!40		; Is this a lower case letter
+	blo	55$			; No
+	cmpb	r0	,#'z!40		; Keep checking...
+	bhi	55$			; No
+	bicb	#40	,r0		; Convert to upper case
+55$:	cmpb	(r3)+	,r0		; No, do the characters match up?
+	beq	50$			; Yes, keep checking them
+	br	80$			; No, read another record.
+					;
+70$:	inc	r2			; Match, increment level number and read
+	tst	(r5)+			; another record from the help file.
+	STRCAT	#htopic	,#hlpbuf+1	; Build up a header record
+80$:	br	10$			; Next please
+
+
+85$:	mov	#2	,r0		; Match with wildcarding
+	mov	r2	,toplev		; Save the topic level and exit
+	br	110$			; Exit
+					;
+90$:	mov	#1	,r0		; Not found (reached end of file)
+	br	110$			; Exit
+					;
+100$:	mov	r2	,toplev		; Save topic level
+	dec	toplev			; It will be off by one
+	clr	r0			; Found the topic
+110$:	unsave	<r5,r4,r3,r2>		; Pop registers and exit
+	return				; Bye
+
+
+	.dsabl	lsb
+
+
+
+	.sbttl	print help text already found by HFIND
+	.enabl	lsb
+
+
+;	Return:	<0	Failure, the RMS error code
+;		 0	Success
+;		 1	Found subtopics to print out
+;
+;	Assumes:	That both PARSE and HFIND have been called already.
+
+hprint:	save	<r2,r3,r4,r5>		; Save these registers please
+	STRCPY	#ttbuff	,#htopic	; Get the default header string made
+					;
+30$:	tst	cccnt			; Control C interupt ?
+	bne	90$			; Yes, exit please
+	mov	#hlpbuf	,r4		; Point to the buffer now
+	CALLS	getrec	,<r4,#LUN.IN>	; Read the next record
+	tst	r0			; Error ?
+	bne	90$			; Yes, exit
+	clrb	hlpbuf(r1)		; Insure it's .asciz please
+	cmpb	(r4)	,#40		; Leading space ?
+	blos	60$			; Yes, a normal line to print
+	cmpb	(r4)	,toplev		; Is this a lower, higher or same?
+	blo	90$			; Lower level, thus we must exit.
+	beq	50$			; Same level
+	movb	(r4)	,-(sp)		; Pass the level number please
+	call	hindex			; And print out whats leftover.
+	tst	wild			; If not wildcarded then exit.
+	beq	80$			; Exit
+					;
+50$:	tst	wild			; Same level, wildcarded?
+	beq	90$			; No, we must exit then.
+	inc	r4			; Skip past the leading number in line
+	STRCPY	#ttbuff	,#htopic	; Build a header string up
+	STRCAT	#ttbuff	,r4		; Copy over the topic name.
+	dec	r4			; Reset the pointer
+	clrb	@r4			; Don't print this line.
+					;
+60$:	tstb	ttbuff			; Do we need to print the next topic?
+	beq	70$			; No
+	MESSAGE				; CrLf
+	PRINT	#ttbuff			; Yes, dump it please
+	MESSAGE				; Ditto...
+	clrb	ttbuff			; Clear topic name out now
+70$:	tstb	@r4			; Don't print if NULL
+	beq	75$			; ...
+	PRINT	r4			; Ok to print, dump the text now
+75$:	MESSAGE				; A cr/lf please
+	br	30$			; Next please
+
+
+80$:	mov	#1	,r0		; Return(Sub_topic_found)
+	br	100$			; Exit
+					;
+90$:	clr	r0			; Return(Success)
+	br	100$			; Exit
+					;
+100$:	unsave	<r5,r4,r3,r2>		; Pop registers and exit
+	return				; And finally exit
+
+	.dsabl	lsb
+
+
+
+
+	.sbttl	print index out
+	.enabl	lsb
+
+;	Passed:	2(sp)	Level to look for
+;
+;	Assumption:	HLPBUF is already loaded with the current record
+
+hindex:	save	<r2,r3,r4,r5>		; We may overwrite these here
+	clr	-(sp)			; Allocate some buffers
+	clr	-(sp)			; Allocate some buffers
+	mov	sp	,idxdmp		; Flag that we have been here
+	mov	sp	,r5		; And a pointer to such
+	movb	2+<6*2>(sp),2(r5)	; Get the topic level passed.
+	mov	#idxbuf	,r3		; Get a buffer to store names in
+	mov	#hlpbuf	,r4		; Point to the help buffer now
+	cmpb	2(r5)	,#'1		; Is this the MAIN menu today?
+	bhi	10$			; No, don't reposition the file
+	CALLS	rewind	,<#LUN.IN>	; It is the main, reset the file
+	clrb	hlpbuf			; Flag that nothings there
+10$:	Message	<    Additional information is available on:>,cr
+	Message				; An extra CR/LF
+	Message				; CRLF please
+	STRCPY	r3	,#fill5		; Move over a bit
+	mov	#4	,(r5)		; Number of topic names per line
+	clr	cccnt			; Insure control C count is zapped
+					;
+30$:	tstb	@r4			; Do we need to load the buffer?
+	bne	40$			; No
+	CALLS	getrec	,<r4,#LUN.IN>	; Yes, preload the buffer now.
+	tst	r0			; Did we reach end of file?
+	bne	80$			; Yes, exit please
+	clrb	hlpbuf(r1)		; Always .asciz please
+40$:	tst	cccnt			; If control C then exit
+	bne	90$			; Exit then
+	cmpb	@r4	,#40		; Is this a null line or a text line?
+	blos	60$			; If so, ignore it.
+	cmpb	@r4	,2(r5)		; Must be a topic line, check the level
+	bhi	60$			; Higher level, ignore it
+	blo	80$			; Lower level, we need to exit
+	clrb	21(r4)			; Insure no more than 16 characters
+	inc	r4			; Skip the level number on the line
+	STRCAT	r3	,r4		; Add on the current topic now
+	strlen	r4			; Now compute the number of spaces
+	dec	r4			; Fix the pointer up to startofline
+	mov	#22	,r2		; Assume worst case of 18 spaces needed
+	sub	r0	,r2		; We now have the number of spaces.
+50$:	STRCAT	r3	,#filler	; Loop adding the spaces in
+	sob	r2	,50$		; Terribly inefficient, but so what.
+	dec	(r5)			; Is there room left for the next one?
+	bne	60$			; Yes, go and get some more
+	PRINT	r3			; No, we have to dump and reset things
+	MESSAGE				; A cr/lf
+	mov	#4	,(r5)		; Reset the counter now
+	STRCPY	r3	,#fill5		; Reset the line buffer
+					;
+60$:	clrb	@r4			; Force a read next time
+	br	30$			; Next please
+
+	
+80$:	PRINT	r3			; End of file, dump whats left over
+	MESSAGE				; And exit.
+	clr	r0			; Success
+	br	100$			; Bye
+					;
+90$:	mov	#-1	,r0		; Failure exit
+					;
+100$:	cmp	(sp)+	,(sp)+		; Pop some local buffers...
+	unsave	<r5,r4,r3,r2>		; Pop registers and exit
+	mov	(sp)+	,(sp)		; Pop return address up and exit
+	return				; Exit now
+
+
+	.dsabl	lsb
+
+
+
+	.sbttl	open and close the kermit-11 help file up
+	.enabl	lsb
+
+;	This code was taken verbatim from the old K11HLP.MAC
+
+
+hlpclo:	CALLS	close	,<#lun.in>
+	return
+
+
+hlpopn:	call	getprv			; seems to be needed
+	mov	#hnames	,r1		; the list of help file names
+	call	getsys			; if this is RT11 use something
+	cmpb	r0	,#sy$rt		; reasonable please
+	bne	10$			; not RT
+	mov	#rtname	,r1		; RT11, try DK: and SY:
+10$:	mov	r1	,r2		; Save it
+20$:	tst	@r1			; end of the list as of yet ?
+	beq	70$			; yes, can't find the help file
+	CALLS	fopen	,<@r1,#lun.in,#text,#$HBUFS>; try to open help file
+	tst	r0			; did it work ?
+	beq	100$			; yes
+	tst	(r1)+			; no, try the next help filename
+	br	20$			; next please
+70$:	MESSAGE	<%Kermit-11-W Cannot find the Kermit-11 help files or>,cr
+	MESSAGE	<the task image high limit prevents mutliblock reads.>,cr
+	MESSAGE	<Please put K11HLP in one of the following locations:>,cr
+	MESSAGE				;
+80$:	tst	@r2			; Any more left
+	beq	90$			; No
+	PRINT	@r2			; Yes, print the name of the file
+	MESSAGE				; A crlf
+	tst	(r2)+			; Point to next
+	br	80$			; Next please
+90$:	mov	#ER$FNF	,r0		; return file not found
+100$:	call	drpprv			; please no more privs
+	return				; return with it open or not found
+
+
+	.dsabl	lsb
+	.save
+	.psect	rodata	,ro,d,lcl,rel,con
+hnames::.word	10$,20$,30$,40$,0
+10$:	.asciz	/LB:[1,2]K11HLP.HLP/
+20$:	.asciz	/SY:[1,2]K11HLP.HLP/
+30$:	.asciz	/KERMIT:K11HLP.HLP/
+40$:	.asciz	/HELP:K11HLP.HLP/
+	.even
+
+rtname:	.word	10$,20$,0
+10$:	.asciz	/DK:K11HLP.HLP/
+20$:	.asciz	/SY:K11HLP.HLP/
+	.even
+	.restore
+
+	global	<drpprv	,getprv	,getsys>
+	global	<$HBUFS>
+	.end

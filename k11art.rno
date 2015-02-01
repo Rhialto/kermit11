@@ -1,0 +1,234 @@
+.rm 66
+.c;The Kermit protocol and the PDP-11
+.s 2
+.c;Brian Nelson   4-OCT-1985 14:10
+.s 2
+Abstract
+.s 1
+#This article will describe the author's implementation of the Kermit
+file transfer protocol for the PDP-11 series under RSTS/E, RSX11M/M+, P/OS
+RT11 and TSX+.  This protocol allows many (if not most) types of computer
+systems to effect, at minimum, error free file transfer with other systems
+and microcomputers over asynchronous lines.
+.s 1
+The first obvious use of any program or protocol designed to accomplish
+file transfer
+is to be able to provide the
+ability to support file uploads and downloads from superminis such as the
+VAX and PDP-11 to remote personal computers, such as the PC and Rainbow.
+Since as of this date (03-Oct-1985)
+there are available over 160 versions of Kermit available for numerous
+micro, mini and mainframe configurations, Kermit addresses this need
+quite well.
+.s 1
+Other uses of Kermit are quite numerous. I routinely use Kermit
+for transfering software developed for the PRO/350 on a RSTS/E 11/23+ host as
+well as using the PDP-11/44 and VAX 11/785 I run at the University of Toledo
+for dialing out to other systems, such as the LCG Tops 20 system and
+the LDP public domain library.
+Considering that there exists a Kermit for almost any DEC configuration
+one can even use Kermit as a poor man's Decnet. In my case, I have a DMF
+modem port from the 11/785 and a DZ11 port from the 11/44 connected to the
+Gandalf PACX front end switch, which allows me to connect either system to
+any of the other systems on the PACX, which includes an IBM 370 compatible
+system as well as connecting the VAX to the PDP-11.
+.s 1
+With the knowledge that
+there are Kermit implementations for most personal computers in use
+it becomes apparent that the Kermit standard is well worth looking in to.
+A list of versions running
+on Digital hardware follows the article.
+.br
+
+.s 1
+The Kermit protocol
+.s 1
+The Kermit protocol is designed to operate over normal asynchronous terminal
+lines. All data and commands are transferred with a packet oriented protocol,
+basically consisting of a start of packet character (normally SOH), followed
+by length, control, data and checksum fields.
+Communications is half duplex, in that for every packet sent, the sender
+must wait for either an acknowledgement packet (ACK) or a negative
+acknowledgement packet (NAK). Transmission is in ascii, with no requirements
+needed for the transmission of eight bit characters or control characters
+other than the choice of control-A for marking the start of a packet.
+All 'control' characters imbedded in the data are prefixed to convert them
+to printable characters, the same applying to eight bit characters if
+required by the characteristics of the line.  Since there are many
+different implementations of Kermit, the protocol provides a mechanism
+by which the capabilities of two connected Kermits can be negotiated to
+allow for differences in the level of protocol support.  Examples of
+protocol features that not all Kermits understand include data
+compression and transfer of file attributes.
+.br
+#Rather than to go into more detail about the the Kermit protocol, the reader
+should consult the references listed at the end of this article.
+.s 1
+The PDP-11 Kermit-11 implementation
+.s 1
+#The author's version of Kermit-11 is written in Macro-11 and can run on
+RSTS/E, RSX11M, RSX11M Plus, P/OS and RT11.  The RSTS and RSX file system
+interface is via RMS11 version 2, while the RT11 interface attempts to
+emulate the RMS11 subsystem. The choice of Macro-11 for the implementation
+language was made for several reasons, one being the availability of the
+assembler on all systems and another being speed and compactness of the
+code.
+.br
+#RMS11 was used for RSTS/E and RSX to provide a common i/o interface to
+the host file system. Additionally, Bob Denny of Alisa Systems further
+extended the RMS interface to support remote file access over DECNET with
+Kermit, allowing commands such as SEND NODENAME::[BRIAN.FUBAR]FILE.TYPE
+and other remote file accesses over DECNET. RMS11 version 2 also provides a very
+simple and powerfull means of doing wildcard searching, file renames and
+file deletion via the $PARSE, $SEARCH, $RENAME and $DELETE
+macros. Points against RMS basically amount to it's size, RMS is quite
+large even if overlayed. This is helped by using the segmented RMSRES
+available on RSTS/E and RSX11M Plus, though there is no remote file
+access for RMSRES in the current release of Kermit-11. The other objection
+to RMS will come from RSTS/E users, who are used to using files that normally
+lack file attributes. This is overcome by the ability of RMS v2 to create
+stream ascii files. 
+.s 1
+The RSTS/E Kermit, while it does 'run' under RSX emulation, does NOT use any
+RSX directives (apart from GTSK$S) to interface to the executive, as (one) the
+RSX directive emulation under RSTS/E is only a small subset of 'real' RSX
+and (two) there is no need to go
+though an additional layer of overhead to make RSTS/E map RSX calls to native
+calls. The 'multiple private delimiters' feature is used to avoid losing
+read pass all (binary) mode on read timeouts, as well as setting the link
+to '8-bit' mode to keep the terminal driver from stripping the high bit from
+data received.
+.s 1
+The RSX11M/M+ and P/OS versions of Kermit-11, like the RSTS/E and RT versions,
+receive eight bit data assuming no parity is used. Where parity is a must,
+Kermit-11 has to use a prefixing scheme for eight bit binary data. Like the
+RSTS/E version, binary files are created as FIXED no carriage control files
+such as used for task images. Note that parity generation is done by software
+in Kermit-11. The P/OS version runs under control of DCL. The next release
+of Kermit-11, which will be 2.37, will include support for the PRO TMS
+(Telephone Management System) option.
+
+.s 1
+#The RT11 and TSX+
+version of Kermit-11 maintains source module compatability with the
+RSTS/E and RSX versions. Each version of Kermit-11 has it's own source file
+to deal with the operating system, for RSX it is K11M41.MAC, for RSTS/E they
+are K11E80.MAC and K1180S.MAC, and for RT11 they are called K11RT*.MAC.
+Apart from these specific files, all other source
+files are shared. The RT11 Kermit-11 can use either the version 5.x XL and
+XC handler for high throughput, or it can use multiple terminal service to do
+all its terminal i/o. This second option allows the use of any
+interface supported,
+including the PDT150 modem port, DL/DLV11's and DZ/DZV11's. The drawback is
+overhead, the RT11 MT service can't sustain a rate much past 1200 baud at most.
+This is not a problem for Kermit, however, due to it's half duplex nature and
+the fact that no packet received is ever longer than the ring buffer size.
+The only problem is in when Kermit-11 is running as a terminal emulator
+(the Kermit CONNECT command) where the data coming from the remote host can
+easily overrun the executive's buffer. A SET RT11 [NO]FLOW command was added
+to force Kermit-11 to send its own flow control to the host via XON and XOFF.
+TSX+ users can connect to CL: for dialing out, the exact means is documented
+in the Kermit-11 users guide.
+The disk i/o emulates the RSTS/E and RSX RMS11 version, and each executive
+directive has its error codes mapped into an unique global error code, with
+the symbolic names corresponding to the nearest RMS11 error name. Wildcarding
+is handled, of course, by non file-structured access to the directory on
+the desired volume, and supports full RT11 wildcard filenames.
+.s 1
+Transmission of file attributes
+.s 1
+One of the optional features of the Kermit protocol is the ATTRIBUTE packet.
+The attribute packets allow a Kermit program to send to a receiving Kermit
+information regarding the file organization, size, cluster/retrieval size,
+protection and so forth. There is even a system dependant attribute packet type
+that can be used to transfer things like the RMS11 IFAB 
+(the RMS/FCS attributes). One of the things that two Kermits exchange
+before any file transfer is an information packet, this packet tells the
+receiving Kermit about itself. The last field in this packet, the CAPAS mask,
+tells Kermit if the other one can process attribute packets. If two Kermit-11's
+are communicating, they will find that each can do so, and the sender of a file
+will then send over attribute packets indicating the need (or lack of)
+for binary transmission, based on the file organization, filetype and protection
+code (for RSTS/E).
+ If the sending Kermit-11 is running on RSTS/E, RSX11M/M+ or P/OS
+it will also send a copy of the RMS/FCS attributes so the received file will
+be identical (to FCS and/or RMS) to the copy on the sender's system. Since
+other implementations of Kermit may use this special system attribute packet,
+Kermit-11 always sends an attribute packet telling the receiver what hardware
+and operating system it is running on, and thus will only use such data if
+they are compatible.
+Of course, there will be times when a file may be binary and Kermit-11 can't
+tell so, many Kermit's have a SET FILE BINARY and SET FILE ASCII to allow the
+user to override defaults. Kermit-11 also has a SET FILE AUTO/NOAUTO to disable
+it from trying to determine a file's binary status.
+.s 1
+Future directions
+.s 1
+With the advent of packet switched networks and satellite communications
+the Kermit protocol will likely be extended to increase efficiency over
+such links. The main problem is the half duplex nature of Kermit, the
+packet acknowledgements can take up to several seconds in transit thus
+drastically reducing the throughput. There are several possibilities under
+discussion and a standard should be appearing shortly.
+.page
+Summary
+.s 1
+#This article describes only the PDP-11 Kermit-11 implementation, for further
+reading see:
+.lit
+
+
+Kermit: A File-transfer Protocol for Universities 
+Frank da Cruz and Bill Catchings
+BYTE Magazine, June/July 1984
+
+The Kermit Protocol Manual, version 5
+Frank da Cruz   April 1984
+Columbia University Center for Computing Activities
+
+Information on obtaining Kermit:
+
+KERMIT Distribution
+Columbia University Center for Computing Activities 
+7th Floor, Watson Laboratory
+612 West 115th Street
+New York, N.Y.  10025
+
+Kermit is also usually found on the Decus symposia SIG tapes.
+Kermit-11 is available from DECUS as number 11-731
+
+Digital hardware that Kermit is currently available for:
+
+		 Operating  Program   
+Machine          System     Language     Contributor
+     
+DEC PDP-11       MUMPS-11   MUMPS-1982   Cornell U
+DEC PDP-11       RSTS/E     Macro-11     U of Toledo
+DEC PDP-11       RSX-11/M   Macro-11     U of Toledo
+DEC PDP-11       RSX-11/M+  Macro-11     U of Toledo
+DEC PDP-11       RT-11      Macro-11     U of Toledo
+DEC PDP-11       RT-11      OMSI Pascal  U of Toronto
+DEC PDP-11       TSX+       Macro-11     U of Toledo
+DEC PDP-11       Unix 2xBSD C            Columbia U
+DEC PDP-11, ...  Unix V7    C            Columbia U
+DEC PDP-8        OS8, RTS8  PAL-8        R. Hippe
+DEC Pro-3xx      P/OS       Bliss, Macro Stevens I.T.
+DEC Pro-3xx      P/OS       Macro-11     U of Toledo
+DEC Pro-3xx      Pro/RT     Macro-11     U of Toledo
+DEC Pro-3xx      Venix V1   C            Columbia U
+DEC Pro-3xx      Venix V2   C            Columbia U
+DEC Rainbow      CPM86      ASM86        Columbia U
+DEC Rainbow      MS-DOS     MASM         Columbia U
+DEC Rainbow      QNX 1.x    C            Merrell-Dow
+DEC VAX          Ultrix-32  C            Columbia U
+DEC VAX          VMS        Bliss,Macro  Stevens I.T.
+DEC VAX          VMS        C (VAX-11 C) Columbia U
+DEC VAX          VMS        Pascal       U of Toronto
+DEC VAX, ...     Unix 4xBSD C            Columbia U
+DEC VT-180 Robin CPM80      Turbo Pascal Jeff Duncan
+DEC VT-180 Robin CPM80 2.2  M80,LASM     ACC
+DECmate-II,III   CPM80 2.2  M80,LASM     ACC
+DECsystem-10     TOPS-10    Bliss, Macro Stevens I.T.
+DECSYSTEM-20     TOPS-20    MACRO-20     Columbia U
+     
+.eli

@@ -1,0 +1,208 @@
+	program k11hex
+c
+c
+c	02-Mar-84  13:50:23  Brian Nelson
+c
+c
+c	 Written in Fortran-77 since if written it in  MACRO-11 I
+c	would need two versions (one for RSX and RSTS and another
+c	for RT)
+c
+c	pack and unpack the so-called HEX file for kermit
+c
+	byte	mode
+	byte	infil(40),outfil(40)
+c
+c	note:    For encoding, RT fortran does not know about
+c		eof for direct access files. Will have to fix
+c		for RT when I get the rt version done.
+c
+c
+c
+c	to compile:
+c
+c	f77 k11hex=k11hex
+c	ftb
+c	k11hex=k11hex,lb:f4pots/lb
+c	/
+c	maxbuf=1000
+c	//
+c
+c
+c	Be sure to include MAXBUF=1000 for FTB (or TKB) otherwise
+c	it won't run.
+c
+c-	call errset(39,.true.,.false.,.true.,.false.,32000)
+c
+	write (5,30000)
+	read  (5,30010) infil
+	write (5,30020)
+	read  (5,30010) outfil
+	infil(40)  = 0
+	outfil(40) = 0
+10	continue
+	write (5,30030)
+	read  (5,30010) mode
+	if (mode.eq.'e' .or. mode.eq.'E') go to 100
+	if (mode.eq.'d' .or. mode.eq.'D') go to 200
+	type *,'Please enter E for ENCODE or D for DECODE'
+	goto 10
+c
+c
+100	continue
+	open	(unit=1,type='OLD',name=infil,access='DIRECT',
+	1	 recordsize=512/4 ,readonly,form='UNFORMATTED')
+	open	(unit=2,type='NEW',name=outfil,carriagecontrol='LIST')
+	call crehex
+	close (unit=1)
+	close (unit=2)
+	stop
+c
+200	continue
+	open	(unit=1,type='OLD',name=infil,readonly,
+	1	 carriagecontrol='LIST')
+	open	(unit=2,type='NEW',name=outfil,access='DIRECT',
+	1	 recordsize=512/4,form='UNFORMATTED')
+	call cretsk
+	close (unit=1)
+	close (unit=2)
+	stop
+c
+c
+c	
+c
+30000	format (1x,'Input  file ? '$)
+30010	format (80a1)
+30020	format (1x,'Output file ? '$)
+30030	format (1x,'Encode or Decode ? '$)
+c
+	end
+c
+c
+c
+c
+	subroutine crehex
+	implicit integer (a-z)
+	byte buffer(512)
+c
+c
+	rnum = 1
+10	continue
+	read(1'rnum,end=1000,err=1000) buffer
+	offset = 1
+	do 20 j = 1 , 16
+	check = 0
+	do 15 k = offset,offset+31
+	 check = check + ord(buffer(k))
+15	continue
+	write(2,30000) (buffer(k),k=offset,offset+31),check
+	offset = offset + 32
+20	continue
+	rnum = rnum + 1
+	go to 10
+1000	type *,'All done'
+	return
+c
+30000	format (32z2.2,':',z6.6)
+	end
+c
+c
+c
+	subroutine cretsk
+	implicit integer (a-z)
+	byte buffer(512)
+	byte lbuff(64)
+	byte cbuff(6)
+	byte chr
+	integer chmap(256)
+	data chmap /256*0/
+c
+	chmap(48) = 0
+	chmap(49) = 1
+	chmap(50) = 2
+	chmap(51) = 3
+	chmap(52) = 4
+	chmap(53) = 5
+	chmap(54) = 6
+	chmap(55) = 7
+	chmap(56) = 8
+	chmap(57) = 9
+	chmap(65) = 10
+	chmap(66) = 11
+	chmap(67) = 12
+	chmap(68) = 13
+	chmap(69) = 14
+	chmap(70) = 15
+c
+c
+	rnum = 1
+10	continue
+	off = 1
+	do 90 j = 1 , 16
+	  read(1,30010,end=100,err=100) lbuff,cbuff
+	  i = 1
+	  do 20 k = off,off+31
+	   buffer(k) = chr( chmap(lbuff(i))*16 + chmap(lbuff(i+1)) )
+	   i = i + 2
+20	  continue
+	  check = chmap( cbuff(6) )
+     1		+ chmap( cbuff(5) ) * 16
+     2		+ chmap( cbuff(4) ) * 256
+     3		+ chmap( cbuff(3) ) * 4096
+c
+c-	  read(1,30000,end=100,err=100)(buffer(k),k=off,off+31),check
+	  comchk = 0
+	  do 70 k = off,off+31
+	   comchk = comchk + ord(buffer(k))
+70	  continue
+	  if (comchk.eq.check) go to 80
+	   type *,'Checksum error ',check,comchk
+	   stop
+80	  continue
+	  off = off + 32
+90	continue
+	write(2'rnum) buffer
+	rnum = rnum + 1
+	go to 10
+c
+100	continue
+	type *,'all done'
+	type *,'For RSX, please make  the task image  contiguous as in'
+	type *,' '
+	type *,'   PIP [1,54]KERMIT.TSK/CO=KERMIT.TSK'
+	type *,' '
+	type *,'For RSTS, make the task contiguous, set the protection'
+	type *,'to <104> and the rts name to RSX as in'
+	type *,' '
+	type *,'   PIP [1,2]KERMIT.TSK<104>/MO:16/RTS:RSX=KERMIT.TSK'
+	type *,' '
+	return
+c
+c	for f77 only, the format was '30000	format (32z2,1x,z6)'
+c
+30010	format (64a1,1x,6a1)
+c
+	end
+c
+c
+c
+	integer function ord(b)
+	byte b
+	byte ch(2)
+	integer i
+	equivalence (ch(1),i)
+	ch(1) = b
+	ord = i
+	return
+	end
+c
+c
+	byte function chr(i)
+	integer i
+	byte b(2)
+	integer ch
+	equivalence (b(1),ch)
+	ch = i
+	chr = b(1)
+	return
+	end

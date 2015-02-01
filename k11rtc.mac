@@ -1,0 +1,664 @@
+
+
+
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !!!!!
+; !!!!!	The file is NO longer used.
+
+
+
+	.title	k11con	terminal emu
+	.ident	/8.0.01/
+	.psect
+
+	r$rt11	=	1
+
+;	Brian Nelson  29-Dec-83  16:00:09  initial version
+;	Brian Nelson  23-Jan-84  16:19:49  RSX mods
+;	Brian Nelson  16-Apr-84  08:01:57  Merge Bob Denny's changes for RSX
+;	John Pieper   840607		Fix  TC.DLU  for autocall modems (RSX)
+;	John Pieper   840614		Attach lun.ti (even though slaved!)
+;	Brian nelson  840616		Don't change TC.DLU, does not work for
+;					my system at any rate.
+
+	.iif ndf, r$rt11, r$rt11 = 0	; assume not rt11 today
+
+
+	.include	/IN:K11MAC.MAC/
+	.iif ndf	,k11inc	,.error	; missing INCLUDE for K11MAC.MAC
+
+	locmod	=	ter$cc ! ter$bi	; for the 11's console
+	remmod	=	ter$cc
+
+;	note:	vt125's are a problem as they don't send xon when you type one
+
+	.psect	$code
+
+	.sbttl	connect code for kermit
+	.enabl	gbl
+	.enabl	lsb
+
+
+
+doconn::message	<You have linked in obsolete CONNECT code>,cr
+	tstb	ttname			; insure that a device name is set
+	bne	1$			; ok
+	message	<You must first define an output port:>,cr	;jfp 840607
+	message	<Use the SET LINE command for this.>,cr
+	return
+
+	
+1$:	message	<Connecting to line >	; Print the line and speed out
+	print	#ttname			; the link name
+	calls	ttspee	,<#ttname>	; get the speed now
+	tst	r0			; not if we can't get it
+	ble	5$			; yes, do not print 0 or -1 baud
+	message	< at >			; and the speed
+	sub	#10	,sp		; try to format the response a little
+	mov	sp	,r1		; allocate a buffer and point to it
+	deccvt	r0,r1,#4		; convert to decimal, 4 wide
+	print	r1	,#4		; print it
+	add	#10	,sp		; pop the buffer
+	message	< baud>,cr		; and finish off the message
+5$:	message	< Type CTRL >
+	clr	-(sp)			; allocate a text buffer
+	bisb	conesc	,(sp)		; get it
+	add	#100	,(sp)		; convert it back to printable
+	mov	sp	,r0		; point to it now
+	print	r0	,#1		; at last
+	tst	(sp)+			; pop the buffer
+	message	< and then C to return to command level>,cr
+
+	call	getsys			; get the exec we are running today
+	cmpb	r0	,#sy$rsts	; rsts today ?
+	bne	10$			; no
+	call	dorsts			; yes, call the correct routine
+	br	100$
+10$:	cmpb	r0	,#sy$rt
+	bne	20$
+	call	dort11
+	br	100$
+20$:	call	dorsx
+	br	100$
+
+100$:	return
+
+	.dsabl	lsb
+
+	global	<conesc	,getsys	,ttcons	,ttname	,lun.co	,lun.ti>
+
+
+	.sbttl	do the connect command for RSTS/E
+
+;	 This is the  module that handles the CONNECT command for a Kermit
+;	running in local mode on a RSTS or RT11 system. The method used is
+;	simply to try a read  without stall on the remote's line,  echo to
+;	the user's  terminal if there was data,  read without stall on the
+;	users local terminal and send that data to the remote if there was
+;	data to be read. If neither terminal  had data to get, then Kermit
+;	will suspend itself  for 1 second.  For RT11, we will never stall.
+;	Also,  for RT11,  whenever we get 20 (8) characters,  we will send
+;	the remote  system an  XOFF so we can catch up on the input due to
+;	the RT MT service overhead for single character i/o.
+
+	chcount	=	0
+	exectyp	=	2
+	needxon	=	4
+	locsize	=	10
+
+dort11:
+dorsts:	sub	#locsiz	,sp		; allocate local r/w data
+	mov	sp	,r4		; and a pointer to it please
+	clr	-(sp)			; allocate single character buffer
+	mov	sp	,r3		; and point to it please
+	call	getsys			; get system type
+	movb	r0	,exectyp(r4)	; save system type in exectype(r4)
+	mov	#10	,chcount(r4)	; count down for rt11 to do an XOFF
+	clr	needxon(r4)		; don't need to send xon yet
+	calls	noecho	,<#ttname>	; don't want echoing please
+	calls	gttnam	,<#ttcons>	; get the 11's terminal name
+	calls	ttyini	,<#ttcons,#lun.co,#locmod>
+	tst	r0			; did it work
+	bne	5$			; no, exit with error
+	calls	ttysav	,<#ttcons>	; save terminal settings
+	calls	ttyset	,<#ttcons>	; set terminal up
+	tst	r0			; did the initialization work ?
+	bne	5$			; no, exit
+	calls	ttyini	,<#ttname,#lun.ti,#remmod>
+	tst	r0			; did the initialization work ?
+	bne	5$			; no, exit
+	calls	ttyset	,<#ttname>	; ok, set some useful things up
+	br	10$
+5$:	jmp	90$
+
+10$:	.iif ne,r$rt11	,call contrp	; special ^C things for RT11
+
+20$:	clr	r2			; assume a short nap is needed
+	calls	xbinrea	,<#lun.ti,#-1>	; try to get a charater from remote
+	call	errchk			; insure error is correct one
+	tst	r0			; did it work ?
+	bne	30$			; no, send an XON to the remote system
+	clrpar	r1			; yes, drop any aprity bits please
+	movb	r1	,@r3		; yes, get the character and print
+	cmpb	r1	,#'S&37		; /48/ Xoff?
+	beq	24$			; /48/ Yes, ignore
+	calls	binwri	,<r3,#1,#lun.co>; it out on the local terminal
+24$:	call	dumplo			; dump to a log file perhaps
+	mov	sp	,r2		; and say we don't want to sleep
+	dec	chcount(r4)		; is it time to do a RT11 XOFF ?
+	bne	40$			; no, wait a while then
+	cmpb	exectype(r4),#sy$rt	; if not rt11, then skip the xoff
+	bne	25$
+	mov	#2	,needxon(r4)	; will need to send xon later
+	call	sxoff			; yes, send an xoff please
+25$:	mov	#10	,chcount(r4)	; and reset the character counter
+	br	40$			; and look for local terminal input
+30$:	cmpb	exectype(r4),#sy$rt	; if not rt, then skip the xon
+	bne	40$			; not rt
+	tst	needxon(r4)		; really send an xon today?
+	beq	40$			; no
+	dec	needxon(r4)		; don't overdo sending xon's please
+	call	sxon			; no data, send an xon please
+
+40$:	calls	xbinrea	,<#lun.co,#-1>	; see if any input is pending from
+	tst	r0			; the local terminal
+	bne	70$			; no
+	movb	r1	,@r3		; yes, get it and send it to the
+
+	bic	#^C177	,r1		; insure no high bits are set.
+	cmpb	r1	,conesc		; other system unless it's the escape
+	bne	50$
+	calls	xbinrea	,<#lun.co,#20>	; char. get the next one please
+	tst	r0			; but wait for it. did it work  ?
+	bne	70$			; no
+	bic	#^C177	,r1		; insure no high bits are set.
+	cmpb	r1	,conesc		; really send the escape ?
+	beq	50$			; yes
+	call	concmd			; yes, do the command
+	tst	r0			; exit ?
+	bne	100$			; yes, bye
+	br	70$			; no, next please
+
+50$:	setpar	@r3	,@r3		; insure correct outgoing parity now
+	calls	binwri	,<r3,#1,#lun.ti>; the data is for the remote system
+	tst	duplex			; full or half duplex connection?
+	beq	60$			; full
+	calls	binwri	,<r3,#1,#lun.co>; half, send it back please
+60$:	mov	sp	,r2		; flag that no wait is needed
+70$:	tst	r2			; should we take a short nap ?
+	bne	80$			; no
+	cmpb	exectype(r4),#sy$rt	; don't wait if rt11
+	beq	80$			; yep, it's rt11 today
+	calls	suspend	,<#1,#0>	; yes, sleep 1 second for RSTS/E
+80$:	jmp	20$			; and back for more
+
+
+		
+90$:	direrr	r0			; problems in getting the connection
+
+100$:	tst	(sp)+			; pop the one byte buffer and exit
+	calls	ttyfin	,<#ttcons,#lun.co>	
+	calls	ttyrst	,<#ttcons>	; restore terminal settings
+	calls	ttyfin	,<#ttname,#lun.ti>
+	.iif ne,r$rt11	,call	conrst	; for RT11 control C junk
+	add	#locsiz	,sp		; pop local r/w data
+	return				; bye
+
+
+
+
+	.sbttl	RSX Connect code - Rev. Notes
+
+;
+; This is the terminal emulator for Kermit-11 on native RSX.  It was
+; rewritten because the original version developed on the RSTS emulator
+; was unsuitable for native RSX.  It wouldn't work reliably at baud
+; rates over 1200 on a moderately busy system.
+;
+;
+; Bob Denny	10-Mar-84
+;
+;	NOTE:	vt125's are a problem as they don't send xon when you type one
+;
+; John Pieper	840607		fix for connecting to an autocall modem
+;	Note:  Autocall modems are a pain under RSX.
+;	If the  TTnn:  is set  /remote ,
+;	  the Terminal Handler will NOT let you talk to it until it senses
+;	  DSR .  This logic is based on the assumption that a remote line
+;	  will be used only for incoming calls.
+;	If the  TTnn:  is set  /noremote ,
+;	  then you can talk to it, but the Terminal Handler will drop  DTR .
+;	  Thus, unless your modem has a local  DTR  override, it thinks
+;	  that you are not connected to it.
+;	Solution:  RSX-11m V4.1  allows  TC.DLU = 2
+;	  which holds  DTR  but allows you to talk without having  DSR .
+;	Note -- this mechanism is NOT available from  MCR  level.
+;	  Further,  TC.DLU  must be reset to 1 when KERMIT is done or else
+;	  the system will not recognize the  TT  as really being remote --
+;	  things such as  .IFF <LOCAL>  in an indirect command file will fail.
+;
+;  John Pieper	840614	Slave Terminal Fix!
+;	Due to a change in the Terminal Handler, a slaved terminal must also
+;	  be attached or else unsolicited input will NOT be kept in the
+;	  typeahead buffer.  (See Software Dispatch Dec. 1983).
+;	  Terminal Emulation sure works better with this fix !!
+
+	.sbttl	RSX Connect code - Definitions
+;
+	.if eq	,r$rt11
+	.iff
+dorsx::	return
+	.ift				; keep some sanity for the rt assembler
+
+	ef.rem	= 14.			; Remote event flag
+	em.rem	= 020000		; Remote event flag mask
+	ef.loc	= 15.			; Local event flag
+	em.loc	= 040000		; Local event flag mask
+
+;
+; LOCAL IMPURE DATA
+;
+	.psect	$idata	rw,d,lcl,rel,con
+;
+; Characteristics buffers
+;
+;	Note: TC.SLV must be second in the list   BDN 18-Apr-84  10:47:18
+;
+savti:	.byte	TC.FDX,0,TC.SLV,0	; Original setting for remote
+savco:	.byte	TC.FDX,0		; Original setting for local
+fdxchr:	.byte	TC.FDX,1,TC.SLV,1	; Change to FDX if required
+
+;  Buffers for Autocall modem fix
+savti2:	.byte	TC.DLU,0,TC.ABD,0	; TC.ABD maybe not needed - can't hurt
+	sizti2	=  .-savti2		;  in case we ever add more functions
+fixti2:	.byte	TC.DLU,2,TC.ABD,0	; values we need for a modem
+
+rtab:	.byte	TC.TBF,0		; #chars in remote typeahead
+ltab:	.byte	TC.TBF,0		; #chars in local typeahead
+
+	.mcall	qio$	qiow$
+;
+; Oft' used QIO DPB's
+;
+remread:
+	qio$	<io.rne!tf.ral>,lun.ti,ef.rem,,remios,,<rembf,1>
+locread:
+	qio$	<io.rne!tf.ral>,lun.co,ef.loc,,locios,,<locbf,1>
+remwrite:
+	qiow$	io.wal,lun.ti,ef.loc,,,,<locbf,1>
+locwrite:
+	qiow$	io.wal,lun.co,ef.rem,,,,<rembf>
+locech:
+	qiow$	io.wal,lun.co,ef.rem,,,,<locbf,1>
+remtest:
+	qiow$	sf.gmc,lun.ti,ef.rem,,remios,,<rtab,2>
+remtab:
+	qiow$	<io.rne!tf.ral>,lun.ti,ef.rem,,remios,,<rembf+1>
+
+;
+; Other stuff
+;
+efbuf:	.blkw	4				; Event flags buffer
+rembf:	.blkb	256.				; Remote data buffer
+locbf:	.blkb	256.				; Local data buffer
+eseen:	.word	0				; 1 = escape seen
+locios:	.word	0,0
+remios:	.word	0,0
+
+	.psect	$code
+
+	.endc				; for r$rt11 = 0
+
+
+;	.sbttl	RSX Connect Code -- Setup
+
+	.if eq	,r$rt11
+	.ift
+
+	.mcall	qio$	qiow$	qiow$s	dir$	wtlo$s
+	.mcall	alun$s	dscp$s	encp$s	exit$s	rdaf$s	srex$s
+
+	.sbttl	Connect code for RSX kermit 
+;
+; 	D O C O N N  -  Connect for native RSX
+;
+; Assumes that the remote device has been attached via the
+; SET LINE command and its "asslun()" routine.
+
+	.enabl	lsb
+
+
+dorsx:	clr	eseen			; must do this for next connect cmd
+	calls	ttpars	,<#ttname>	; Get remote unit number
+	srex$s	#rsxabo			; abort perhaps
+	alun$s	#lun.ti,r1,r0		; Assign it
+	alun$s	#lun.co,#"TI,#0		; Assign our local terminal
+	tst	proflg
+	bne	5$			; yes, don't try to attach xk0:
+	qiow$s	#io.att,#lun.ti,#ef.rem	; and now Attach it. (jfp 840614)
+5$:
+	;
+	; Save local and remote's /{NO}FULLDUPLEX settings, and
+	; set them to /FULLDUPLEX.  Then DISABLE CHECKPOINTING
+	; so asynchronous buffered I/O is disabled and true full
+	; duplex communication can take place.
+	; BDN 18-Apr-84  10:41:51  Also force slave mode
+	;
+	qiow$s	#sf.gmc,#lun.ti,#ef.rem,,,,<#savti,#4>	; This is crude ...
+	qiow$s	#sf.gmc,#lun.co,#ef.loc,,,,<#savco,#2>
+	qiow$s	#sf.smc,#lun.ti,#ef.rem,,#remios,,<#fdxchr,#4>
+	qiow$s	#sf.smc,#lun.co,#ef.loc,,#remios,,<#fdxchr,#2>
+
+	; If  lun.ti  is currently /noremote (hard wire connection), leave it.
+	; Notify user to make sure correct  TT number.
+	; If it is /remote , fix it for autocall.
+
+	tst	proflg
+	bne	10$
+	qiow$s	#sf.gmc,#lun.ti,#ef.rem,,,,<#savti2,#sizti2>
+	tstb	savti2+1			; currently /remote ?
+	bne	6$				;  Yes
+	message	<Note:  This is NOT a Remote line.>,cr
+	br	10$				; that's all we do if local.
+6$:
+;-	qiow$s	#sf.smc,#lun.ti,#ef.rem,,,,<#fixti2,#sizti2>	; fix it.
+10$:	dscp$s					; **DISABLE CHECKPOINTING**
+
+
+
+	.sbttl	RSX Connect code - Remote Input
+	;
+	; Prime incoming and outgoing streams
+	;
+	dir$	#remread
+	dir$	#locread
+
+	;
+	; Main loop - Handle incoming and outgoing streams
+	; until escape character is detected on outgoing (local KB)
+	;
+20$:	wtlo$s	0,#<em.loc!em.rem>		; Wait for a character on either
+	rdaf$s	#efbuf				; Read the event flags
+
+	;
+	; Handle character(s) on incoming stream
+	;
+	bit	#em.rem,efbuf+0			; Anything coming in?
+	beq	40$				; (no)
+	movb	remios	,r5			; get the status of the read
+	call	iocheck				; and check for allowable errors
+	bcs	100$				; fatal (likely was IE.DNR)
+
+	dir$	#remtest			; More in typeahead?
+	movb	remios	,r5			; get the status of the read
+	call	iocheck				; and check for allowable errors
+	bcs	100$				; fatal (likely was IE.DNR)
+
+	clr	r0				; m+ may have a lot ready to get
+	bisb	rtab+1,r0			; r0 = # in typeahead
+	beq	30$				; (no)
+	mov	r0,remtab+q.iopl+2		; Set # to read to drain
+	dir$	#remtab				; Read 'em in
+;-	movb	remios	,r5			; get the status of the read
+;-	call	iocheck				; and check for allowable errors
+;-	bcs	100$				; fatal (likely was IE.DNR)
+
+30$:	inc	r0				; r0 = total # chars to show
+	mov	r0,locwrite+q.iopl+2		; Write out this many
+	dir$	#locwrite
+	mov	locwrite+q.iopl+0,r2		; now dump junk to logging file
+35$:	movb	(r2)+	,r1			; a character at a time
+	call	dumplo				; simple to do
+	sob	r0	,35$			; next please
+	dir$	#remread			; Re-issue read
+
+	.sbttl	RSX Connect code - Local Input
+	;
+	; Handle characters on outgoing (Local input) stream
+	;  do this without fast-drain (yet)
+	;
+40$:	bit	#em.loc,efbuf+0			; Anything typed locally?
+	beq	20$				; (no, loop back)
+
+	movb	locbf,r1			; r1 = just typed character
+	bic	#^C177,r1			; drop bit 7 if mark set (BDN)
+	cmpb	r1,conesc			; Console escape?
+	bne	50$				; (no)
+	tst	eseen				; Already seen one escape?
+	bne	60$				; (yes, send this one)
+	inc	eseen				; Yes, note it for now
+	br	70$				; And go read again
+
+50$:	tst	eseen				; Character following conesc?
+	beq	60$				; (no, send it)
+	call	concmd				; Yup, process it
+	tst	r0				; Exit CONNECT mode?
+	bne	100$				; (yes, clean up etc.)
+
+60$:	clr	eseen				; Assure escape flag reset
+	setpar	locbf	,locbf			; set correctr outgoing parity
+	dir$	#remwrite			; Transmit character to remote
+	tst	duplex				; ibm type things today?
+	beq	70$				; no
+	dir$	#locech				; need half duplex duplex ?
+70$:	dir$	#locread			; Re-issue local read
+	jmp	20$				; Loop back
+
+	.sbttl	RSX Connect code - Clean Up and Exit
+
+;
+; Exit CONNECT mode
+;
+100$:	call	rsxrst			; restore terminal settings
+	encp$s				;**ENABLE CHECKP**
+	return
+
+	
+
+rsxabo:	call	rsxrst			; called via requested exit
+	srex$s				; disable further exits
+	exit$s				; bye
+
+
+rsxrst:	qiow$s	#io.kil,#lun.ti,#ef.rem		; Kill incoming I/O
+	qiow$s	#io.kil,#lun.co,#ef.loc		; Kill incoming I/O
+	qiow$s	#sf.smc,#lun.ti,#ef.rem,,,,<#savti,#4>	; Restore lines
+	qiow$s	#sf.smc,#lun.co,#ef.loc,,,,<#savco,#2>
+	qiow$s	#sf.smc,#lun.ti,#ef.rem,,,,<#savti2,#sizti2>	;jfp
+	qiow$s	#io.det,#lun.ti,#ef.rem		; De-Attach remote line
+	return
+
+
+
+iocheck:mov	r0	,-(sp)		; insure this is saved
+	tstb	r5			; sucessesful read qio ?
+	bpl	180$			; yes
+	scan	r5	,#200$		; allowable error code ?
+	tst	r0			; well
+	bne	180$			; yes, let it through
+	neg	r5			; make > 0 for direrr macro
+	direrr	r5			; simple
+	sec				; failure, exit to command level
+	br	190$			; bye
+180$:	clc				; success, stay in connect code
+190$:	mov	(sp)+	,r0		; restore old r0 please
+	return
+
+200$:	.byte	IE.BCC	,IE.DAO	,IE.IES	,IE.NOD	,IE.PES	,IE.VER	,0
+	.even
+
+
+	global	<conesc	,ttcons	,ttname	,lun.co	,lun.ti>
+
+	.dsabl	lsb
+
+	.endc				; for r$rt11 = 0
+
+
+
+	.sbttl	errchk	check for allowable errors on the link
+
+
+
+errchk:	mov	r0	,-(sp)		; save the error code
+	cmpb	r0	,#nodata	; check error codes out please
+	beq	210$			; that is what we wanted (no data)
+	tst	r0			; any other kind of error ?
+	beq	210$			; no
+	calls	syserr	,<r0,#errtxt>	; yes, get the error text please
+	strlen	#errtxt			; ok
+	add	#errtxt	,r0		; get the length, point to the end
+	movb	#cr	,(r0)+		; and stuff a carriage return and
+	movb	#lf	,(r0)+		; a line feed in
+	clrb	@r0			; insure .asciz please
+	strlen	#errtxt			; the length once again
+	calls	binwri	,<#errtxt,r0,#lun.co> ; try to print error on TI
+	tst	r0			; did that also fail ?
+	beq	210$			; no
+	mov	@sp	,r0		; yes
+	direrr	r0			; yes, print on default TI: lun
+210$:	mov	(sp)+	,r0		; pop saved r0 and exit
+	return				; bye
+
+	global	<errtxt	,lun.co	,nodata>
+
+
+
+
+	.sbttl	concmd	terminal emulation escape commands
+
+concmd:	save	<r1>
+	bicb	#^C177	,r1
+	scan	r1,#200$		; look for a match here
+	asl	r0			; word offsets
+	jsr	pc	,@210$(r0)	; dispatch to the correct routine
+	unsave	<r1>
+	return
+
+
+200$:	.byte	'C&137	,'c!40		; drop connection ctrl \ C
+	.byte	'I&137	,'i!40		; init the line
+	.byte	'Q&137	,'q!40		; quit logging but leave file open
+	.byte	'R&137	,'r!40		; resume logging if file is open
+	.byte	'X&137	,'X!40		; control Q and then thats all
+	.byte	'B&137	,'b!40
+	.byte	'?	,177		; help, rub for send break
+	.byte	'H&137	,'h!40
+	.byte	0
+	.even
+
+210$:	.word	con.$			; unknown escape command
+	.word	con.c	,con.c		; drop connection
+	.word	con.i	,con.i		; get modems attention
+	.word	con.q	,con.q		; turn console logging off
+	.word	con.r	,con.r		; turn it back on please
+	.word	con.x	,con.x		; send XON
+	.word	con.br	,con.br		; break
+	.word	con.hl	,con.br		; print out commands
+	.word	con.hl	,con.hl		; help
+
+
+
+con.$:	calls	binwri	,<#200$,#1,#lun.co>	; beep at user
+	clr	r0
+	return
+
+200$:	.byte	'G&37			; [BEL]
+	.even
+
+
+con.c:	mov	sp	,r0		; set flag to exit connect code
+	return				; simple
+
+
+con.i:	calls	ttydtr	,<#ttname>	; try to force DTR up on the line
+	clr	r0
+	return
+
+
+con.q:	bic	#log$co	,trace		; turn off console logging
+	clr	r0
+	return
+
+
+con.r:	bit	#log$op	,trace		; if the file is open do it
+	beq	100$			; no
+	bis	#log$co	,trace		; yes, enable this
+100$:	clr	r0
+	return
+
+
+con.x:	calls	binwri	,<#200$,#1,#lun.ti>; insure a control Q goes down
+	calls	ttxon	,<#ttname>
+	clr	r0
+	return
+
+200$:	.byte	'Q&37
+	.even
+
+con.br:	calls	senbrk	,<#ttname,#lun.ti>
+	clr	r0
+	return
+
+
+
+con.hl:	strlen	#200$
+	calls	binwri	,<#200$,r0,#lun.co>
+	clr	r0
+	return
+
+200$:	.ascii	/B	Try to send a  break to the  remote/<cr><lf>
+	.ascii	/C	Connect back to the local Kermit-11/<cr><lf>
+	.ascii	/I	Drop  and raise DTR (for RSTS only)/<cr><lf>
+	.ascii	/Q	Quit console logging.   See SET LOG/<cr><lf>
+	.ascii	/R	Resume console logging. See SET LOG/<cr><lf>
+	.ascii	/X	Send XON and cancel any active XONs/<cr><lf>
+	.asciz	/RUBOUT	Try to fake a break to the remote/<cr><lf>
+	.ascii	/?	Print this message/<cr><lf>
+	.byte	0
+	.even
+
+
+
+
+	.sbttl	dump i/o to a log file ?
+
+
+dumplo:	bit	#log$co	,trace		; is this enabled ?
+	beq	100$			; no
+	bit	#log$op	,trace		; is it open
+	beq	100$			; no
+	save	<r0,r1>			; yes, save temps please
+	mov	r1	,r0		; call simple version
+	mov	#lun.lo	,r1		; unit number
+	call	putcr0			; thats it folks
+	unsave	<r1,r0>
+100$:	return
+
+
+
+sxon:	tst	conflow
+	beq	100$
+	calls	binwri	,<#xon,#1,#lun.ti>
+100$:	return
+
+sxoff:	tst	conflow
+	beq	100$
+	calls	binwri	,<#xoff,#1,#lun.ti>
+100$:	return
+
+
+	.save
+	.psect	$pdata
+xon:	.byte	'Q&37
+xoff:	.byte	'S&37
+	.even
+	.restore
+
+
+
+	global	<lun.lo	,putcr0	,trace	,conflow>
+
+
+
+	.end

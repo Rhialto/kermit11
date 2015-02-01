@@ -1,0 +1,415 @@
+	.title	k11tsx	terminal service for TSX+
+	.ident	/1.0.01/
+
+;	28-May-84  09:06:31  Brian Nelson
+;	09-Nov-84  10:13:19  Edited from mods by NED RHODES for TSX+ and
+;			     created new module, K11TSX.MAC
+;
+;	6-May-85             Removed the .gval and .pval stuff that fooled
+;                            with the tt config word as it is not need under
+;                            TSX-Plus.  Disable wait mode in kbread so that
+;                            other users could run under TSX-Plus.  With
+;                            nowait enabled, job would hang system in tight
+;                            read loop.  (Ned W. Rhodes)
+;
+;
+;	Copyright (C) 1984 Change Software, Inc.
+
+
+
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.endc
+
+	.psect
+	.sbttl	definitions for multiple terminal support
+
+	.mcall	.mrkt	,.cmkt	,.twait
+	.mcall	.gval	,.pval
+	.mcall	.ttyout	,.ttinr
+        .mcall  .spfun	,.writw	,.lookup,.close
+	.mcall	.serr,.herr
+	.enabl	gbl
+
+
+	jsw	=	44		; job status word
+	ttlc$	=	040000		; lower case bit
+	ttspc$	=	010000		; terminal special mode
+	tcbit$	=	000100		; inhibit terminal i/o wait
+	edit$	=	000020		; disable sl bit
+	gtlin$	=	000010		; non-terminating .gtlin
+	sysgen	=	372		; sysgen features word
+	tsx$p	=	100000		; running under TSX
+	mtty$	=	020000		; multi terminal support
+	$tcfig	=	424		; terminal configuration word
+	crlf$	=	000002		; ignore width
+	ctrl.m	=	35
+	.macro	$mterr			; map multiple terminal service
+	movb	@#errbyt,r0		; into a global error code
+	asl	r0			; simple to do
+	mov	mterr(r0),r0		; thats all there is to it
+	.endm	$mterr
+
+
+	.save
+	.psect	mtmap	,rw,d,lcl,rel,con
+
+	.even
+ttsave:	.blkw	4
+ttctlc:	.blkw	1			; for control C things in connect mode
+ttime:	.word	0,1			; a tick sleep for .twait
+
+mtty:	.byte	0			; multiterminal support
+tsx:	.byte	0			; under tsx flag
+xlact:	.byte	0			; xl is being used
+tsxrem:	.byte	0			; logged into tsx
+	.even
+m.tsxs:	.byte	ctrl.m,'S		; single character
+	.byte	ctrl.m,'W		; tape mode on
+	.byte	ctrl.m,'U		; No wait
+;	.byte	ctrl.m,'D,'W-100	; Make ^W an activation char ; jam
+;	.byte	ctrl.m,'D,lf		; Do it for linefeed, too
+	.byte	ctrl.m,'Y		; No linefeed echo
+	.byte	ctrl.m,'R		; High efficiency
+	.byte	0
+	.even
+m.tsxr:	.byte	ctrl.m,'T		; single-character off
+	.byte	ctrl.m,'X		; tape mode off
+	.byte	ctrl.m,'Z		; line feed echo
+	.byte	0
+	.even
+hieff:	.byte	0,120			; hi eff off
+	.restore
+
+
+
+
+	.sbttl	assign the terminal unit
+
+
+
+t.assdev::
+	save	<r1>			; we may want to use these
+	movb	#1	,tsx		; flag for tsx
+	movb	#1	,tsxrem		; again
+	clr	r0			; no errors
+	unsave	<r1>
+	return
+
+
+t.deadev::
+	save	<r1>			; save this one, folks
+	clrb	tsxrem			; drop flag
+	clr	r0
+100$:	unsave	<r1>			; exit
+	return				; dh
+
+
+
+	.sbttl	initialize the terminal
+
+
+;	T T Y I N I
+;
+;	input:	@r5	device name
+;		2(r5)	LUN
+;		4(r5)	modifiers
+;
+;	output:	r0	error code
+	ttmode	=	100 ! 10000 ! 40000
+
+t.ttyini::
+	save	<r1,r2>			; we will need this one
+
+	call	ttpars			; parse the device name
+	bcs	70$			; name ok
+	bis	#ttmode,@#jsw		; tt special, no wait, lowercase
+;	.gval	#rtwork,#$tcfig		; get terminal configuration word
+;	bic	#crlf$,r0		; no crlf
+;	mov	r0,r1			; copy it
+;	.pval	#rtwork,#$tcfig,r1	; and set it in fixed offset area
+;	tstb	tsx			; are we under tsx??
+;	beq	5$			; nope
+	.gval	#rtwork,#-4		; get tsx leadin
+	cmp	r0,#ctrl.m		; default?
+	beq	4$			; skip the labor
+	movb	r0,m.tsxr		;  single character activation mode
+	movb	r0,m.tsxr+2		;  and tape mode
+	movb	r0,m.tsxr+4		;  and some more
+
+	movb	r0,m.tsxs		; now set it in the tsx strings
+	movb	r0,m.tsxs+2		;  which enable and disable
+	movb	r0,m.tsxs+4		;  some more
+	movb	r0,m.tsxs+6		;  some more
+	movb	r0,m.tsxs+8.		;  some more
+4$:	.print	#m.tsxs,#10.		; set the terminal state
+
+5$:	mov	#1000	,r2
+10$:	calls	binrea	,<2(r5),#-1>	; eat anything that's pending please
+	dec	r2			; don't loop forever please
+	beq	20$			; exit the loop
+	tst	r0			; did we get anything at all ?
+	beq	10$			; yes, eat some more input
+20$:	clr	r0			; all done
+	br	100$			; bye
+
+70$:	mov	#er$dev	,r0		; device name parse failed
+	br	100$			; bye
+
+100$:	unsave	<r2,r1>			; pop and exit
+	return
+
+
+
+
+
+	.sbttl	save/restore terminal settings
+
+
+t.ttysav::
+	save	<r1>			; we will use this one
+;
+;	No multi-terminal support in TSX-plus
+;
+	mov	@#jsw,ttparm		; save jsw
+;	.gval	#rtwork,#$tcfig		; get terminal configuration
+;	mov	r0,ttparm+2		; and save it
+	clr	r0			; success
+100$:	unsave	<r1>			; pop this and exit
+	return
+
+
+
+t.ttyrst::
+	save	<r1>			; we will use this one
+;
+;	No multi-terminal support
+;
+	mov	ttparm,@#jsw		; restore jsw
+;	.pval	#rtwork,#$tcfig,ttparm+2; restore terminal configuration
+;	tstb	tsx			; are we under tsx??
+;	beq	70$			; nope
+	mov	#hieff,r0		; point to block
+	tst	tsxflg			; /38/ really TSX+
+	bmi	70$			; /38/ no
+	emt	375			; and turn off high efficiency
+	.print	#m.tsxr,#6		; reset stuff
+70$:	clr	r0			; success
+	br	100$			; bye
+
+100$:	unsave	<r1>			; pop this and exit
+	return
+
+
+
+	.sbttl	binrea	read binary
+
+
+;	B I N R E A
+;
+;	input:	@r5	LUN
+;		2(r5)	timeout
+;	output:	r0	error code
+;		r1	character just read
+
+
+t.xbinre::
+t.binrea::
+	save	<r2,r3,r4>		; we may want to use these here
+	bis	#10000	,@#JSW		; /39/ insure no echoing please
+	clr	-(sp)			; allocate a mark time tim buffer
+	clr	-(sp)			; simple
+	mov	sp	,r2		; and point to it
+	mov	@r5	,r3		; get the LUN
+
+	cmp	2(r5)	,#-1		; read without any wait ?
+	bne	20$			; no
+	.ttinr				; try to read a single character
+	bcs	80$			; nothing was there, so exit
+	mov	r0	,r1		; return character in r1
+	clr	r0			; no errors
+	br	100$			; exit
+
+20$:	mov	2(r5)	,r1		; get the timeout in seconds
+	mul	#60.	,r1		; into ticks now
+
+30$:	.ttinr				; try and read console
+	bcs	40$			; none
+	mov	r0,r1			; save character
+	clr	r0			; success
+	br	100$			; exit
+40$:	dec	r1			; been here too long ?
+	beq	80$			; yes, exit with error
+	.twait	#rtwork,#ttime		; sleep a moment please
+	br	30$			; and try again please
+
+80$:	mov	#er$nin	,r0		; no data today
+	br	100$			; bye
+
+100$:	add	#4	,sp		; pop local buffers
+	unsave	<r4,r3,r2>		; pop registers and exit
+	return
+
+	.sbttl	binary write
+
+
+
+;	B I N W R I
+;
+;	binwri( %loc buffer, %val buffer_size, %val lun )
+;
+;	output:	r0	error code
+;
+
+
+
+t.binwri::
+	save	<r1,r2>			; save registers we may need
+	clr	r0			; preset no errors as of yet
+	mov	@r5	,r1		; get the string address
+	mov	2(r5)	,r2		; get the string length
+	beq	100$			; nothing to do
+10$:	.ttyou	(r1)+			; dump and exit
+	sob	r2	,10$		; next please
+	clr	r0			; success today
+
+100$:	unsave	<r2,r1>			; pop the saved registers
+	return				; and exit
+
+
+
+	.sbttl	parse terminal unit
+
+
+;	T T P A R S
+;
+;	input:	@r5	address of RT11 Multiple terminal service unit string
+;	output:	r0	unit in binary
+
+
+t.ttpars::
+	clr	r0			; /39/ does not make sense in
+	return				; /39/ this context.
+	mov	r1	,-(sp)		; save scratch register please
+	mov	@r5	,r0		; get the address of the string
+	call	200$			; check for legit character
+	bcs	110$			; oops
+	movb	(r0)+	,r1		; get the first byte please
+	sub	#'0	,r1		; convert to binary
+	call	200$			; check for legit character
+	bcs	110$			; oops
+	movb	@r0	,r0		; get the next digit
+	beq	100$			; nothing there then we are done
+	mul	#12	,r1		; something there, shift over by 10
+	sub	#'0	,r0		; and convert low digit to binary
+	add	r0	,r1		; add into the accumulator
+100$:	mov	r1	,r0		; and return the result
+	clc				; return success
+110$:	mov	(sp)+	,r1
+	return
+
+
+200$:	tstb	@r0			; null ?
+	beq	210$			; yes, it's ok
+	cmpb	@r0	,#'0		; must only be digits today
+	blo	220$			; oops
+	cmpb	@r0	,#'9		; 0..9
+	bhi	220$			; bad device name
+210$:	clc				; device name ok so far
+	return				; bye
+220$:	sec				; bad, set and exit
+	return
+
+
+;	G T T N A M
+;
+;	input:	@r5	address of console name to be written
+;	output:	@r5	console name, always .asciz /0/
+
+
+t.gttnam::
+	mov	@r5	,r0		; get the address of where to put it
+	movb	#'0	,(r0)+		; tt0: is always mt unit 0
+	clrb	@r0			; insure .asciz and exit
+	clr	r0			; return success
+	return				; bye
+
+
+
+t.ttyfin::
+100$:	clr	r0			; return 'success'
+	return				; and exit
+
+
+	.sbttl	speed read and change
+
+t.ttspee::
+t.setspd::
+	clr	r0			; find the speed map now
+	return
+
+	.sbttl	terminal i/o things we don't need, can't do or haven't done yet
+
+
+t.ttxon::
+t.cantyp::
+t.ttset::
+t.ttydtr::
+t.ttrfin::
+t.ttrini::clr	r0
+	return
+
+t.ttyhan::mov	#er$iop	,r0
+	return
+
+	.mcall	.ttyin
+	jsw	=	44
+
+t.kbread::mov	r2	,-(sp)
+	mov	r3	,-(sp)
+	bis	#40000	,@#jsw		; enable lower case tt: input
+	bic	#10000!100,@#jsw	; ditch single ch input and nowait
+	mov	@r5	,r1		; a buffer to put the chars
+	mov	#80.	,r3		; size of the buffer here
+;10$:	.scca	#area	,#kmonbf	; so we can catch control Z
+10$:	.ttyin				; read a character please
+	tstb	r0
+	beq	15$			; a null
+	cmpb	r0	,#'Z&37		; control Z ?
+	beq	20$			; yes
+	cmpb	r0	,#'C&37		; control C ?
+	beq	20$			; yep
+	cmpb	r0	,#15		; carriage return ?
+	beq	30$			; yep
+	movb	r0	,(r1)+		; return what we just got
+	cmpb	r0	,#14		; form feed ?
+	beq	40$			; yep
+15$:	sob	r3	,10$		; next please
+20$:	mov	#er$eof	,r0		; say read error and exit
+	br	100$			; bye
+30$:	movb	#cr	,(r1)+		; return all terminators please
+	movb	#lf	,(r1)+		; simple
+	.ttyin				; eat the line feed now
+40$:	clrb	@r1
+	sub	@r5	,r1		; the length
+	clr	r0
+100$:	mov	(sp)+	,r3
+	mov	(sp)+	,r2
+	return
+
+
+
+
+
+t.senbrk::
+t.finrt::
+	clr	r0
+	return
+
+
+
+
+	.end

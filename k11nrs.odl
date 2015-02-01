@@ -1,0 +1,54 @@
+	.psect	topmem	,d,rw,gbl,ovr,rel
+	.name	utl
+	.name	err
+	.name	sr
+	.root	rm-rmsrot,rmsall,senrec,utilty,error,topmem
+rm:	.fctr	a-b-c-d-e-f-errdvr-mem-sub
+
+;	.root	rm,utilty,error,topmem
+;rm:	.fctr	a-b-c-d-e-f-errdvr-mem-sub-rms
+a:	.fctr	in:k11pak
+b:	.fctr	in:k11dat
+c:	.fctr	in:k11rms
+d:	.fctr	in:k11e80
+e:	.fctr	in:k11cmd-in:k11edi
+f:	.fctr	in:k11lcl
+
+senrec:	.fctr	sr-*(in:k11sen,in:k11rec,in:k11cm1)
+
+set0:	.fctr	in:k11st0
+set1:	.fctr	in:k11st1
+show:	.fctr	in:k11sho
+connec:	.fctr	in:k11eco
+help:	.fctr	in:k11hlp
+server:	.fctr	in:k11ser
+transf:	.fctr	in:k11tra
+debug:	.fctr	in:k11deb
+dial:	.fctr	in:k11dia
+utilty:	.fctr	utl-*(set0,set1,show,server,connec,help,transf,debug,dial)
+errdvr:	.fctr	in:k11err
+
+error:	.fctr	err-*(e1,e2)
+e1:	.fctr	*(er1,er2,er3,direrr,k11rmz)
+e2:	.fctr	*(pk,hl,copy,cmdlst,setlst,conver-atr,ini,sersub)
+
+sersub:	.fctr	in:k1180s
+conver:	.fctr	in:k11cvt
+copy:	.fctr	in:k11cpy
+er1:	.fctr	in:k11er1
+er2:	.fctr	in:k11er2
+er3:	.fctr	in:k11er3
+direrr:	.fctr	in:k11der
+sub:	.fctr	in:k11sub
+pk:	.fctr	in:k11pk
+hl:	.fctr	in:k11dfh
+cmdlst:	.fctr	in:k11com
+setlst:	.fctr	in:k11std
+ini:	.fctr	in:k11ini
+atr:	.fctr	in:k11atr
+mem:	.fctr	lb:syslib/lb:extsk
+rms:	.fctr	lb:rmslib/lb
+
+@in:k11dap.e80
+
+	.end

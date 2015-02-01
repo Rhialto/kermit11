@@ -1,0 +1,120 @@
+	.title	k11com	overlay for the main command list
+	.ident	/2.37/
+
+;	08-Mar-84  10:48:20  Brian Nelson
+;	23-Oct-85  09:44:20  BDN	Break LOASET out for new overlay.
+;
+;	Copyright (C) 1984 Change Software, Inc.
+;
+;	 Place the main command list in  an overlay
+;	Call LOACMD  to get the overlay  loaded and
+;	return the command list address in r0. Also
+;	do the same thing for REMOTE commands via a
+;	call to LOAREM.
+;	 If it should happen that this should cause
+;	a problem due to overlays overwritting this
+;	routine then simply put this into the root.
+
+
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.include	/IN:K11CDF.MAC/
+	.endc
+
+	.iif ndf, k11inc, .error	; INCLUDE missing for K11MAC.MAC
+
+
+
+	.sbttl	define the allowable commands
+	.psect	$code	,i
+
+loacmd::mov	#cmdlst	,r0
+	return
+
+	$cmglob	=	1		; globalize
+
+	command	cmdlst	,@	,1	,c$take	,<Command file ? >,string
+	command	cmdlst	,BYE	,2	,c$bye
+	command	cmdlst	,COMMENT,4	,c$nop
+	command	cmdlst	,CONNECT,3	,c$conn
+	command	cmdlst	,CWD	,2	,c$cwd	,<Directory: >,string
+	command	cmdlst	,COPY	,3	,c$copy	,<From: >,string
+	command	cmdlst	,DATE	,2	,sho$dy
+	command	cmdlst	,DELETE	,2	,c$del	,<What: >,string
+	command	cmdlst	,DIAL	,3	,c$dial	,<Phone number ? >,string
+	command	cmdlst	,DIRECT	,3	,c$dir
+	command	cmdlst	,DISCONNECT,4	,c$disc
+	command	cmdlst	,DISK	,4	,c$spac
+	command	cmdlst	,DISPLAY,4	,c$disp	,<Symbol: >,string
+	command	cmdlst	,ERASE	,2	,c$del	,<What: >,string
+	command	cmdlst	,EXAMINE,3	,c$disp	,<Symbol: >,string
+	command	cmdlst	,EXIT	,2	,c$exit
+	command	cmdlst	,FINISH	,2	,c$fin
+	command	cmdlst	,GET	,2	,c$get	,<File ? >,string
+	command	cmdlst	,HANGUP	,2	,c$hang
+	command	cmdlst	,HELP	,2	,c$help
+	command	cmdlst	,HOME	,3	,c$home
+	command	cmdlst	,HOST	,3	,c$sys	,<Command: >,string
+	command	cmdlst	,LOCAL	,3	,c$loc	,<Local command ? >,string
+	command	cmdlst	,LOGOUT	,4	,c$bye
+	command	cmdlst	,LOGFILE,4	,c$logf	,<Logfile name ? >,string
+	command	cmdlst	,LOG_FILE,4	,c$logf	,<Logfile name ? >,string
+	command	cmdlst	,LOG-FILE,4	,c$logf	,<Logfile name ? >,string
+	command	cmdlst	,NOTE	,2	,c$nop
+	command	cmdlst	,QUIT	,1	,c$exit
+	command	cmdlst	,PRINT	,2	,c$print,<File ? >,string
+	command	cmdlst	,RECEIVE,3	,c$rec
+	command	cmdlst	,REDIAL	,3	,c$redi	,<Number of retries ? >,decnum
+	command	cmdlst	,REMOTE	,3	,c$rem	,<Remote Kermit cmd ? >,string
+	command	cmdlst	,RENAME	,3	,c$rena	,<From: >,string
+	command	cmdlst	,SEND	,3	,c$send	,<File ? >,string
+	command	cmdlst	,SERVER	,3	,c$serv
+	command	cmdlst	,SET	,3	,c$set	,<What: >,string
+	command	cmdlst	,SHOW	,2	,c$show	,<What: >,string
+	command	cmdlst	,SPACE	,2	,c$spac
+	command	cmdlst	,STATUS	,2	,c$stat
+	command	cmdlst	,SYSTEM	,2	,c$sys	,<Command: >,string
+	command	cmdlst	,TAKE	,2	,c$take	,<Command file ? >,string
+	command	cmdlst	,TEST	,2	,c$test
+	command	cmdlst	,TIME	,2	,sho$dy
+	command	cmdlst	,TRANSFER,3	,c$tran	,<File ? >,string
+	command	cmdlst	,TRANSMIT,3	,c$tran	,<File ? >,string
+	command	cmdlst	,TYPE	,2	,c$type	,<File ? >,string
+	command	cmdlst	,WHO	,1	,c$who
+	command	cmdlst
+
+
+	.sbttl	same thing for remote commands
+
+
+loarem::mov	#remlst	,r0
+	return
+
+
+	$cmglob	=	1
+
+	command	remlst	,BYE	,2	,rmtbye
+	command	remlst	,COPY	,2	,rmtcop	,<From: >,string
+	command	remlst	,CWD	,2	,rmtcwd	,<Remote Directory: >,string
+	command	remlst	,DELETE	,2	,rmtdel	,<File Specification: >,string
+	command	remlst	,DIRECTORY,3	,rmtdir	,<Of what: >,string
+	command	remlst	,DISK	,3	,rmtspa
+	command	remlst	,ERASE	,2	,rmtdel	,<File Specification: >,string
+	command	remlst	,FINISH	,2	,rmtfin
+	command	remlst	,GET	,2	,rmtget	,<File Specification: >,string
+	command	remlst	,HELP	,2	,rmthlp
+	command	remlst	,HOST	,2	,rmthos	,<Command: >,string
+	command	remlst	,LOGIN	,3	,rmtlgi ,<User and Password: >,string
+	command	remlst	,RENAME	,2	,rmtren	,<From: >,string
+	command	remlst	,SPACE	,2	,rmtspa
+	command	remlst	,TYPE	,2	,rmttyp	,<File: >,string
+	command	remlst	,WHO	,1	,rmtwho
+	command	remlst
+
+
+
+
+	.end

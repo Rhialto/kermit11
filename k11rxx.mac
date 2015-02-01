@@ -1,0 +1,424 @@
+	.title	k11rxx	alter rsx connect terminal emu
+
+;	16-Jul-85  15:13:03 BDN 
+;
+;	SET RSX CON BIN
+;
+;	Alternate internal flow control and multibuffering for RSX11M/M=
+;	If it turns out that this option work ok, then we will replace
+;	Bob's code with this. RSX is a P A I N  with it's ttdrv.
+
+	.ident	/8.0.02/
+	.psect
+
+
+
+
+	.include	/IN:K11MAC.MAC/
+	.iif ndf	,k11inc	,.error	; missing INCLUDE for K11MAC.MAC
+
+
+
+
+
+	.sbttl	RSX Connect code - Rev. Notes
+
+;
+; This is the terminal emulator for Kermit-11 on native RSX.  It was
+; rewritten because the original version developed on the RSTS emulator
+; was unsuitable for native RSX.  It wouldn't work reliably at baud
+; rates over 1200 on a moderately busy system.
+;
+;
+; Bob Denny	10-Mar-84
+;
+;	NOTE:	vt125's are a problem as they don't send xon when you type one
+;
+; John Pieper	840607		fix for connecting to an autocall modem
+;	Note:  Autocall modems are a pain under RSX.
+;	If the  TTnn:  is set  /remote ,
+;	  the Terminal Handler will NOT let you talk to it until it senses
+;	  DSR .  This logic is based on the assumption that a remote line
+;	  will be used only for incoming calls.
+;	If the  TTnn:  is set  /noremote ,
+;	  then you can talk to it, but the Terminal Handler will drop  DTR .
+;	  Thus, unless your modem has a local  DTR  override, it thinks
+;	  that you are not connected to it.
+;	Solution:  RSX-11m V4.1  allows  TC.DLU = 2
+;	  which holds  DTR  but allows you to talk without having  DSR .
+;	Note -- this mechanism is NOT available from  MCR  level.
+;	  Further,  TC.DLU  must be reset to 1 when KERMIT is done or else
+;	  the system will not recognize the  TT  as really being remote --
+;	  things such as  .IFF <LOCAL>  in an indirect command file will fail.
+;
+;  John Pieper	840614	Slave Terminal Fix!
+;	Due to a change in the Terminal Handler, a slaved terminal must also
+;	  be attached or else unsolicited input will NOT be kept in the
+;	  typeahead buffer.  (See Software Dispatch Dec. 1983).
+;	  Terminal Emulation sure works better with this fix !!
+;
+;  Rich Seibel  850605  Double buffered I/O
+;       It still didn't work at 4800 baud.  Added double buffering
+;         of the remote to local data.  Flow control was not reliable,
+;	  so added internal flow control (XON/XOFF).
+;
+;  Brian Nelson 16-Jul-85  15:14:37  Insure XON sent iff XOFF sent
+;				     Split from mainline code into overlay
+;				     via SET RSX CON BIN
+;				     The other mod re SET RSX TC.DLU is NOT
+;				     in this module as of yet. wait........
+;				     if this module works better, then ....
+
+
+	.sbttl	RSX Connect code - Definitions
+
+
+	ef.lot	= 13.			; Local output event flag
+	em.lot	= 010000		; Local output event flag mask
+	ef.rem	= 14.			; Remote event flag
+	em.rem	= 020000		; Remote event flag mask
+	ef.loc	= 15.			; Local event flag
+	em.loc	= 040000		; Local event flag mask
+
+;
+; LOCAL IMPURE DATA
+;
+	.psect	$idata	rw,d,lcl,rel,con
+;
+; Characteristics buffers
+
+;	Note: TC.SLV must be second in the list   BDN 18-Apr-84  10:47:18
+
+
+sentxof:.word	0				; did we ever send XOFF ?
+
+savti:	.byte	TC.FDX,0,TC.SLV,0,TC.BIN,0	; Original setting for remote
+sizti = .-savti					; for the next time 
+
+savco:	.byte	TC.FDX,0			; Original setting for local
+
+fdxchr:	.byte	TC.FDX,1,TC.SLV,1,TC.BIN,1	; Change to FDX if required
+sizchr = .-fdxchr
+
+
+;  Buffers for Autocall modem fix
+
+savti2:	.byte	TC.DLU,0,TC.ABD,0	; TC.ABD maybe not needed - can't hurt
+	sizti2	=  .-savti2		;  in case we ever add more functions
+fixti2:	.byte	TC.DLU,2,TC.ABD,0	; values we need for a modem
+
+rtab:	.byte	TC.TBF,0		; #chars in remote typeahead
+ltab:	.byte	TC.TBF,0		; #chars in local typeahead
+
+
+
+
+	.mcall	qio$	qiow$
+;
+; Oft' used QIO DPB's
+;
+remread:
+	qio$	<io.rne!tf.ral>,lun.ti,ef.rem,,remios,,<rembf,1>
+locread:
+	qio$	<io.rne!tf.ral>,lun.co,ef.loc,,locios,,<locbf,1>
+remwrite:
+	qiow$	io.wal,lun.ti,ef.loc,,,,<locbf,1>
+locwrite:
+	qio$	io.wal,lun.co,ef.lot,,,,<bufptr>
+locech:
+	qiow$	io.wal,lun.co,ef.rem,,,,<locbf,1>
+remtest:
+	qiow$	sf.gmc,lun.ti,ef.rem,,remios,,<rtab,2>
+remtab:
+	qiow$	<io.rne!tf.ral>,lun.ti,ef.rem,,remios,,<bufptr+1>
+remxoff:
+	qiow$	io.wal,lun.ti,ef.rem,,,,<xoff,1>
+remxon:
+	qiow$	io.wal,lun.ti,ef.lot,,,,<xon,1>
+
+;
+; Other stuff
+;
+efbuf:	.blkw	4				; Event flags buffer
+rembf:	.blkb	2				; Remote data buffer
+rembf1:	.blkb	256.				; Local output data buffer
+rembf2:	.blkb	256.				; Local output data buffer
+bufptr: .word	0				; Local output buffer pointer
+locbf:	.blkb	2				; Local data buffer
+eseen:	.word	0				; 1 = escape seen
+locios:	.word	0,0
+remios:	.word	0,0
+
+	.psect	$code
+
+
+
+;	.sbttl	RSX Connect Code -- Setup
+
+
+	.mcall	qio$	qiow$	qiow$s	dir$	wtlo$s	setf$s
+	.mcall	alun$s	dscp$s	encp$s	exit$s	rdaf$s	srex$s
+
+	.sbttl	Connect code for RSX kermit 
+;
+; 	D O C O N N  -  Connect for native RSX
+;
+; Assumes that the remote device has been attached via the
+; SET LINE command and its "asslun()" routine.
+
+	.enabl	lsb
+
+
+xdorsx::message	<Alternate RSX connect code called>,cr
+	clr	eseen			; must do this for next connect cmd
+	calls	ttpars	,<#ttname>	; Get remote unit number
+	srex$s	#rsxabo			; abort perhaps
+	alun$s	#lun.ti,r1,r0		; Assign it
+	alun$s	#lun.co,#"TI,#0		; Assign our local terminal
+	tst	proflg
+	bne	5$			; yes, don't try to attach xk0:
+	qiow$s	#io.att,#lun.ti,#ef.rem	; and now Attach it. (jfp 840614)
+5$:
+	;
+	; Save local and remote's /{NO}FULLDUPLEX settings, and
+	; set them to /FULLDUPLEX.  Then DISABLE CHECKPOINTING
+	; so asynchronous buffered I/O is disabled and true full
+	; duplex communication can take place.
+	; BDN 18-Apr-84  10:41:51  Also force slave mode
+	;
+	qiow$s	#sf.gmc,#lun.ti,#ef.rem,,,,<#savti,#sizti>	; Crude
+	qiow$s	#sf.gmc,#lun.co,#ef.loc,,,,<#savco,#2>
+	qiow$s	#sf.smc,#lun.ti,#ef.rem,,#remios,,<#fdxchr,#sizchr>
+	qiow$s	#sf.smc,#lun.co,#ef.loc,,#remios,,<#fdxchr,#2>
+
+	; If  lun.ti  is currently /noremote (hard wire connection), leave it.
+	; Notify user to make sure correct  TT number.
+	; If it is /remote , fix it for autocall.
+
+	tst	proflg
+	bne	10$
+	qiow$s	#sf.gmc,#lun.ti,#ef.rem,,,,<#savti2,#sizti2>
+	tstb	savti2+1			; currently /remote ?
+	bne	6$				;  Yes
+	message	<Note:  This is NOT a Remote line.>,cr
+	br	10$				; that's all we do if local.
+6$:
+;-	qiow$s	#sf.smc,#lun.ti,#ef.rem,,,,<#fixti2,#sizti2>	; fix it.
+10$:	dscp$s					; **DISABLE CHECKPOINTING**
+
+
+
+	.sbttl	RSX Connect code - Remote Input
+	;
+	; Prime incoming and outgoing streams
+	;
+	dir$	#remread
+	dir$	#locread
+	setf$s	#ef.lot				; Signal local output available
+	clr	sentxof				; no xoff's have been sent
+	clr	r3				; Count of rem buffer (empty)
+	mov	#rembf1,bufptr			; Pick a buffer
+
+	;
+	; Main loop - Handle incoming and outgoing streams
+	; until escape character is detected on outgoing (local KB)
+	;
+20$:	wtlo$s	0,#<em.loc!em.rem!em.lot>	; Wait for a character on either
+	rdaf$s	#efbuf				; Read the event flags
+
+	;
+	; Handle character(s) on incoming stream
+	;
+	bit	#em.rem,efbuf+0			; Anything coming in?
+	beq	30$				; (no)
+	movb	remios	,r5			; get the status of the read
+	call	iocheck				; and check for allowable errors
+	bcs	23$				; fatal (likely was IE.DNR)
+
+	mov	bufptr	,r1			; Get buffer
+	add	r3	,r1			; and position in buffer
+	movb	rembf	,(r1)+			; put in character
+	inc	r3				; running count of buffer
+
+	dir$	#remtest			; More in typeahead?
+	movb	remios	,r5			; get the status of the read
+	call	iocheck				; and check for allowable errors
+23$:	bcs	100$				; fatal (likely was IE.DNR)
+
+	clr	r0				; m+ may have a lot ready to get
+	bisb	rtab+1,r0			; r0 = # in typeahead
+	beq	25$				; (no)
+	add	r0	,r3			; keep count of buffer
+	mov	r1,remtab+q.iopl		; Set address to drain into
+	mov	r0,remtab+q.iopl+2		; Set # to read to drain
+	dir$	#remtab				; Read 'em in
+;-	movb	remios	,r5			; get the status of the read
+;-	call	iocheck				; and check for allowable errors
+;-	bcs	100$				; fatal (likely was IE.DNR)
+
+25$:	cmp	r3	,#20			; Check for buffer fill limit 
+	ble	28$				; not yet
+	dir$	#remxoff			; Stop input please
+	mov	sp	,sentxof		; flag that we sent an XOFF
+
+28$:	dir$	#remread			; Re-issue input
+
+
+	.sbttl	RSX Connect code - Local Output
+	;
+	; Handle completion of output to local terminal
+	; and check for more output available
+	;
+30$:	bit	#em.lot,efbuf+0			; Check output flag
+	beq	40$				; (no, still busy)
+
+	tst	r3				; Anything to output
+	beq	40$				; no
+
+	mov	bufptr,locwrite+q.iopl		; Buffer to write
+	mov	r3,locwrite+q.iopl+2		; amount to write
+	dir$	#locwrite			; Start the output
+
+	bit	#log$co,trace			; Is logging enabled
+	beq	34$				; no
+	mov	bufptr,r1			; start of data
+32$:	calls	putc,<(r1)+,#lun.lo>		; put character
+	sob	r3,32$				; til count exhausted
+
+34$:	cmp	bufptr,#rembf1			; switch buffers
+	beq	36$
+	mov	#rembf1,bufptr
+	br	38$
+36$:	mov	#rembf2,bufptr
+38$:	clr	r3				; New buffer is empty
+
+	tst	sentxof				; skip if we never sent an
+	beq	39$				; xoff please
+	dir$	#remxon				; Start input if stopped
+	clr	sentxof				; no xoff's are active now
+39$:
+
+
+
+	.sbttl	RSX Connect code - Local Input
+	;
+	; Handle characters on outgoing (Local input) stream
+	;  do this without fast-drain (yet)
+	;
+40$:	bit	#em.loc,efbuf+0			; Anything typed locally?
+	beq	20$				; (no, loop back)
+
+	movb	locbf,r1			; r1 = just typed character
+	bic	#^C177,r1			; drop bit 7 if mark set (BDN)
+	cmpb	r1,conesc			; Console escape?
+	bne	50$				; (no)
+	tst	eseen				; Already seen one escape?
+	bne	60$				; (yes, send this one)
+	inc	eseen				; Yes, note it for now
+	br	70$				; And go read again
+
+50$:	tst	eseen				; Character following conesc?
+	beq	60$				; (no, send it)
+	call	concmd				; Yup, process it
+	clr	eseen				; clear the flag
+	tst	r0				; Exit CONNECT mode?
+	bgt	100$				; (yes, clean up etc.)
+	blt	70$				; no, but it was a command
+
+60$:	clr	eseen				; clear the flag
+	setpar	locbf	,locbf			; set correctr outgoing parity
+	dir$	#remwrite			; Transmit character to remote
+	tst	duplex				; ibm type things today?
+	beq	70$				; no
+	dir$	#locech				; need half duplex duplex ?
+70$:	dir$	#locread			; Re-issue local read
+	jmp	20$				; Loop back
+
+	.sbttl	RSX Connect code - Clean Up and Exit
+
+;
+; Exit CONNECT mode
+;
+100$:	call	rsxrst			; restore terminal settings
+	encp$s				;**ENABLE CHECKP**
+	return
+
+	
+
+rsxabo:	call	rsxrst			; called via requested exit
+	srex$s				; disable further exits
+	exit$s				; bye
+
+
+rsxrst:	qiow$s	#io.kil,#lun.ti,#ef.rem		; Kill incoming I/O
+	qiow$s	#io.kil,#lun.co,#ef.loc		; Kill incoming I/O
+	qiow$s	#sf.smc,#lun.ti,#ef.rem,,,,<#savti,#sizti>	; Restore lines
+	qiow$s	#sf.smc,#lun.co,#ef.loc,,,,<#savco,#2>
+	qiow$s	#sf.smc,#lun.ti,#ef.rem,,,,<#savti2,#sizti2>	;jfp
+	qiow$s	#io.det,#lun.ti,#ef.rem		; De-Attach remote line
+	return
+
+
+iocheck:mov	r0	,-(sp)		; insure this is saved
+	tstb	r5			; sucessesful read qio ?
+	bpl	180$			; yes
+	scan	r5	,#200$		; allowable error code ?
+	tst	r0			; well
+	bne	180$			; yes, let it through
+	neg	r5			; make > 0 for direrr macro
+	direrr	r5			; simple
+	sec				; failure, exit to command level
+	br	190$			; bye
+180$:	clc				; success, stay in connect code
+190$:
+	mov	(sp)+	,r0		; restore old r0 please
+	return
+
+200$:	.byte	IE.BCC	,IE.DAO	,IE.IES	,IE.NOD	,IE.PES	,IE.VER	,0
+	.even
+
+
+	global	<conesc	,ttcons	,ttname	,lun.co	,lun.ti>
+
+	.dsabl	lsb
+
+
+
+
+	.sbttl	dump i/o to a log file ?
+
+
+dumplo:	bit	#log$co	,trace		; is this enabled ?
+	beq	100$			; no
+	save	<r0>			; yes, save temps please
+	calls	putc,<r1,#lun.lo>	; thats it folks
+	unsave	<r0>
+100$:	return
+
+
+
+sxon:	tst	conflow
+	beq	100$
+	calls	binwri	,<#xon,#1,#lun.ti>
+100$:	return
+
+sxoff:	tst	conflow
+	beq	100$
+	calls	binwri	,<#xoff,#1,#lun.ti>
+100$:	return
+
+
+	.save
+	.psect	$pdata
+xon:	.byte	'Q&37
+xoff:	.byte	'S&37
+	.even
+	.restore
+
+
+
+	global	<lun.lo	,putcr0	,trace	,conflow>
+
+
+
+	.end

@@ -1,0 +1,136 @@
+
+>>>>> DB1:K11CDF.MAC[2,2] <<<<<
+
+$listl	==	6
+
+>>>>> DB1:K11E80.MAC[2,2] <<<<<
+
+	nodata	==	13.		; no data for terminal read
+	detkey	==	27.		; i/o to detached tt line
+pr$set	==	. - 2			; patchable out to a NOP
+..dirp	==	. - 2			; patch this via onlpat perhaps
+wtmask	==	0			; dummy definitions for event flags
+ef.co	==	0			; used under RSX
+ef.ti	==	0
+bit.co	==	0
+bit.ti	==	0
+sf.gmc	==	2560 
+sf.smc	==	2440 
+tc.fdx	==	64 
+tf.ral	==	10    
+tc.tbf	==	71    
+tc.slv	==	0
+tc.abd	==	0
+tc.dlu	==	0
+
+>>>>> DB1:K11M41.MAC[2,2] <<<<<
+
+	er.tmo	==	176		; for now, timeout
+	er.nod	==	177		; pseudo error for no data
+	nodata	==	er.nod
+
+>>>>> DB1:K11RMS.MAC[2,2] <<<<<
+
+sylen	==	. - sydisk
+sydska	==	sydisk
+sydskl	==	sylen
+
+>>>>> DB1:K11INI.MAC[2,2] <<<<<
+
+	.sparsz	==	13		; 10 parameters to send over
+
+>>>>> DB1:K11DAT.MAC[2,2] <<<<<
+
+filsiz	==	128.
+rwdata	==	.
+rwend	==	.
+rwsize	==	rwend-rwdata
+
+>>>>> DB1:K11RTE.MAC[2,2] <<<<<
+
+	er$cre	==	-1		; can't create a file
+	er$dev	==	-2		; invalid device name
+	er$eof	==	-3		; end of file
+	er$fnf	==	-4		; file not found
+	er$fnm	==	-5		; bad filename
+	er$ful	==	-6		; device full
+	er$nmf	==	-7		; no more files found
+	er$iop	==	-10		; invalid i/o request
+	er$sys	==	-11		; system error
+	er$lby	==	-12		; lun open
+	er$rer	==	-13		; read error
+	er$wer	==	-14		; write error
+	er$prv	==	-15		; protection error
+	er$rtb	==	-16		; record too big
+	er$que	==	-17		; no que elements
+	er$nin	==	-20		; no input for .mtget
+	er$nat	==	-21		; not attached for .mtxxxx
+	er$lun	==	-22		; non-existant lun for .mtxxxx
+	er$bsy	==	-23		; device not available
+	er$buf	==	-24		; invalid buffer for xm exec
+	er$sup	==	-25		; missing exec feature
+	er$map	==	-26		; terminal unit not initialized
+	er$spe	==	-27
+	er$sy1	==	-30
+	er$sy2	==	-31
+	er$sy3	==	-32
+	er$sy4	==	-33
+	er$vol	==	-34		; not an rt11 volume
+	er$nop	==	-35		; i/o channel not open
+	er$wld	==	-36		; no wildcard support
+	er$xco	==	-37		; could not access XC:/XL:
+	er$fun	==	-40		; invalid .spfun code
+	er$hrd	==	-41		; hard i/o error
+	er$fet	==	-42		; no room to load handler
+	maxerr	==	42		; must be abs(maxerr)
+	nodata	==	er$nin		; no data available
+
+
+>>>>> DB1:K11PAK.MAC[2,2] <<<<<
+
+	maxpak	==	94.		; maximum packet size-maxsize(checksum)
+	mx$try	==	10		; number of times to retry packet
+	myquote	==	'#		; quoting
+	mypad	==	0		; no padding
+	mypchar	==	0		; thus no pad character
+	myeol	==	cr		; end-of-line
+	mytime	==	12		; time me out after this
+	myqbin	==	'&		; 8 bit quoting
+	defchk	==	'1
+	mychkt	==	defchk		; normal checksumming
+	myrept	==	40		; no repeat counts
+	mycapa	==	capa.a		; i can receive attributes
+	maxtim	==	60		; maximum timeout
+	mintim	==	2		; minimum timeout
+	badchk	==	377		; psuedo packet type for checksum
+	timout	==	'T&137		; psuedo packet type for timeout
+	defdly	==	6		; delay for SENDING to start up
+	lun.kb	==	0		; assume if channel 0 --> terminal
+	lun.in	==	1		; channel for input files
+	lun.ou	==	2		; channel for output files
+	lun.lo	==	3		; channel for packet and file logging
+	lun.tr	==	3		; same as lun.log
+	lun.ta	==	4		; for the TAKE command
+	lun.tt	==	5		; for RSX, the normal TI: channel
+	lun.sr	==	6		; channel for $search for RMSv2.0
+	lun.ti	==	7		; channel number for connected terminal
+	lun.co	==	10		; used as is lin.ti for remote connect
+	lun.as	==	11		; used to attach to remote link device
+
+>>>>> DB1:K11RT4.MAC[2,2] <<<<<
+
+	errbyt	==	52
+	fb$stm	==	0
+	fb$var	==	0
+	fb$cr	==	0
+
+
+>>>>> DB1:K11CMD.MAC[2,2] <<<<<
+
+	baselev	==	2		; baseline level
+	edit	==	23.		; edit (independent of base_level)
+	release	==	'T&137		; T for test, V for release
+	cc$max	==	2
+	cmd$ab	==	-3
+	cmd$ex	==	-2
+	cmd$bad	==	-1

@@ -1,0 +1,2458 @@
+	.title	k11e80	kermit i/o for RSTS verison 8
+
+	.ident	/8.0.01/
+
+	.psect	$code	,ro,i,lcl,rel,con
+
+
+
+;	define macros and things we want for KERMIT-11
+
+	.include	/SY:[1,2]COMMON.MAC/
+	.iif ndf, xrb	, .error ; INCULDE for [1,2]COMMON.MAC failed
+
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.endc
+
+	.iif ndf, k11inc, .error ; INCLUDE for IN:K11MAC.MAC failed
+
+	.title	k11e80		; common.mac destroys our name
+
+
+
+;	Copyright (C) 1983,1984,1985 Change Software, Inc.
+;	
+;	
+;	This software is furnished under a license and may
+;	be  used  and  copied  only in accordance with the
+;	terms of such license and with  the  inclusion  of
+;	the  above copyright notice.  This software or any
+;	other copies thereof may not be provided or other-
+;	wise made available to any other person.  No title
+;	to and ownership of the software is hereby  trans-
+;	ferred.
+;	
+;	The information in this  software  is  subject  to
+;	change  without notice and should not be construed
+;	as a commitment by the author.
+;
+;
+
+	.sbttl	the entry points
+
+;	In all cases, R0 will have the returned error code (zero for success)
+;	For KBREAD and READ, R1 will have the size of the read
+;	For BINREAD,  R1 will have the character just read
+;
+;	The use of %LOC and %VAL are from VMS Pascal and Fortran.
+;	%LOC means ADDRESS, whereas %VAL means literal. All call
+;	formats assume the first argument is at 0(r5), the next
+;	at 2(r5) and so on, as in:
+;
+;	clr	-(sp)			; today's date by default
+;	mov	#datebf	,-(sp)		; where to put the converted string
+;	mov	sp	,r5		; call ASCDAT
+;	call	ascdat			; simple
+;	cmp	(sp)+	,(sp)+		; all done
+;
+;	or by using the CALLS macro (defined in K11MAC.MAC)
+;
+;	calls	ascdat	,<#datebf,#0>
+;
+;
+;	Any version of Kermit-11 which can not, due to the lack of
+;	executive  support,  implement a function should return an
+;	error of -1 in r0.  For instance,  RT11 does not have  any
+;	executive primitives to do wildcarding directory lookup.
+;
+;
+;
+;
+;	ASCDAT	( %loc buffer, %val datevalue )
+;	ASCTIM	( %loc buffer, %val timevalue )
+;	ASSDEV	( %loc device_name )
+;	BINREA	( %val lun, %val timeout )
+;	BINWRI	( %loc buffer, %val byte_count, %val lun )
+;	CANTYP	( %loc device_name, %val lun )
+;	CHKABO	( )
+;	DODIR	( %loc directory_string, %val lun )
+;	DRPPRV	( )
+;	DSKUSE	( %loc returned_string )
+;	ECHO	( %loc terminal_name )
+;	EXIT	( )
+;	GETPRV	( )
+;	GETUIC	( )
+;	GTTNAM	( %loc returned_ttname )
+;	KBREAD	( %loc buffer )
+;	L$PCRL	( )
+;	L$TTYO	( %loc buffer, %val bytecount )
+;	LOGOUT	( )
+;	NAMCVT	( %loc source_filename, %loc returned_normal_name )
+;	NOECHO	( %loc device_name, %val lun )
+;	QUOCHK	( )
+;	READ	( %loc buffer, %val buffer_length, %val lun, %val block_number )
+;	SETCC	( %loc control_c_ast_handler )
+;	SETSPD	( %loc device_name, %val speed )
+;	SUSPEN	( %val seconds, %val ticks )
+;	SYSERR	( %val error_number, %loc error_text_buffer )
+;	TTRFIN	( )
+;	TTRINI	( )
+;	TTSPEE	( %loc terminal_name )
+;	TTYDTR	( %loc terminal_name )
+;	TTYFIN	( %loc terminal_name, %val lun )
+;	TTYHAN	( %loc terminal_name )
+;	TTYINI	( %loc terminal_name, %val lun, %val open_flags )
+;	TTYPAR	( %loc terminal_name, %val parity_code )
+;	TTYRST	( %loc terminal_name )
+;	TTYSAV	( %loc terminal_name )
+;	TTYSET	( %loc terminal_name )
+;	WRITE	( %loc buffer, %val buffer_length, %val lun, %val block_number )
+;	XINIT	( )
+
+	.psect	buffer	,rw,d,lcl,rel,con
+lunsize	=	17
+lokahd:	.word	0			; /44/
+linit:	.blkw	20
+lpoint:	.blkw	20
+lsize:	.blkw	20
+lbuffer:.blkb	MAXLNG+<MAXLNG/10>	; /42/ Bigger for LONG PACKETS
+	.even
+ttsave:	.blkb	40*15
+bufqsav:.blkb	15
+	.even
+ver9.x::.word	0
+$xon:	.byte	'Q&37
+$off:	.byte	'S&37
+
+	ALSIZE	==	400
+	SDBSIZ	==	400
+
+$albuf:	.blkb	ALSIZE
+$phnum:	.blkb	60
+
+
+	global	<albuff,phnum>
+
+
+	.sbttl	edits
+
+
+;	05-Jan-84  14:34:01 BDN	Added  TT8BIT mode to line if no parity
+;				since the terminal driver always strips
+;				bit 7 even if the character is a delim.
+
+
+
+
+	.sbttl	macros
+
+	.macro	clrfqb
+	call	$clrfq
+	.endm	clrfqb
+
+	.macro	clrxrb
+	call	$clrxr
+	.endm	clrxrb
+
+
+	nodata	==	13.		; no data for terminal read
+	detkey	==	27.		; i/o to detached tt line
+
+	.psect	$code
+	.enabl	lsb
+
+xinit::	save	<r1>
+	call	rmsini			; /53/ Setup SST
+	call	getsys			; /58/ See if really RSTS
+	cmpb	r0	,#SY$RSTS	; /58/ Well?
+	beq	1$			; /58/ Its ok
+	MESSAGE	<This task image was linked for RSTS/E>,CR
+	mov	(pc)+	,-(sp)		; /58/ RSX exit
+	.byte	51.,1			; /58/ Code for EXIT$S
+	emt	377			; /58/ Do it
+1$:	mov	#$phnum	,phnum		; /51/
+	mov	#$albuf	,albuff		; /51/ Fill address in.
+	clrb	@phnum			; /51/ Clear
+	clr	@albuff			; /51/ Clear first word.
+	mov	#$cmdbuf,cmdbuf		; /53/ $CMDBUF defined in K11RMS
+	mov	#$argbuf,argbuf		; /53/ $ARGBUF defined in K11RMS
+	mov	sp	,infomsg	; /41/ msg displaying
+	mov	#doconn	,altcon		; /44/
+	clr	df$rat			; stream ascii please for RSTS?
+	movb	#fb$stm	,df$rfm		; say so and exit
+	mov	#ttsave	,r1		; initialize the terminal char
+	mov	#15	,r0		; save area now.
+10$:	movb	#377	,(r1)+		; the ttysave area is set up for
+	add	#40	,r1		; saving up to 15 (8) settings.
+	clrb	bufqsav(r0)		; /40/ clear old buffer quotas
+	sob	r0	,10$		; makes it easy to save via LUN
+	calls	l$fss	,<#kb>		; open terminal on LUN.AS
+	movb	#opnfq	,FIRQB+FQFUN	; to fix things up if using
+	movb	#lun.tt	,FIRQB+FQFIL	; it's global please
+	aslb	FIRQB+FQFIL		; times 2 please
+	CALFIP				; simple
+	movb	FIRQB	,r0		; it can't fail !!
+	beq	20$			; ok
+	direrr	r0			; oops
+20$:	call	inqv9			; /40/ global flag for version 9.x
+	bcs	40$			; /45/ Not version 9 or later
+	clrfqb				; /45/ V9, get the JOB type
+	movb	#UU.SYS	,FIRQB+FQFUN	; /45/ Job stats, part 3
+	movb	#2	,FIRQB+5	; /45/ Subfunction code
+	.UUO				; /45/ Do it please
+	mov	#proctype,r0		; /45/ Address of process_type
+	clr	(r0)			; /45/ Word sized
+	movb	FIRQB+20,(r0)		; /45/ Save our process type now
+	clr	jobtype			; /45/ Assume interactive
+	cmpb	(r0)	,#PRO$NET	; /45/ Is this a SET HOST job ?
+	beq	30$			; /45/ Yes, let it be INTERACTIVE
+	cmpb	(r0)	,#PRO$BAT	; /45/ Is this a BATCH job ?
+	bne	30$			; /45/ No, assume INTERACTIVE for now
+	mov	#JOB$BAT,jobtype	; /45/ Set BATCH access
+30$:					; /45/ Maybe more kinds in the future
+40$:	call	inqter			; /39/ get terminal type
+	movb	r0	,vttype		; /39/ same terminal type
+	cmp	jobtype	,#JOB$BAT	; /59/ Batch?
+	bne	50$			; /59/ No
+	clr	vttype			; /59/ Yes, dumb terminal
+	clr	blip			; /59/ No packet count updates
+50$:
+	clr	r0
+	unsave	<r1>
+	return
+
+	.save
+	.psect	$PDATA	,D
+kb:	.asciz	/_KB:/
+	.even
+	.restore
+	.dsabl	lsb
+
+	global	<lastli,lastcn>
+	global	<df$rat,df$rfm,fb$stm,getuic,lun.tt,vttype>
+	global	<infomsg,inqter>
+	global	<doconn,altcon,jobtyp,procty>	; /44/
+	global	<ARGBUF,CMDBUF,$ARGBUF,$CMDBUF>	; /53/
+	global	<RMSINI,GETSYS,BLIP>		; /53/
+
+	.assume	JOB$INT eq 0			; /45/
+
+
+	.sbttl	terminal initialization
+	.psect	$code
+
+
+;	T T Y I N I
+;
+;	ttyini( %loc device_name ,%val channel_number ,%val ccflag )
+;
+;
+;	input:	@r5	.asciz string of device name
+;		2(r5)	channel number
+;		4(r5)	bitfield for ter$cc and ter$bi
+;
+;			 if 4(r5) and ter$bi then use binary open
+;					     else use multiple delimiters
+;			 if 4(r5) and ter$cc then set control c as delimiter
+;			 if 4(r5) and ter$xo then allow binary mode with XON
+;
+;	output:	r0	error codes
+;
+;
+;	 Ttyini sets the  appropiate terminal characteristics  for
+;	the  device name  passsed and returns the  device open (or
+;	attached) on the passed logical unit.  Errors are returned
+;	in r0. For RSTS these could be the usual device not avail-
+;	able or missing monitor feature.
+;
+;	useful things to add: device check for terminal
+
+	.enabl	lsb
+
+ttyini::save	<r2>
+	clr	lokahd			; /44/ Clear lookahead
+	call	getprv			; will need for binary open
+	mov	2(r5)	,r2		; channel number
+	asl	r2			; times two
+	clr	lpoint(r2)		; clear offset into local buffer
+	clr	linit(r2)		; we have not set fast packet mode
+	clr	lsize(r2)		; we have not read anyting yet also
+	clrfqb				; insure FIRQB and xrb are cleared
+	clrxrb				; of undesirable defaults
+	mov	@r5	,r0		; get address of device string
+	tstb	@r0			; anything there ?
+	bne	10$			; yes
+	calls	l$fss	,<#kb>		; no, use _KB:
+	br	20$
+10$:	call	l$fss			; do the usual .FSS to parse
+20$:	tst	r0			; the device name
+	bne	100$			; oops
+	movb	#opnfq	,FIRQB+FQFUN	; open the device up now
+	movb	r2	,FIRQB+FQFIL
+	bit	#ter$bi	,4(r5)		; use straight binary mode today ?
+	beq	30$			; no
+	mov	#100001	,FIRQB+FQMODE	; yes
+	mov	#lun.tt	,binmod		; flag for i/o later on please
+	bit	#ter$xo	,4(r5)		; want xon/xoff to work normally ?
+	beq	30$			; no
+	bis	#40	,FIRQB+FQMODE	; yes, add the mode in please
+
+30$:	CALFIP				; get fip to do it
+	movb	FIRQB	,r0		; fail ?
+	bne	90$			; yes
+	bit	#ter$bi	,4(r5)		; use straight binary mode today ?
+	bne	50$			; yes
+	clr	r0			; assume control c's are ok
+	bit	#ter$cc	,4(r5)		; did the caller want to allow ^C
+	beq	40$			; yes
+	dec	r0			; no, make control C a delimiter
+	br	45$
+40$:	bit	#ter$pa	,4(r5)
+	beq	45$
+	inc	r0
+	mov	sp	,linit(r2)
+45$:	calls	setdlm	,<2(r5),r0>	; no, try to set up delimiter
+50$:	tst	r0			; did it work also
+	bne	80$			; no
+	call	initer			; yes, set the tty's characteristics
+	br	100$			; and exit (with errors in r0)
+80$:	cmpb	r0	,#102		; "missing special feature?"
+	bne	100$			; no
+	.print	#200$			; yes, make it reasonable
+90$:	clr	binmod			; open failed, clear binary flag
+100$:	call	drpprv			; no longer want privs please
+	unsave	<r2>
+	return
+
+	.save
+	.psect	$PDATA	,D
+	.enabl	lc
+200$:	.ascii	/? This copy of RSTS is missing the multiple private/<cr><lf>
+	.ascii	/delimiter SYSGEN option. Please include this option/<cr><lf>
+	.asciz	/in RSTS for KERMIT to function/<cr><lf>
+	.even
+	.restore
+	.dsabl	lsb
+
+
+
+
+	.sbttl	close up a terminal line
+
+
+ttyfin::save	<r1,r2,r3>
+	call	ttpars			; get unit number
+	mov	r0	,r3		; save it
+	movb	FIRQB	,r0		; check foor any errors from parse
+	bne	100$			; oops
+	calls	clrdlm	,<2(r5)>	; clear private delimiters
+	mov	2(r5)	,r0		; channel number
+	asl	r0			; times 2
+	clr	lsize(r0)		; nothing in packet buffer
+	clr	linit(r0)		; not using packet buffering now
+	clr	binmod			; nothing is binary anymore
+	clrfqb				; close the terminal
+	movb	#clsfq	,FIRQB+FQFUN	; fip subfunction for closing lun
+	movb	2(r5)	,FIRQB+FQFIL	; channel number
+	aslb	FIRQB+FQFIL		; times 2
+	CALFIP				; close it now
+	movb	FIRQB	,r0		; get any errors from close
+	bne	100$			; oops, just exit then
+	mov	2(r5)	,r1		; get the channel number
+	clrfqb				; /40/ insure no unpleasant effects
+	movb	#UU.TRM	,FIRQB+FQFUN	; /40/ uuo code for terminals
+	incb	FIRQB+4			; /40/ subfunction one
+	movb	r3	,FIRQB+5	; /40/ unit number or 377
+	movb	bufqsav(r1),FIRQB+27	; /40/ restore old buffer quotas
+	.UUO				; /40/ ignore errors
+	mul	#40	,r1		; offset into the TTSAVE area
+	add	#ttsave	,r1		; finally, the address of saved stuff
+	cmpb	@r1	,#377		; but is the saved stuff real ?
+	beq	100$			; no
+	mov	r1	,-(sp)		; yes, try to set terminal chars
+	mov	#FIRQB	,r2		; where to put the parameters
+	mov	#40	,r0		; number of bytes to copy
+10$:	movb	(r1)+	,(r2)+		; do a byte please
+	sob	r0	,10$		; next
+	clrb	FIRQB+4			; Version 9 fix here
+	bisb	FIRQB+36,FIRQB+20	; UU.TRM returns 8bit setting here
+	clr	FIRQB+36		; insure unused for future rsts/e?
+	movb	#UU.TRM	,FIRQB+FQFUN	; uuo subfunction for terminals
+	movb	r3	,FIRQB+5	; stuff the unit number in
+	.UUO				; try to do it
+	movb	FIRQB	,r0		; save any errors	
+	mov	(sp)+	,r1		; get the ttsave address back
+	movb	#377	,@r1		; mark as being invalid
+100$:	unsave	<r3,r2,r1>		; pop registers and exit
+	return
+
+
+	global	<binmod>
+
+
+
+
+	.sbttl	get terminal name
+
+;	G T T N A M
+;
+;	input:	@r5	address of 8 character buffer for terminal name
+;	output:		.asciz name of terminal
+
+gttnam::save	<r0,r1,r2>		; may as well save it
+	mov	@r5	,r2		; now return the name
+	movb	#'_	,(r2)+		; return _KBnn:
+	movb	#'K	,(r2)+		; return _KBnn:
+	movb	#'B	,(r2)+		; return _KBnn:
+	clrfqb				; assume defaults
+	movb	#UU.SYS	,FIRQB+FQFUN	; for a systat part one
+	.UUO				; simple
+	movb	FIRQB+5	,r1		; get the name
+	bmi	90$			; detached ?
+	clr	r0			; now compute the ascii name
+	div	#100.	,r0		; /19/ lots of terminals on system?
+	tst	r0			; /19/ ge kb100: ?
+	beq	10$			; /19/ no
+	add	#'0	,r0		; /19/ convert the 100's part of unit
+	movb	r0	,(r2)+		; /19/ and copy it please
+10$:	clr	r0			; /19/ get the low two digits please
+	div	#10.	,r0		; simple
+	add	#'0	,r0
+	add	#'0	,r1
+	movb	r0	,(r2)+
+	movb	r1	,(r2)+
+90$:	movb	#':	,(r2)+
+	clrb	@r2
+	unsave	<r2,r1,r0>
+	return
+	
+
+
+	.sbttl	set delimiter bitmask up please
+
+
+;	S E T D L M
+;
+;!	setdlm( %val channel_number )
+;
+;	input:	@r5	channel number to use
+;
+;	output:	r0	error code (would be missing sysgen feature)
+
+
+
+	.iif ndf, ttyhnd , ttyhnd = 2
+
+	global	<dlmmsk>
+
+	.save
+	.psect	$PDATA	,D
+
+pakmsk:	.byte	^B11110111
+	.byte	377
+	.byte	377
+	.byte	377
+	.rept	13
+	.byte	0
+	.endr
+	.rept	21
+	.byte	377
+	.endr
+
+dlmmsk:	.byte	^B11110111		; all chars except control C
+	.byte	^B11111111
+	.rept	36
+	.byte	377
+	.endr
+	.even
+
+dlmcc:	.rept	40
+	.byte	377
+	.endr
+	.even
+
+	.restore
+
+	.iif ndf,.spec	,.spec = emt + 14
+
+
+
+snoecho:mov	#xrb	,r0		; pointer to parameter block
+	mov	#3	,(r0)+		; function to disable echo
+	clr	(r0)+			; unused
+	clr	(r0)+			; unused
+	movb	2(sp)	,@r0		; channel number
+	aslb	(r0)+			; times 2
+	movb	#ttyhnd	,(r0)+		; driver index (ttdvr)
+	clr	(r0)+			; unused
+	clr	(r0)+			; unused
+	clr	(r0)+			; unused
+	.spec				; now do it
+	movb	FIRQB	,r0		; return any errors
+	mov	(sp)+	,(sp)		; pop arg list and exit
+	return				; exit
+
+
+setdlm::mov	@r5	,-(sp)
+	call	snoecho
+	mov	#xrb	,r0		; setup to set a private delim
+	mov	#11	,(r0)+		; mask now. function code is 11
+	mov	#40	,(r0)+		; for .spec, 40 byte to copy
+	mov	#dlmmsk	,(r0)+		; address of delimiter mask
+	tst	2(r5)			; allow control c's to come in
+	beq	10$
+	bmi	5$
+	mov	#pakmsk	,-2(r0)
+	br	10$
+5$:	 mov	#dlmcc	,-2(r0)
+10$:	movb	@r5	,@r0		; channel number
+	aslb	(r0)+			; times 2
+	movb	#ttyhnd	,(r0)+		; device driver index
+	clr	(r0)+			; default to console device
+	clr	(r0)+			; unused
+	mov	#1	,(r0)+		; subfunction SET DELIMITER
+	.spec				; and do it please
+	movb	FIRQB	,r0		; did it work ?
+	return
+
+
+
+
+clrdlm::
+	mov	#xrb	,r0		; point to it please
+	mov	#11	,(r0)+		; subfunction 
+	clr	(r0)+			; must be 0
+	clr	(r0)+			; also 0
+	movb	@r5	,@r0		; channel number please
+	aslb	(r0)+
+	movb	#ttyhnd	,(r0)+		; device driver to call
+	clr	(r0)+			; use channel number
+	clr	(r0)+			; must be zero
+	clr	(r0)+			; subfunction 0
+	.spec				; and call ttdvr
+100$:	return
+
+
+
+	.sbttl	special init for receiving files
+
+;	Due to what I would consider a RSTS terminal driver
+;	bug ( .ttddt isn't cleared if you do a read without
+;	wait and  there was  no data)  we have to call this
+;	before we receive any files from a remote kermit.
+
+	.save
+	.psect	$PDATA	,D
+
+xzmask:	.byte	^B00100010		; control E and A (/56/)
+	.byte	0
+	.byte	0
+	.byte	^B00000101		; control X and control Z please
+	.rept	34
+	.byte	0
+	.endr
+
+	.RESTORE
+
+ttrini::mov	#xrb	,r0		; setup to set a private delim
+	mov	#11	,(r0)+		; mask now. function code is 11
+	mov	#40	,(r0)+		; for .spec, 40 byte to copy
+	mov	#xzmask	,(r0)+		; address of delimiter mask
+	movb	#lun.tt	,@r0		; channel number
+	aslb	(r0)+			; times 2
+	movb	#ttyhnd	,(r0)+		; device driver index
+	clr	(r0)+			; default to console device
+	clr	(r0)+			; unused
+	mov	#1	,(r0)+		; subfunction SET DELIMITER
+	.spec				; and do it please
+	return
+
+
+ttrfin::calls	clrdlm	,<#lun.tt>
+	return
+
+
+
+
+	.sbttl	other things like echo off and on
+
+
+;	N O E C H O
+;
+;
+;	input:	@r5	terminal name or null or 0 for current terminal
+;	output:	r0	error code
+
+
+noecho::save	<r1>			; save a temp register
+	clr	r0			; assume our terminal
+	mov	@r5	,r1		; passed address of 0 or a null string?
+	beq	10$			; no address, assume _KB:
+	tstb	@r1			; null string passed ?
+	beq	10$			; yes, assume the console terminal
+	call	ttpars			; parse the terminal device name
+	bcs	90$			; oops
+	cmpb	r0	,#377		; own terminal ?
+	bne	10$			; no
+	call	myterm			; yes, get correct unit number then
+10$:	clrxrb				; insure no defaults
+	mov	#xrb	,r1		; point to the xrb now
+	mov	#3	,(r1)+		; disable function for .SPEC
+	mov	r0	,(r1)+		; terminal number or zero for _KB:
+	movb	#ttyhnd	,xrb+7		; and the device driver index please
+	.spec				; simple
+
+90$:	movb	FIRQB	,r0		; error, return it please
+100$:	unsave	<r1>			; pop the register we saved
+	return
+
+
+;	E C H O
+;
+;	input:	@r5	terminal name or null or 0 for current terminal
+;	output:	r0	error code
+
+
+echo::	save	<r1>			; save a temp register
+	clr	r0			; assume our terminal
+	mov	@r5	,r1		; passed address of 0 or a null string?
+	beq	10$			; no address, assume _KB:
+	tstb	@r1			; null string passed ?
+	beq	10$			; yes, assume the console terminal
+	call	ttpars			; parse the terminal device name
+	bcs	90$			; oops
+10$:	clrxrb				; insure no defaults
+	mov	#xrb	,r1		; point to the xrb now
+	mov	#2	,(r1)+		; enable echo function for .SPEC
+	mov	r0	,(r1)+		; terminal number or zero for _KB:
+	movb	#ttyhnd	,xrb+7		; and the device driver index please
+	.spec				; simple
+
+90$:	movb	FIRQB	,r0		; error, return it please
+100$:	unsave	<r1>			; pop the register we saved
+	return
+
+
+
+
+	.sbttl	write and read
+
+;	W R I T E
+;
+;!	write( %loc buffer, %val buffer_length, %val channel_number,
+;!	       %val block_number )
+;
+;
+;	input:	@r5	buffer address
+;		2(r5)	buffer length
+;		4(r5)	channel number
+;		6(r5)	block number
+;
+;	output:	r0	error code
+
+
+write::	mov	#xrb	,r0		; address of xrb parameter block
+	mov	2(r5)	,(r0)+		; buffer length
+	mov	2(r5)	,(r0)+		; byte count for the i/o
+	mov	@r5	,(r0)+		; address of the buffer
+	movb	4(r5)	,@r0		; channel number
+	aslb	(r0)+			; times 2
+	clrb	(r0)+			; unused
+	clr	(r0)+			; unused
+	clr	(r0)+			; unused
+	clr	(r0)+			; unused
+	mov	6(r5)	,xrb+xrblk	; forgot to stuff this one in
+	.WRITE
+	movb	FIRQB	,r0		; return error code and exit
+	return
+
+
+
+;	R E A D
+;
+;!	read( %loc buffer, %val buffer_length, %val channel_number,
+;!	       %val block_number )
+;
+;	input:	@r5	buffer address
+;		2(r5)	buffer length
+;		4(r5)	channel number
+;		6(r5)	block number
+;
+;	output:	r0	error code
+;		r1	byte count for read
+
+
+read::	mov	#xrb	,r0		; address of xrb parameter block
+	mov	2(r5)	,(r0)+		; buffer length
+	clr	(r0)+			; must be zero
+	mov	@r5	,(r0)+		; address of the buffer
+	movb	4(r5)	,@r0		; channel number
+	bne	10$			; /52/ Not Chan zero
+	.TTECH				; /52/ Chan zero, insure echo
+10$:	aslb	(r0)+			; times 2
+	clrb	(r0)+			; unused
+	clr	(r0)+			; unused
+	clr	(r0)+			; unused
+	clr	(r0)+			; unused
+	mov	6(r5)	,xrb+xrblk	; forgot to stuff this one in
+	.READ
+	clr	r1			; /36/ assume error
+	movb	FIRQB	,r0		; return error code and exit
+	bne	100$			; /36/ insure zero bytecount on error
+	mov	xrb+xrbc,r1
+100$:	return
+
+kbread::.TTECH
+	calls	read	,<@r5,#80.,#0,#0> ; do the actual read now
+	mov	r1	,-(sp)		; /36/ save byte count
+	add	@r5	,r1		; /36/ point to end to make it .asciz
+	clrb	@r1			; /36/ .asciz
+	mov	(sp)+	,r1		; /36/ restore length
+	return
+
+
+
+
+	.sbttl	terminal read/write binary mode
+
+
+;	B I N R E A
+;
+;!	binread( %val channel_number, %val timeout )
+;
+;
+;	input:	@r5	channel number
+;		2(r5)	timeout	(if -1, then no wait)
+;
+;	output:	r0	error
+;		r1	character read
+;
+;	assumptions:	the terminal has all characters set up
+;			as private delimeters
+;
+;
+;	BINREAD is called ONLY for packet reading.
+;	XBINREA is called for general single character data reading
+;
+;
+; /44/	If a packet reads gets ESC<letter>, where LETTER is in the
+;	range 100-137,  then we can safely assume that the version
+;	9 terminal driver did us the favor of converting a C1 char
+;	into the equivalent (?) escape sequence. What a hack!
+
+
+pakrea::
+binrea::tstb	lokahd+1		; /44/ Anything REALLY there?
+	bne	90$			; /44/ Yes, use it
+	call	doread			; /44/ Read next character
+	tst	r0			; /44/ Success?
+	bne	100$			; /44/ No, just exit with error
+	cmpb	r1	,#33		; /44/ Escape character?
+	bne	100$			; /44/ No, use it as is
+	call	doread			; /44/ Yes, look for char in 100..137
+	tst	r0			; /44/ Should always work
+	bne	95$			; /44/ But if not, return( '\033' )
+	cmpb	r1	,#100		; /44/ Is it in the range of \0100
+	blo	80$			; /44/ to \0137 ?
+	cmpb	r1	,#137		; /44/ Well ?
+	bhi	80$			; /44/ Yes, we can't control it then
+	bisb	#100	,r1		; /44/ In range, restore to CORRECT
+	br	100$			; /44/ format of CTL+0100
+
+80$:	incb	lokahd+1		; /44/ Invalid, set lookahead flag
+	movb	r1	,lokahd+0	; /44/ Save the data please
+	movb	#33	,r1		; /44/ Return( '\033' )
+	br	100$			; /44/ for next read and exit
+
+90$:	clr	r1			; /44/ Setup for lookahead data
+	bisb	lokahd	,r1		; /44/ Insert lookahead data
+95$:	clr	lokahd			; /44/ No more lookhahead data
+	clr	r0			; /44/ No errors
+100$:	return				; /44/ Exit
+
+
+
+	.sbttl	Really read next character in the buffer now
+doread:	save	<r2>			; save temp register
+5$:	mov	@r5	,r2		; get the channel number 
+	asl	r2			; times 2 for word addressing
+	tst	linit(r2)		; has this lun ever been set
+	beq	20$			; up for a partial delimiter mask?
+	tst	lsize(r2)		; yes, is there any data waiting?
+	bgt	10$			; yes, get whats already there
+	clr	lpoint(r2)		; no, clear the pointer
+	clr	lsize(r2)		; insure buffer size is zero
+	call	rget			; and read a record if possible
+	tst	r0			; if it fails, revert to 1 char
+	bne	100$			; i/o
+10$:	dec	lsize(r2)		; one less character in buffer
+	bmi	5$			; if < 0, nothig was read. do it again
+	mov	lpoint(r2),r0		; get the offset into the buffer
+	inc	lpoint(r2)		; and prime this for next time
+	clr	r1			; avoid pdp-11 sign extension
+	bisb	lbuffer(r0),r1		; get the character from the buffer
+	clr	r0			; no errors
+	br	100$			; and exit
+20$:	call	xbinrea			;
+100$:	unsave	<r2>			; pop temp register and exit
+	return				;
+
+rget:	mov	#xrb	,r0		; address of xrb parameter block
+	mov	#MAXLNG	,(r0)+		; /42/ buffer length
+	clr	(r0)+			; must be zero
+	mov	#lbuffer,(r0)+
+	movb	r2	,(r0)+		; channel number
+	bne	5$			; /52/ Not zero
+	.TTECH				; /52/ Zero, insure echoing
+5$:	clrb	(r0)+			; unused
+	clr	(r0)+			; unused
+	cmp	2(r5)	,#-1		; no wait ?
+	bne	10$			; no
+	 clr	(r0)+			; yes
+	 mov	#8192.	,(r0)+		; stuff return without wait in
+	 br	20$			; and do it
+10$:	mov	2(r5)	,(r0)+		; timeout
+	clr	(r0)+			; unused
+20$:	.READ
+	movb	FIRQB	,r0		; return error code and exit
+	beq	30$			; /45/ No errors
+	cmpb	r0	,#DETKEY	; /45/ I/O to detached Keyboard ?
+	bne	100$			; /45/ No
+	mov	#1	,XRB+0		; /45/ Yes, sleep a moment
+	.SLEEP				; /45/ ...
+	br	100$			; /45/ Exit
+30$:	mov	xrb+xrbc,lsize(r2)	; Read size, save it
+	clr	lpoint(r2)
+	add	#1	,rdrate+4	; /56/ Stats
+	bcs	40$			; /56/ Overflowed
+	add	lsize(r2),rdrate+2	; /56/ Count the data
+	adc	rdrate+0		; /56/ 32 bits worth
+	br	100$			; /56/ And exit
+40$:	clr	rdrate+0		; /56/ Overflow, so reset
+	clr	rdrate+2		; /56/ Overflow, so reset
+	clr	rdrate+4		; /56/ Overflow, so reset	
+100$:	return
+
+	global	<rdrate>		; /56/
+
+xbinre::mov	#xrb	,r0		; address of xrb parameter block
+	mov	#1	,(r0)+		; buffer length
+	clr	(r0)+			; must be zero
+	clr	-(sp)			; allocate buffer on the stack
+	mov	sp	,(r0)+		; address of the buffer
+	movb	@r5	,@r0		; channel number
+	bne	5$			; /52/ Not zero
+	.TTECH				; /52/ Zero, insure echoing
+5$:	aslb	(r0)+			; times 2
+	clrb	(r0)+			; unused
+	clr	(r0)+			; unused
+	cmp	2(r5)	,#-1		; no wait ?
+	bne	10$			; no
+	 clr	(r0)+			; yes
+	 mov	#8192.	,(r0)+		; stuff return without wait in
+	 br	20$			; and do it
+10$:	mov	2(r5)	,(r0)+		; timeout
+	clr	(r0)+			; unused
+20$:	.READ
+	movb	FIRQB	,r0		; return error code and exit
+	clr	r1
+	bisb	(sp)+	,r1
+	return
+
+
+;	Check for pending input on terminal (like ^X and ^Z)
+;	Note: .TTDDT should be cleared by TTDVR always. It's
+;	not, so for the time being lets forget about it  and
+;	instead setup ^X and ^Z as delimiters.  I would have
+;	preferred to use odt mode for this routine.
+
+
+chkabo::tst	jobtyp			; /45/ Can't do from batch
+	bne	110$			; /45/ Exit then
+	calls	xbinrea	,<#5,#-1>	; simple read on console terminal
+	tst	r0			; did it work ok ?
+	bne	100$			; no
+	mov	r1	,r0		; yes, return ch in r0 please
+	return
+100$:	cmpb	r0	,#11.		; error EOFEOF?
+	bne	110$			; no
+	movb	#'Z&37	,r0		; yes, return ^Z as the character
+	return
+110$:	clr	r0			; it failed
+	return
+
+	.assume	JOB$INT eq 0
+	.assume	JOB$BAT eq 1
+
+
+read1c::CLRXRB				; Insure XRB is zapped
+	.TTNCH				; No echo
+	.TTDDT				; One shot ODT mode
+	CLRXRB				; Insure XRB zapped
+	clr	-(sp)			; Allocate a buffer
+	mov	sp	,r1		; A pointer
+	mov	r1	,XRB+XRLOC	; Buffer address
+	inc	XRB+XRLEN		; One character size buffer
+	.READ				; Simple
+	clr	r0			; Return the character next
+	tstb	FIRQB			; Errors?
+	bne	100$			; Yes, return a NULL
+	tst	XRB+XRBC		; No data?????
+	beq	100$			; Should never happen.
+	bisb	@r1	,r0		; No, return the data then.
+100$:	tst	(sp)+			; Pop the buffer and exit
+	return				; Bye
+
+Wrtall::SAVE	<r0,r1,r2>		; Save registers
+	mov	2+6(sp)	,r2		; String address
+	STRLEN	r2			; Get the length
+	mov	#xrb	,r1		; address of xrb parameter block
+	mov	r0	,(r1)+		; buffer length
+	mov	r0	,(r1)+		; byte count for the i/o
+	mov	r2	,(r1)+		; address of the buffer
+	clr	(r1)+			; Channel zero
+	clr	(r1)+			; unused
+	clr	(r1)+			; unused
+	mov	#4096.	,(r1)+		; modifier (ie, io.wal+nostall)
+	.WRITE				; Do the WRITE
+	UNSAVE	<r2,r1,r0>		; Pop registers
+	mov	(sp)+	,(sp)		; Move return address up
+	return				; And exit
+
+
+	.sbttl	write everything to the communications line
+
+;	P A K W R I
+;
+;	input:	@r5	buffer address
+;		2(r5)	buffer size
+;		4(r5)	channel number
+;	output:	r0	error code
+;
+;	 Pakwrite(buffer,size,lun) attempts  to  write out the specified
+;	number of bytes in pass all  mode  to  the  line.  Additionally,
+;	NOSTALL  is  specified  the first time to allow us to detect the
+;	line being XOFF'ed. The side effect is  that  we  may  also  get
+;	returned  on  a  lack  of  small  buffers,  so  thus  we must be
+;	prepared to try again if that was the case. If we  are  XOFF'ed,
+;	which  is indicated by the 'bytes not sent' value being equal to
+;	the requested write size, then we force  an  XON  to  the  line.
+;	We also can get an XOFF via line noise in the middle of a packet
+;	thus we should also force an XOFF even for a partial write.
+;	 This  is messy, addtionally, it ALWAYS requires SYSIO priv even
+;	if you own the line. The code to do this always has  to  inquire
+;	about  the  unit number, which is currently only possible via an
+;	UU.FCB call. This is undesirable in the unlikely event that  the
+;	first  few  words of the terminal DDB get changed by DIGITAL. We
+;	could, of course, save the  unit  number  in  TTYINI  in  a  LUN
+;	indexed table, but that's conceptually unattractive.  Even if it
+;	does change,  the UU.FCB code is rarely called and not very dan-
+;	gerous if things change.
+;	
+;	 Ideally, we  need  a  .SPEC call to return XOFF'ed status and a
+;	.SPEC call to clear XOFF'ed status. The method used in  the  RSX
+;	based  Kermit-11  uses  a QIOW$S with a marktime in front of it,
+;	this if the mark time goes off we can  issue  an  IO.KIL,  clear
+;	the  xoffed  state  with  SF.SMC+IO.CTS,  and  redo  the QIOW$S.
+;	Again, the usefulness of MARK TIME and the equiv of IO.KIL comes
+;	to mind for RSTS/E, as noted before in the case of having a CTRL
+;	C ast routine being able to kill io requests on lines other than
+;	one's console terminal, which a control C always does.
+;	 Hopefully, a future  release of  RSTS/E  will  make  these task
+;	simpler.  At  such  time,  we would have to consider the case of
+;	older version of RSTS/E; I would simply  cut  the  current  code
+;	out  and let those user's not upgrading suffer; reverting to the
+;	old code in BINWRI (next page). 
+;	 Lately,  I seem to be turning my comments into essays about the
+;	deficiences a given exec may have.  RSTS developers, take heart,
+;	using the RSTS/E terminal  driver is a LOT more predictable than 
+;	than what you find on the various flavors of RSX.  I simply have
+;	spent a lot of time in the last couple of years with RT11,  RSX, 
+;	P/OS, TSX+ and VMS; they all have strong points and weaknesses.
+;	What one likes in one is rarely found in the other.
+
+
+	.sbttl	Now for the real packet writer (enough of the soapbox)
+
+pakwri::save	<r1,r2,r3>		; /45/ Save this please
+	mov	@r5	,r2		; /45/ Address of the write
+	mov	2(r5)	,r3		; /45/ Size of the write
+	mov	#8192.!4096.,r1		; /45/ First time modifier
+10$:	mov	#XRB	,r0		; /45/ Address of xrb parameter block
+	mov	r3	,(r0)+		; /45/ Buffer length
+	mov	r3	,(r0)+		; /45/ Byte count for the i/o
+	mov	r2	,(r0)+		; /45/ Address of the buffer
+	movb	4(r5)	,@r0		; /45/ Channel number
+	aslb	(r0)+			; /45/ Times 2
+	clrb	(r0)+			; /45/ Unused
+	clr	(r0)+			; /45/ Unused
+	clr	(r0)+			; /45/ Unused
+	mov	r1	,(r0)+		; /45/ Modifier (ie, io.wal+nostall)
+	.WRITE				; /45/ Really dump the data
+	movb	FIRQB	,r0		; /45/ return error code and exit
+	bne	100$			; /45/ Error, exit NOW
+	tst	XRB+XRBC		; /45/ Did EVERTHING get dumped ?
+	beq	100$			; /45/ Yes, exit with SUCCESS
+
+	bic	#8192.	,r1		; /45/ No more 'NO STALL' modes
+	mov	r3	,r0		; /45/ Get the old write size
+	sub	XRB+XRBC,r0		; /45/ And compute a new buffer addr
+	add	r0	,r2		; /45/ buffer = buffer + (size-left)
+	mov	XRB+XRBC,r3		; /45/ New write size
+					; /45/ Now try to XON the line
+	clrfqb				; /45/ Try a UU.FCB to get the unit
+	movb	#UU.FCB	,FIRQB+FQFUN	; /45/ number. While it's acknowledged
+	movb	4(r5)	,FIRQB+FQFIL	; /45/ that data strutures may change,
+	.UUO				; /45/ its unlikely that terminal DDB's
+	movb	FIRQB	,r0		; /45/ will change in the first few
+	bne	100$			; /45/ words.
+	mov	#XRB	,r0		; /45/ Point to the XRB now
+	mov	#5	,(r0)+		; /45/ Xoffed, try to clear the line
+	mov	#1	,(r0)+		; /45/ One byte, an XON, to force.
+	mov	#$xon	,(r0)+		; /45/ XRLOC, address of the buffer.
+	mov	#TTYHND*400,(r0)+	; /45/ Low byte unused, high=driveridx
+	movb	FIRQB+7	,(r0)+		; /45/ Unit number to force to
+	clrb	(r0)+			; /45/ Unused
+	clr	(r0)+			; /45/ Unused
+	clr	(r0)+			; /45/ Unused
+	.SPEC				; /45/ At last !
+	mov	#4	,XRB+0		; /45/ Take a short nap and then retry
+	.SLEEP				; /45/ Wait a moment.
+	br	10$			; /45/ Go back, stalled write this time
+
+100$:	unsave	<r3,r2,r1>
+	return
+
+
+
+
+
+;	B I N W R I
+;
+;	input:	@r5	buffer address
+;		2(r5)	buffer size
+;		4(r5)	channel number
+;	output:	r0	error code
+
+
+binwri::mov	#xrb	,r0		; address of xrb parameter block
+	mov	2(r5)	,(r0)+		; buffer length
+	mov	2(r5)	,(r0)+		; byte count for the i/o
+	mov	@r5	,(r0)+		; address of the buffer
+	movb	4(r5)	,@r0		; channel number
+	aslb	(r0)+			; times 2
+	clrb	(r0)+			; unused
+	clr	(r0)+			; unused
+	clr	(r0)+			; unused
+	mov	#4096.	,(r0)+		; modifier (ie, io.wal+nostall)
+	.WRITE
+	movb	FIRQB	,r0		; return error code and exit
+	return
+
+
+
+
+	.sbttl	do a filename string scan
+
+;	L $ F S S
+;
+;	input:	@r5	.asciz string of the device or filename
+;	output:	FIRQB	the usual
+;		r0	error code if any
+
+
+l$fss::	clrfqb
+l$fssx::mov	@r5	,r0		; get the filename address
+10$:	tstb	(r0)+			; and now get the length
+	bne	10$			; no null, keep going
+	sub	@r5	,r0		; now get the length
+	dec	r0			; which is off by one of course
+	mov	r0	,xrb+xrlen	; length of the string
+	mov	r0	,xrb+xrbc	; once again
+	mov	#xrb+xrloc,r0		; finish clearing out
+	mov	@r5	,(r0)+		; starting address of string
+	clr	(r0)+			; unused
+	clr	(r0)+			; unused
+	clr	(r0)+			; unused
+	clr	(r0)+			; unused
+	.FSS				; now do it please
+	movb	FIRQB	,r0		; return error
+	return
+
+	.assume	<xrb+xrlen+2> eq <xrb+xrbc>
+	.assume	<xrb+xrbc+2>  eq <xrb+xrloc>
+
+
+	.sbttl	normal i/o to the terminal
+
+;	S T T Y O U
+;
+;	input:	2(sp)	buffer address
+;		4(sp)	buffer length
+;	output:	'c' 	set on error
+;		'c'	clear on no error
+;
+;
+;	L $ T T Y O
+;
+;	l$ttyou( %loc buffer, %val string_length )
+;
+;	input:	@r5	buffer address
+;		2(r5)	buffer length
+
+
+l$ttyo::save	<r0,r1>			; save temps here please
+	mov	2(r5)	,r0		; string length
+	bne	20$			; length was passed
+	mov	@r5	,r0		; no length, assume .asciz
+10$:	tstb	(r0)+			; move along looking for a null
+	bne	10$			; none yet so far
+	sub	@r5	,r0		; get the length
+	dec	r0			; off by one
+20$:	mov	#xrb	,r1		; address of xrb parameter block
+	mov	r0	,(r1)+		; buffer length
+	mov	r0	,(r1)+		; byte count for the i/o
+	mov	@r5	,(r1)+		; address of the buffer
+	movb	binmod	,@r1		; perhaps we need to preserve
+	aslb	(r1)+			; binary i/o modes here
+	clrb	(r1)+			; unused	
+	clr	(r1)+			; unused
+	clr	(r1)+			; unused
+	clr	@r1			; unused
+	tst	binmod			; in binary mode?
+	bne	25$			; yes
+	mov	#40000	,@r1		; no, stuff xrmod with transparent mode
+25$:	.WRITE
+	cmpb	FIRQB	,#11		; i/o channel not open ?
+	bne	30$			; no, exit please
+
+	clr	binmod			; yes, clear the binary i/o lun
+	mov	#xrb	,r1		; address of xrb parameter block
+	mov	r0	,(r1)+		; buffer length
+	mov	r0	,(r1)+		; byte count for the i/o
+	mov	@r5	,(r1)+		; address of the buffer
+	clr	(r1)+			; unused	
+	clr	(r1)+			; unused
+	clr	(r1)+			; unused
+	mov	#40000	,(r1)+		; xrmod
+	.WRITE
+	
+
+30$:	unsave	<r1,r0>			; pop registers please
+	tstb	FIRQB			; any errors ?
+	bne	90$			; yes
+	clc				; no
+	return
+90$:	sec				; yes, set error flag and exit
+	return
+
+
+sttyou::mov	r5	,-(sp)
+	mov	sp	,r5
+	add	#4	,r5
+	call	l$ttyo
+	mov	(sp)+	,r5
+	return
+
+
+l$pcrl::MESSAGE
+	return
+
+
+	.sbttl	other junk
+
+$clrxr::save	<r0>
+	mov	#xrb	,r0
+10$:	clr	(r0)+
+	cmp	r0	,#xrb+14
+	blos	10$
+	unsave	<r0>
+	return
+
+
+
+$clrfq::save	<r0>
+	mov	#FIRQB	,r0
+10$:	clr	(r0)+
+	cmp	r0	,#FIRQB+36
+	blos	10$
+	unsave	<r0>
+	return
+
+
+
+	.sbttl	exit kermit and logout
+
+
+exit::	MESSAGE
+	clrxrb				; /55/ ensure xrb is clear first
+	.TTECH				; /55/
+	clrxrb				; ensure xrb is clear first
+	clrfqb				; this must be cleared out
+	.RTS				; try to go to users KBM
+	.EXIT				; failed, go to the system's DEFKBM
+
+;	Logout moved to K1180S /54/ 23-Aug-86  12:21:41
+
+
+
+
+	.sbttl	cantyp	cancel typeahead
+
+
+;	C A N T Y P
+;
+;	cantyp(%val channel_number)
+;
+;	input:	@r5	the device name to cancel typeahead on
+;		2(r5)	lun, for RSX compatibilty
+;
+;
+;	 Cantyp tries to dump all pending input on a given terminal
+;	line  by using  the normal  .spec call.   The documentation 
+;	states that the KB must not be open which I find a bit odd.
+;	It really should not make any difference. At any rate, call
+;	the routine before you open it.
+
+
+cantyp::save	<r1,r2>			; use r0 to point into xrb
+	call	ttpars			; parse the passed device name
+	bcs	90$			; the parse failed
+	mov	r0	,r2		; save the parsed unit number
+	sub	#40	,sp		; allocate a buffer for gttnam
+	mov	sp	,r1		; and a pointer to it please
+	calls	gttnam	,<r1>		; get the local terminal name
+	calls	ttpars	,<r1>		; parse the device name now
+	add	#40	,sp		; pop the local buffer
+	clr	-(sp)			; assume _KB: for now
+	cmpb	r0	,r2		; is the unit number the same as
+	beq	10$			; the console terminal ? if eq, Y
+	mov	r2	,@sp		; no, stuff the correct unit number
+10$:	mov	#xrb	,r1		; ok
+	mov	#7	,(r1)+		; functioncode := cancel_typeahead
+	mov	(sp)+	,(r1)+		; the kb number to use
+	clr	(r1)+			; not used
+	clrb	(r1)+			; no channel number today
+	movb	#2	,(r1)+		; driver index for terminals
+	clr	(r1)+			; not used
+	clr	(r1)+			; not used
+	clr	(r1)+			; not used
+	.spec				; do a driver special function now
+	mov	2(r5)	,r0
+	asl	r0
+	clr	lsize(r0)
+90$:	movb	FIRQB	,r0		; return any errors please
+100$:	unsave	<r2,r1>			; all done
+	return				; bye
+
+clrcns::CLRXRB				; Insure XRB is cleared
+	mov	#7	,XRB+XRLEN	; Cancel typeahead call
+	movb	#2	,XRB+XRBLKM	; Driver index
+	.SPEC				; Should be it
+	return				; Exit
+
+
+
+	.sbttl	get uic
+
+
+;	G E T U I C
+;
+;	input:	nothing
+;	output:	r0	current UIC/PPN of the user
+
+
+
+getuic::mov	#xrb	,r0		; clear xrb out first
+10$:	clrb	(r0)+			; simple
+	cmp	r0	,#xrb+15
+	blos	10$
+	.stat
+	mov	xrb+10	,r0		; return uic (ppn) in r0
+	return
+
+
+
+drpprv::mov	#jfsys	,xrb+0		; drop temp privs
+	.clear				; simple
+	return
+
+
+getprv::mov	#jfsys	,xrb+0		; get temp privs back please
+	.SET
+	return
+
+
+
+	.sbttl	suspend the job for a while
+
+;	S U S P E N
+;
+;	suspend(%val sleep_time)
+;
+;	input:	@r5	time to go away for
+
+
+suspen::mov	@r5	,xrb+0
+	bne	10$
+	inc	xrb+0
+10$:	.sleep
+	return
+
+
+	.sbttl	error text
+
+
+fcserr::
+fiperr::save	<r0,r1,r2>
+	mov	4(r5)	,r2		; r0 := addr( errtxt )
+	mov	@2(r5)	,r0
+	bgt	5$
+	neg	r0
+5$:	movb	r0	,@#FIRQB+fqerno	; movbe the error number .
+	movb	#errfq	,@#FIRQB+FQFUN	; set up for sys err call
+	CALFIP
+	mov	#28.	,r0		; error text length
+	mov	#FIRQB+fqerno	,r1	; r1 := addr( actual msg )
+10$:	movb	(r1)+	,(r2)+		; go and transfer the text
+	beq	20$			; did we find the end yet
+	sob	r0	,10$		; all thirty bytes  worth.
+20$:	clrb	@r2
+40$:	unsave	<r2,r1,r0>
+	return				; all done
+
+
+
+
+syserp::save	<r0>
+	mov	@r5	,r0
+	call	rmserp
+	MESSAGE
+	unsave	<r0>
+	return
+
+
+
+syserr::save	<r1>			; save a register
+	clr	-(sp)			; allocate variable for error #
+	mov	sp	,r1		; and point to it
+	mov	@r5	,@r1		; if errornumber > 0
+	bmi	10$			;  then
+	calls	fiperr	,<#2,r1,2(r5)>	;   call fiperr(num,text)
+	br	100$			;  else
+10$:	calls	rmserr	,<#2,r1,2(r5)>	;   call rmserr(num,text)
+100$:	tst	(sp)+
+	unsave	<r1>
+	return
+
+	global	<fiperr	,rmserp	,rmserr>
+
+
+
+
+	.sbttl	ttypar	set parity stuff for kermit
+
+
+;	T T Y P A R
+;
+;	ttypar( %loc terminal name, %val paritycode )
+;
+;	input:	@r5	address of terminal name
+;		2(r5)	parity code
+;	output:	r0	error code
+
+	.if ne	,0			; we don't need this anymore
+	.ift
+
+ttypar::call	ttpars			; get the terminal unit number
+	bcs	100$			; oops
+	clrfqb				; clear FIRQB out for defualts
+	inc	FIRQB+20		; assume no parity
+	cmpb	2(r5)	,#par$no	; really no parity ?
+	beq	10$			; yes
+	inc	FIRQB+20		; try next for even parity
+	cmpb	2(r5)	,#par$ev	; well ?
+	beq	10$			; yes
+	inc	FIRQB+20		; not NONE or EVEN --> ODD
+	cmpb	2(r5)	,#par$od	; must be
+	beq	10$			; yes
+	movb	#18.	,FIRQB		; no, return illegal sys usage
+	br	100$
+10$:	movb	r0	,FIRQB+5	; stuff the terminal unit number
+	movb	#UU.TRM	,FIRQB+FQFUN	; terminal call today
+	.UUO				; simple
+100$:	movb	FIRQB	,r0		; get any errors
+	return
+
+	.endc				; don't need hardware parity control
+
+chkpar::clr	r0
+	return
+
+
+
+
+	.sbttl	hangup a terminal, set dtr on a terminal
+
+
+;	T T Y H A N
+;
+;	ttyhan( %loc terminalname )
+;
+;	input:	@r5	address of the terminal name
+;	output:	r0	error code
+
+
+ttyhan::call	ttpars			; the usual, parse the device name
+	bcs	100$			; oops
+	clrfqb				; clear the FIRQB please
+	movb	#UU.HNG	,FIRQB+FQFUN	; terminal call today
+	movb	r0	,FIRQB+4	; unit number
+	movb	#1	,FIRQB+5	; do it asap
+	.UUO				; simple
+100$:	movb	FIRQB	,r0		; return error code and exit
+	return				; bye
+
+
+
+;	raise DTR on a terminal line
+;
+;	T T Y D T R
+;
+;	ttydtr( %loc terminalname )
+;
+;	input:	@r5	address of the terminal name
+;	output:	r0	error code
+
+
+ttydtr::call	ttpars			; the usual, parse the device name
+	bcs	100$			; oops
+	clrfqb				; clear the FIRQB please
+	movb	#UU.HNG	,FIRQB+FQFUN	; terminal call today
+	movb	r0	,FIRQB+4	; unit number
+	movb	#377	,FIRQB+5	; set dtr function
+	.UUO				; simple
+100$:	movb	FIRQB	,r0		; return error code and exit
+	return				; bye
+
+
+
+
+
+
+	.sbttl	inquire if DTR is up on a device
+
+;	INQDTR(ttname)
+;
+;	Find out if DTR is up.
+;
+;	 On RSTS/E, DTR is up if (1) Carrier detect is up or (2) Ring is up
+;	Thus,  to connect to a dialout modem,  some means  must be provided
+;	for the terminal driver to 'See' CD. This can be done from internal
+;	modem options, or one can cut CD and loop DTR to CD on the cpu side
+;	and use the Kermit-11 command SET DTR to get CD up. This routine is
+;	to return the current DTR status.  For RSX, it would be more useful
+;	to return TRUE if TC.DLU==2 or TRUE if CD is up.
+;
+;	Returns:	1	DTR is present
+;			0	DTR is NOT present
+;			-1	Line is not modem controlled
+;
+;	18-Dec-85  09:16:08 BDN
+
+	.iif ndf, UU.CFG, UU.CFG = 42	; So this builds on version 8 systems
+
+inqdtr::tst	ver9.x			; /40/ only works on 9.0 or later
+	beq	90$			; /40/ if so, return(-1)
+	call	ttpars			; /40/ get device unit number
+	tstb	FIRQB			; /40/ Was parse successful?
+	bne	90$			; /40/ No, return(-1)
+	clrfqb				; /40/ clear firqb out please
+	movb	#UU.CFG	,FIRQB+FQFUN	; /40/ Find out if line has Modem ctl
+	mov	#"KB	,FIRQB+FQDEV	; /40/ Always a KB: device please
+	movb	r0	,FIRQB+FQDEVN	; /40/ Unit number please
+	movb	#377	,FIRQB+FQDEVN+1	; /40/ Unit number is 'real'
+	.UUO				; /40/ do it
+	tstb	FIRQB			; /40/ If failure, return(nomodem)
+	bne	90$			; /40/ Failed
+	bitb	#4	,FIRQB+7	; /40/ If set, the line is modem ctl
+	beq	90$			; /40/ No modem control, return(-1)
+	clrfqb				; /40/ We have modem control, what
+	movb	#UU.TRM	,FIRQB+FQFUN	; /40/ about DTR being around ?
+	movb	r0	,FIRQB+5	; /40/ Unit number here this time
+	.UUO				; /40/ get tt characteristics, part 1
+	tstb	FIRQB			; /40/ Can't fail
+	bne	90$			; /40/ But it did ?
+	bitb	#200	,FIRQB+4	; /40/ At last, is DTR up ?
+	bne	80$			; /40/ No, return(0)
+	mov	#1	,r0		; /40/ Yes, return(1)
+	br	100$			; /40/ Exit
+
+80$:	clr	r0			; /40/ Modem line and no DTR
+	br	100$			; /40/ exit
+90$:	mov	#-1	,r0		; /40/ Not modem or pre 9.x system
+100$:	return
+
+
+inqbuf::mov	#maxpak	,r0		; /42/ Assume pre RSTS v9
+	tst	ver9.x			; /42/ 9.X with huge buffer quotas?
+	beq	100$			; /42/ No
+	mov	#MAXLNG	,r0		; /42/ Yes, return the MAX size
+100$:	return				; /42/ exit
+
+	global	<maxpak>		; /42/
+
+
+inqpar::clr	r0
+	return
+
+
+
+	.sbttl	ttspeed	get speed for line
+
+
+;	T T S P E E D
+;
+;	input:	@r5	name of terminal or address of null for current
+;	output:	r0	current speed
+;
+
+	.save
+	.psect	$pdata
+
+ttdevl:	.asciz	/KLDCDLDEPKDJDHDZVH/
+	.even
+splst:	.word	dlalst,dclst,dlclst,dlelst,pklst,djlst,dhlst,dzlst,dhvlst
+	.word	10$,10$,10$,10$,10$,10$
+10$:	.word	0,0
+dlalst:	.word	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+dclst:	.word	-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
+dlclst:	.word	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-1
+dlelst:	.word	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-1
+pklst:	.word	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-1
+djlst:	.word	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-1
+dhlst:	.word	0., 50.,75.,110.,134.,150.,200.,300., 600.
+	.word	1200.,1800.,2400.,4800.,9600.,0.,0,-1
+dzlst:	.word	0., 50.,75.,110.,134.,150.,300.,600.,1200.
+	.word	1800.,2000.,2400.,3600.,4800.,7200.,9600.,-1
+dhvlst:	.word	 0,  75.,110.,134.,150.,300.,600.,1200.
+	.word	1800.,2000.,2400.,4800.,0    ,9600.,19200.,-1
+	.restore
+
+ttspee::save	<r1>
+	call	ttpars			; parse the device name
+	bcs	90$			; exit
+	clrfqb				; insure no changes to tty settings
+	movb	#UU.TRM	,FIRQB+FQFUN	; uuo code to do it
+	movb	r0	,FIRQB+5	; unit number
+	.UUO				; get terminal characteristics
+	tstb	FIRQB			; did it work ?
+	bne	90$			; no
+	movb	FIRQB+24,r1		; interface type
+	mov	splst(r1),r0		; /40/ is the speed settable?
+	tst	2(r0)			; /40/ second entry is always <> 0
+	beq	90$			; /40/ not settable
+	movb	FIRQB+17,r0		; get the speed of it
+	dec	r0
+	asl	r0			; times 2
+	add	splst(r1),r0		; and the actual speed now
+	mov	@r0	,r0		; got it
+	br	100$			; exit
+90$:	clr	r0
+100$:	unsave	<r1>
+	return
+
+
+
+
+
+
+	.sbttl	set the speed of a terminal line
+
+
+
+;	S E T S P D
+;
+;	setspd(%loc devicename, %val speed)
+;
+;	input:	@r5	device name
+;		2(r5)	speed
+;	output:	r0	error code, 255 if invalid speed
+
+setspd::save	<r1,r2>
+	call	ttpars			; parse the terminal name
+	bcs	90$			; oops
+	clrfqb
+	movb	#UU.TRM	,FIRQB+FQFUN	; uuo code to do it
+	movb	r0	,FIRQB+5	; unit number
+	.UUO				; get terminal characteristics
+	tstb	FIRQB			; did it work ?
+	bne	90$			; no
+	movb	FIRQB+24,r1		; interface type
+	mov	splst(r1),r1		; point to the speed table for it
+	clr	r2			; current index
+10$:	cmp	@r1	,#-1		; reached the end of the table
+	beq	80$			; yes, can't set the speed
+	inc	r2			; speednum := succ( speednum )
+	cmp	2(r5)	,(r1)+		; speed match ?
+	bne	10$			; no
+	clrfqb				; clear FIRQB out please
+	movb	#UU.TRM	,FIRQB+FQFUN	; uuo function for terminals
+	movb	r0	,FIRQB+5	; unit number
+	movb	r2	,FIRQB+17	; rec speed
+	movb	r2	,FIRQB+21	; xmit speed
+	.UUO				; do it
+	tstb	FIRQB			; error ?
+	bne	90$			; yes
+	clr	r0			; no
+	br	100$			; exit
+
+80$:	mov	#377	,r0		; unknown speed or not settable
+	br	100$			; exit
+
+90$:	movb	FIRQB	,r0		; uuo error, return it please
+100$:	unsave	<r2,r1>			; bye
+	return
+
+
+
+
+	.sbttl	INITER	save and set the terminal characteristics
+
+;	ttysav( %loc ttname)
+;	ttyrst()
+;
+;	output:	r0	error code
+
+ttysav::
+ttyrst::
+ttyset::clr	r0
+	return
+
+
+
+;	INITER
+;
+;	Passed:	0(r5)	Address of terminal name
+;		2(r5)	Channel number to be used on
+;	Return:	r0	error code
+;
+;	INITER is called ONLY internally from TTYINI()
+
+
+initer:	save	<r1,r2,r3>
+	call	ttpars			; set terminal up for KERMIT
+	bcs	90$			; oops, bad device name
+	mov	2(r5)	,r1		; /40/ get the channel number please
+	tst	ver9.x			; /40/ version 9.x or later?
+	beq	4$			; /40/ no
+
+	clrb	bufqsav(r1)		; /40/ assume nothing saved for quota
+	clrfqb				; /40/ insure no unpleasant effects
+	movb	#UU.TRM	,FIRQB+FQFUN	; /40/ uuo code for terminals
+	incb	FIRQB+4			; /40/ UU.TRM part two
+	movb	r0	,FIRQB+5	; /40/ unit number or 377
+	.UUO				; /40/ get the current settings
+	tstb	FIRQB			; /40/ did the set list work ?
+	bne	4$			; /40/ should have
+	movb	FIRQB+27,bufqsav(r1)	; /40/ save old buffer quotas
+	clrfqb				; /40/ insure no unpleasant effects
+	movb	#UU.TRM	,FIRQB+FQFUN	; /40/ uuo code for terminals
+	incb	FIRQB+4			; /40/ subfunction one
+	movb	r0	,FIRQB+5	; /40/ unit number or 377
+..BUFQ	== . + 2			; /46/ Patchable
+	movb	#40.	,FIRQB+27	; /40/ raise buffer quotas now
+	.UUO				; /40/ ignore errors
+
+4$:	clrfqb				; insure no unpleasant effects
+	movb	#UU.TRM	,FIRQB+FQFUN	; uuo code for terminals
+	movb	r0	,FIRQB+5	; unit number or 377
+	.UUO				; get the current settings
+	tstb	FIRQB			; did the set list work ?
+	bne	90$			; no, die
+	mov	2(r5)	,r1		; get the channel number please
+	mul	#40	,r1		; get address of ttsave area for it
+	add	#ttsave	,r1		; at last
+	mov	#FIRQB	,r2		; get address of current settings
+	mov	#40	,r3		; number of bytes to copy now
+5$:	movb	(r2)+	,(r1)+		; copy a byte
+	sob	r3	,5$		; next please
+	clr	r1			; get the parity/8bit setting
+	bisb	FIRQB+20,r1		; and check for parity being set
+	bic	#^C3	,r1		; leave only parity bits here
+	cmpb	r1	,#1		; parity set ?
+	bhi	7$			; /36/ yes, can't set 8bit mode then
+	tstb	parity			; /36/ If software parity enabled
+	beq	6$			; /36/ then we must prevent TTDVR
+	cmpb	parity	,#PAR$NO	; /36/ from changing characters in
+	bne	7$			; /36/ range 201-237 into esc seqs.
+6$:	movb	#30	,r1		; no parity so please set 8bit mode
+	br	10$			; /36/
+7$:	bisb	#20	,r1		; /36/ explicitly turn 8bit mode off
+10$:	clrfqb				; now actually set it
+	movb	#UU.TRM	,FIRQB+FQFUN	; uuo code for terminals
+	movb	r0	,FIRQB+5	; unit number or 377
+	movb	#377	,FIRQB+12	; SET XON
+	movb	#377	,FIRQB+35	; SET GAG
+	movb	r1	,FIRQB+20	; SET 8BIT
+	movb	#200	,FIRQB+11	; SET LC OUTPUT
+	movb	#377	,FIRQB+15	; SET LC INPUT
+	movb	#200	,FIRQB+30	; insure no delimiters are set now
+	cmpb	handch	,#'Q&37		; This is a pain. We have to use
+	beq	15$			; multiple delims cause bin mode
+	cmpb	handch	,#'S&37		; perhaps XON also ?
+	bne	20$			; no
+15$:	movb	#200	,FIRQB+22	; timeouts don't work and xon's
+					; don't get thru unless stall is off
+20$:	
+	.UUO				; go get RSTS's attention
+90$:	movb	FIRQB	,r0		; return possible errors
+	unsave	<r3,r2,r1>
+	return
+
+	global	<handch	,parity	,ttname>
+
+
+
+
+	.sbttl	ttpars	get unit number from ttname
+
+;	T T P A R S
+;
+;	ttpars( %loc ttname )
+;
+;	output:	r0	unit number or 377 for null string
+
+	.enabl	lsb
+
+ttpars::save	<r1>
+	call	myterm			; get attached console name
+	movb	r0	,r1		; get the name
+	clrfqb				; no defaults
+	clrxrb
+	mov	#377	,-(sp)		; assume KB:
+	mov	@r5	,r0		; address of terminal name
+10$:	tstb	(r0)+			; get the length of the name
+	bne	10$			; until we find a NULL
+	sub	@r5	,r0		; get the length
+	dec	r0			; if zero, then use 377 for unit
+	beq	20$			; use zero
+	mov	r0	,xrb+xrlen	; length of string for .FSS
+	mov	r0	,xrb+xrbc	; again
+	mov	@r5	,xrb+xrloc	; address of the string to parse
+	.FSS				; and do it
+	tstb	FIRQB			; did it work ?
+	bne	90$			; no
+	bit	#20000!40000,xrb+10	; a device name was parsed ?
+	beq	80$			; no
+	movb	xrb+14,	r0		; get the driver index please
+	scan	r0	,#200$		; a reasonable device name?
+	tst	r0			; well ?
+	beq	80$			; no
+	cmpb	FIRQB+FQDEVN,r1		; same device as controlling terminal?
+	beq	20$			; yes
+	movb	FIRQB+FQDEVN,@sp	; yes, save unit number
+	bne	20$
+	movb	#377	,@sp		; no unit, return 377 for self
+20$:	clc				; flag success
+	br	100$			; and exit
+
+80$:	movb	#6	,FIRQB		; invlaid device name error
+90$:	sec				; flag failure
+100$:	mov	(sp)+	,r0
+	unsave	<r1>
+	return
+
+
+	.iif ndf, ttyhnd, ttyhnd = 2
+	.iif ndf, pkbhnd, pkbhnd = 20
+	.iif ndf, dmchnd, dmchnd = 30
+	.iif ndf, dmphnd, dmphnd = 46
+
+	.save
+	.psect	$PDATA	,D
+200$:	.byte	ttyhnd	,pkbhnd	,dmchnd	,dmphnd	,0
+	.even
+	.restore
+	.dsabl	lsb
+
+myterm:	clrfqb
+	movb	#UU.SYS	,FIRQB+FQFUN	; for a systat part one
+	.UUO				; simple
+	movb	FIRQB+5	,r0		; get the name
+	return
+
+
+
+	.sbttl	assign device
+	.enabl	lsb
+
+;	Assign the device for SET LINE. Device characteristics are
+;	set in TTYINI and reset in TTYFIN. For edit /41/, check to
+;	be sure that the JOB privilege mask includes HWCFG,  which
+;	is needed to alter settings on other terminal lines (9.x).
+
+	.iif ndf , PRVIOL,	PRVIOL = 12
+
+assdev::mov	r1	,-(sp)		; /41/
+	call	ttpars			; parse the terminal name
+	bcs	100$			; oops
+	cmpb	r0	,#377		; Return KB: ?
+	bne	10$			; no
+	clr	r0			; Yes, simply return
+	br	110$			; exit
+10$:	mov	r0	,r1		; /41/ save unit number
+	tst	ver9.x			; /45/ What if this is version 8?
+	beq	20$			; /45/ If so, don't try this out.
+	mov	#HWCFG	,-(sp)		; /41/ See if we have JOB privs
+	call	jobprv			; /41/ Well?
+	tst	r0			; /41/ 1 == success
+	beq	90$			; /41/ No
+20$:	clrfqb				; A Real LINE today
+	movb	#UU.ASS	,FIRQB+FQFUN	; Assign the device please
+	mov	#FIRQB+FQDEV,r0		; Where to place the device name
+	movb	#'K	,(r0)+		; name
+	movb	#'B	,(r0)+		; ..name continued (Always KBnn:)
+	movb	r1	,(r0)+		; unit
+	movb	#377	,@r0		; Unit is 'real'
+	.UUO				; get RSTS/E to do the assignment
+	br	100$			; exit with error in FIRQB+0
+90$:	message	<You lack the HWCFG privilege to assign a line>,cr
+	mov	#PRVIOL	,FIRQB		; /41/
+100$:	movb	FIRQB	,r0		; Return the error code please
+110$:	mov	(sp)+	,r1		; /41/ Restore register please
+	return				; exit
+
+	.dsabl	lsb
+
+	.save
+	.psect	$PDATA
+hwcfg:	.asciz	/HWCFG/
+	.even
+	.restore
+
+
+
+
+	.sbttl	ascdat	get the ascii string for the date
+
+;	A S C D A T
+;
+;	input:	@r5	buffer address
+;		2(r5)	date in system internal format
+
+
+ascdat::save	<r0,r1>
+	clrfqb				; clear the FIRQB out first
+	mov	2(r5)	,FIRQB+4	; where to pass the date
+	movb	#UU.CNV	,FIRQB+FQFUN	; simple
+	inc	FIRQB+6			; KERMIT uses ISO date formats
+	.UUO				; get RSTS to convert the date
+	clrb	FIRQB+22		; insure .asciz
+	mov	#FIRQB+10,r0		; where RSTS put the date
+	mov	@r5	,r1		; where we want to put it
+10$:	movb	(r0)+	,(r1)+		; simple
+	bne	10$			; copy until a null byte is found
+	unsave	<r1,r0>			; pop temps and exit
+	return
+
+
+
+
+
+
+;	A S C T I M
+;
+;	input:	@r5	buffer address
+;		2(r5)	time in system internal format
+
+
+asctim::save	<r0,r1>
+	clrfqb				; clear the FIRQB out first
+	mov	2(r5)	,FIRQB+22	; where to pass the time
+	movb	#UU.CNV	,FIRQB+FQFUN	; simple
+	inc	FIRQB+24		; KERMIT uses ISO time formats
+	.UUO				; get RSTS to convert the time
+	clrb	FIRQB+36		; insure .asciz
+	mov	#FIRQB+26,r0		; where RSTS put the time
+	mov	@r5	,r1		; where we want to put it
+10$:	movb	(r0)+	,(r1)+		; simple
+	bne	10$			; copy until a null byte is found
+	unsave	<r1,r0>			; pop temps and exit
+	return
+
+
+	.sbttl	dodir	get a reasonable directory printed
+
+
+;	D O D I R
+;
+;	input:	@r5	wildcarded filespec
+;	output:	r0	error code
+;
+;	DODIR prints a directory listing at the local terminal.
+;
+;
+;	S D O D I R
+;
+;	Passed:	@r5	wildcarded name
+;	Return:	r0	error code, zero for no errors
+;		r1	next character in the directory listing
+;
+;	SDODIR is called by the server to respond to a remote directory
+;	command.  Instead of the pre 2.38 method of dumping output to a
+;	disk file and then sending the disk file in an extended replay,
+;	SDODIR  returns the next  character so that  BUFFIL can use it.
+;	The routine  GETCR0  is actually a dispatch routine to call the
+;	currently selected GET_NEXT_CHARACTER routine.
+
+
+
+
+	.save
+	.psect	dirctx	,rw,d,lcl,rel,con
+dirnam:	.blkb	120
+dirfir:	.blkb	42
+dirbuf:	.blkb	60
+diridx:	.word	0
+dirptr:	.word	dirbuf
+dcrlf:	.byte	15,12,0
+	.even
+	.restore
+
+
+dodir::	save	<r1,r2,r3,r4>
+	strcpy	#dirnam	,@r5
+	call	dirini			; init things
+	bcs	100$			; error in the .FSS parse
+10$:	call	dirnex			; get the next file
+	bcs	100$			; all done
+	.print	#dirbuf
+	br	10$
+100$:	unsave	<r4,r3,r2,r1>
+	clr	diridx
+	return
+
+
+sdirin::strcpy	#dirnam	,@r5		; copy name over
+	clr	diridx			; ditto
+	call	dirini			; init for calls to sdodir
+	bcs	100$
+	mov	#dirbuf	,dirptr		; yes, init pointers please
+	clrb	@dirptr			; yes, zap the buffer
+	call	dirnex			; preload buffer
+100$:	return
+
+sdodir::save	<r2,r3,r4>
+10$:	movb	@dirptr	,r1		; get the next character please
+	bne	20$			; something was there
+	mov	#dirbuf	,dirptr		; reset the pointer
+	clrb	@dirptr			; yes, zap the buffer
+	call	dirnex			; empty buffer, load with next file
+	bcs	90$			; no more, return ER$EOF
+	br	10$			; and try again
+20$:	inc	dirptr			; pointer++
+	clr	r0			; no errors
+	br	100$			; exit
+90$:	mov	#ER$EOF	,r0		; failure, return(EOF)
+95$:	clr	r1			; return no data also
+	clr	diridx			; init for next time through
+100$:	unsave	<r4,r3,r2>
+	return
+	
+
+
+	global	<defdir,ER$EOF>
+
+
+
+	.sbttl	init for the directory
+
+
+dirini:	clr	diridx			; /38/
+	mov	#dirnam	,r2		; string address
+	tstb	@r2			; a null string ?
+	bne	10$			; no
+5$:	mov	#wild	,r2		; yes, supply *.*
+10$:	calls	l$fss	,<#defdir>	; stuff FIRQB with defaults
+	calls	l$fssx	,<r2>		; parse the string with defaults
+	tst	r0			; did it work ?
+	bne	90$			; no
+	bit	#1	,xrb+10		; was some kind of filename passed?
+	bne	20$			; yes
+	mov	#134745	,FIRQB+FQNAM1+0	; no, insert *
+	mov	#134745	,FIRQB+FQNAM1+2	; no, insert *
+
+20$:	bit	#20	,xrb+10		; was a non-null extension passed ?
+	bne	40$			; yes
+	bit	#10	,xrb+10		; no extension, was the extension an
+	bne	40$			; explicit null (ie, abcdef.) ?
+	mov	#134745	,FIRQB+FQNAM1+4	; no, stuff .* into the filespec
+
+40$:	mov	#dirfir	,r4		; save the FIRQB save area pointer
+	mov	#FIRQB	,r3		; and a pointer to the FIRQB itself
+	mov	#40	,r0		; number of bytes to copy
+50$:	movb	(r3)+	,(r4)+		; simple
+	sob	r0	,50$		; all done saving the FIRQB
+	clc				; success
+	br	100$			; bye
+
+90$:	sec				; failure
+100$:	return				; bye
+
+	global	<getuic>
+
+
+	.sbttl	more routines for dodir
+
+
+dircvt:	save	<r0,r1,r2>
+	mov	r3	,-(sp)		; save the pointer please
+	mov	#FIRQB+FQNAM1,r2	; first three characters of filename
+	calls	rdtoa	,<r3,(r2)+>	; convert it
+	add	#3	,r3		; and fix the pointer up
+	calls	rdtoa	,<r3,(r2)+>	; convert it
+	add	#3	,r3		; and fix the pointer up
+	movb	#'.	,(r3)+		; stuff a dot in please
+	calls	rdtoa	,<r3,(r2)+>	; convert it
+	add	#3	,r3		; bump the pointer along please
+	movb	#40	,(r3)+		; some spaces
+	movb	#40	,(r3)+		; some spaces
+	mov	FIRQB+16,r0		; the file size
+	deccvt	r0,r3,#6		; convert it to ascii
+	add	#6	,r3		; point past the number now
+	movb	#40	,(r3)+		; some spaces
+	movb	#40	,(r3)+		; some spaces
+	mov	FIRQB+24,r2		; save the date of creation
+	calls	asctim	,<r3,FIRQB+26>	; convert the time
+	mov	(sp)	,r3
+	strlen	r3			; get the current length
+	add	r0	,r3		; and point to the new end of it
+	calls	ascdat	,<r3,r2>	; and get the date
+	strcat	r3	,#dcrlf		; append crlf
+	mov	(sp)+	,r3		; point back to the string
+	unsave	<r2,r1,r0>
+	return
+	
+
+dirnex:	mov	#dirfir	,r4		;
+	mov	#FIRQB	,r3		; and a pointer to the FIRQB itself
+	mov	#40	,r0		; number of bytes to copy
+20$:	movb	(r4)+	,(r3)+		; simple
+	sob	r0	,20$		; all done loading the FIRQB
+	mov	diridx	,FIRQB+4	; store the index for the file
+	movb	#lokfq	,FIRQB+3	; directory lookup please
+	CALFIP				; get fip to do it please
+	movb	FIRQB	,r0		; did it work ?
+	bne	90$			; no
+	mov	#dirbuf	,r3		; point to the string buffer
+	call	dircvt			; yes, convert it please
+	inc	diridx			; setup for the next time
+	clc				; success
+	return				; failure
+
+90$:	tst	diridx			; error, did we already find a file?
+	beq	100$			; no, retain error code
+	clr	r0			; yes, return zero and C set
+100$:	clr	diridx			; clear for next time around
+	sec
+	return
+
+
+	.save
+	.psect	$PDATA	,D
+wild:	.asciz	/*.*/
+	.even
+	.restore	
+
+
+
+	.sbttl	force a xon to the connect line
+
+;	T T X O N
+;
+;	input:	@r5	device name, asciz
+;		2(r5)	lun (for rsxm/m+ compatibility)
+;	output:	r0	error code
+
+
+ttxon::	save	<r1>			; save a temp register
+	mov	@r5	,r1		; passed address of 0 or a null string?
+	beq	80$			; no address, assume _KB:
+	tstb	@r1			; null string passed ?
+	beq	80$			; yes, assume the console terminal
+	call	ttpars			; parse the terminal device name
+	bcs	90$			; oops
+10$:	clrxrb				; insure no defaults
+	mov	#xrb	,r1		; point to the xrb now
+	mov	#5	,(r1)+		; force to kb: function for .SPEC
+	inc	(r1)+			; one byte to force please
+	mov	#$xon	,(r1)+		; address of the buffer for output
+	mov	#ttyhnd*400,(r1)+	; channel zero, device driver index
+	mov	r0	,(r1)+		; terminal number
+	.spec				; simple
+	br	90$
+
+80$:	mov	#6	,r0		; ?invalid device name
+	br	100$			; bye
+90$:	movb	FIRQB	,r0		; error, return it please
+100$:	unsave	<r1>			; pop the register we saved
+	return
+
+
+
+	.sbttl	printer spooling for RSTS
+
+
+	.iif ndf, UU.SPL, UU.SPL = -28.
+
+
+;	Q S P O O L
+;
+;	calls QSPOOL	,<address(filename)>
+;
+;	returns:	r0 := rsts error code (if any)
+
+	.save
+	.psect	$PDATA	,D
+sp.dev::.word	0
+sp.mod::.word	0			; use 4!40 for delete and noheader
+	.restore
+
+qspool::save	<r1>
+	call	l$fss			; do the .FSS now
+	tst	r0			; fail ?
+	bne	100$			; yes, exit
+	mov	#FIRQB+16,r1		; stuff the rest of the params
+	mov	#"LP	,(r1)+		; LP of course
+	movb	sp.dev	,(r1)+		; assume LP0 for a moment
+	movb	#377	,(r1)+		; unit is real for sure
+	clr	(r1)+			; must be zero
+	mov	sp.mod	,(r1)+		; /nodelete/header
+	movb	#UU.SPL	,FIRQB+FQFUN	; uuo function code to do
+	.UUO				; simple to do
+	movb	FIRQB	,r0		; return any error codes
+100$:	unsave	<r1>			; pop temps and exit
+	return
+
+
+
+
+	.sbttl	inqterm	get terminal type (v9.x only)
+
+;	Assume:	Login.com did a $ SET TER/INQ
+
+	.enabl	lsb
+
+inqter:	call	inqv9			; /39/ RSTS/E 9.x ?
+	bcs	90$			; /39/ no
+	clrfqb				; /39/ clear out again
+	movb	#UU.TRM	,FIRQB+FQFUN	; /39/ terminal char function
+	mov	#1+<400*377>,FIRQB+4	; /39/ subfunction 1, KB:
+	.UUO				; /39/ read chars
+	tstb	FIRQB			; /39/ success?
+	bne	90$			; /39/ no
+	mov	#200$	,r0		; /39/ yes, look for VT type term
+10$:	tstb	@r0			; /39/ end of list yet?
+	beq	90$			; /39/ yes, return( TTY )
+	cmpb	(r0)+	,FIRQB+6	; /39/ no, check for a match
+	bne	10$			; /39/ not yet
+	mov	#VT100	,r0		; /39/ yes, return(VT100)
+	br	100$			; /39/ exit
+
+90$:	mov	#TTY	,r0		; /39/ nothing
+100$:	return				; /39/ exit
+
+
+	.save
+	.psect	$PDATA	,D
+200$:	.byte	6.			; /39/  vt100
+	.byte	13.			; /39/  vt101
+	.byte	14.			; /39/  vt102
+	.byte	15.			; /39/  vt125
+	.byte	16.			; /39/  vt131
+	.byte	17.			; /39/  vt132
+	.byte	18.			; /39/  vt220
+	.byte	19.			; /39/  vt240
+	.byte	20.			; /39/  vt241
+	.byte	21.			; /39/  vt105
+	.byte	22.			; /39/  vk100 (gigi)
+	.byte	23.			; /39/  rt02
+	.byte	48.			; /58/  VT330
+	.byte	49.			; /58/  VT430
+	.byte	0			; /39/  end
+	.even
+	.restore
+	.dsabl	lsb
+
+
+	.sbttl	login
+
+
+	.iif ndf , UU.CHK,	UU.CHK = 40
+	.iif ndf , UU.PRV,	UU.PRV = 34
+	.iif ndf , NOSUCH,	NOSUCH = 5
+	.iif ndf , NOTAVL,	NOTAVL = 10
+	.iif ndf , PRVIOL,	PRVIOL = 12
+	.iif ndf , QUOTA ,	QUOTA  = 105
+
+;	LOGIN	24-Sep-85  10:01:33  Brian Nelson (V9.x and later only)
+;		Added on Edit 2.36
+;		Moved to K1180S 11-Apr-86  12:27:18
+
+
+
+
+	.sbttl	Check for given privilege (V9.x and later)
+
+;	 SETPRV is intended to reset the CURRENT privilege mask to the
+;	user's AUTHORIZED mask. They could be different as a result of
+;	the REMOTE LOGIN command, moving from a high access account to
+;	once with lesser access.
+
+setprv::sub	#12	,sp		; a buffer
+	mov	#JFSYS	,XRB+0		; drop all privs that are not mine
+	.CLEAR				; in case we inherited privilege
+	clrfqb				; now read the authorized priv mask
+	movb	#UU.PRV	,FIRQB+FQFUN	; UUO function code
+	.UUO				; simple
+	mov	#FIRQB+FQFIL,r0		; and save them
+	mov	sp	,r2		; copy them onto stack save area
+	mov	(r0)+	,(r2)+		; copy
+	mov	(r0)+	,(r2)+		; ..copy
+	mov	(r0)+	,(r2)+		; ....copy
+	mov	(r0)+	,(r2)+		; ......copy
+	mov	#JFSYS	,XRB+0		; now get all we had back again
+	.SET				; simple
+
+	clrfqb				; 
+	movb	#UU.PRV	,FIRQB+FQFUN	; read current privilege
+	.UUO				; call RSTS to do so
+	mov	#FIRQB+FQFIL,r0		; now setup to copy current over
+	mov	#FIRQB+FQNAM2,r1	; the current mask to the 'clear'
+	mov	#4	,r2		; mask
+10$:	mov	@r0	,(r1)+		; copy the privilege mask
+	clr	(r0)+			; and clear this one out
+	sob	r2	,10$		; next please
+	movb	#UU.PRV	,FIRQB+FQFUN	; now drop ALL privileges we had
+	.UUO				; simple
+	clrfqb				; At last, make current privs the
+	mov	sp	,r2		; ones that the user is authorized
+	mov	#FIRQB+FQFIL,r1		; to have
+	mov	(r2)+	,(r1)+		; insert these privileges
+	mov	(r2)+	,(r1)+		; ..insert these privileges
+	mov	(r2)+	,(r1)+		; ....insert these privileges
+	mov	(r2)+	,(r1)+		; ......insert these privileges
+	movb	#UU.PRV	,FIRQB+FQFUN	; at last, set the correct mask
+	.UUO				; simple
+	add	#12	,sp		; exit
+	mov	#1	,r0		;
+	return
+
+
+chkprv::mov	2(sp)	,r1		; get address of priv to look for
+	clrfqb				; clear the FIRQB out
+	mov	#FIRQB+FQFUN,r0		; setup to get the bit value of WACNT
+	movb	#UU.CHK	,(r0)+		; UUO subfunction
+	inc	(r0)+			; UU.CHK subfunction
+	tst	(r0)+			; not used
+10$:	movb	(r1)+	,(r0)+		; copy the desired priv to check
+	bne	10$			; next please
+	.UUO				; try it out
+	movb	FIRQB	,r0		; if this fails its not verison 9.x
+	bne	90$			; or later
+	movb	FIRQB+4	,r0		; success, check if priv is present
+	bne	90$			; no
+	mov	#1	,r0		; yes, return(1)
+	br	100$			; exit
+90$:	clr	r0			; no,  return(0)
+100$:	mov	(sp)+	,(sp)		; pop stack and exit
+	return				; bye
+
+
+inqv9::	clrfqb				; /39/ clear FIRQB out
+	clr	ver9.x			; /40/ assume old RSTS/E
+	movb	#UU.PRV	,FIRQB+FQFUN	; /39/ see if version 9 or later
+	.UUO				; /39/ always works (read priv mask)
+	tstb	FIRQB			; /39/ success?
+	bne	90$			; /39/ no
+	mov	sp	,ver9.x		; /40/ flag for v9.x and later
+	clc				; /39/ v.9x
+	return				; /39/ exit
+90$:	sec				; /39/ not 9.x
+	return				; /39/ return
+
+
+
+	.sbttl	check for current JOB priv , not PROGRAM priv.
+
+;	 Added edit  2.41 to check if a user has HWCFG authorized to
+;	effect a SET LINE command. Note that this  will  not  affect
+;	the  current mask, it just checks to see if the JOB has this
+;	priv. This is different than UU.CHK in that here we look  at
+;	current  'JOB'  mask  where  the other (CHKPRV) looks at the
+;	CURRENT program priv mask. To find AUTHORIZED priv, you must
+;	call AUTHPR.
+;	 Added cause the  M+  v3  Kermit will get and drop privs for
+;	SET LINE.
+;
+;	Passed:	2(sp)	Address of priv name to check
+;	Return:	r0	1 for success (or pre 9.x), zero for no priv
+;
+;	Example:
+;
+;	mov	#HWCFG	,-(sp)
+;	call	JOBPRV
+;	tst	r0
+;	beq	error
+;
+;
+; hwcfg:.asciz	/HWCFG/
+;	.even
+
+
+
+jobprv::mov	r1	,-(sp)		; /41/ Save a register
+	mov	r2	,-(sp)		; /41/ ... save another one
+	sub	#10	,sp		; /41/ temp save area
+	mov	#1	,r2		; /41/ Assume success
+	tst	ver9.x			; /41/ version nine or later?
+	beq	100$			; /41/ no, return( success )
+	clrfqb				; /41/
+	mov	#FIRQB+3,r1		; /41/ point to FQFUN offset
+	movb	#UU.PRV	,(r1)+		; /41/ read current priv mask.
+	.UUO				; /41/ Do it
+	tstb	FIRQB			; /41/ Check status (has to work)
+	bne	90$			; /41/ Return( failure )
+	mov	sp	,r0		; /41/ a pointer to mask save area
+	mov	(r1)+	,(r0)+		; /41/ save current priv mask
+	mov	(r1)+	,(r0)+		; /41/ .save current priv mask
+	mov	(r1)+	,(r0)+		; /41/ ..save current priv mask
+	mov	(r1)+	,(r0)+		; /41/ ...save current priv mask
+	mov	#JFSYS	,XRB+0		; /41/ what to do
+	.CLEAR				; /41/ Drop ALL privs now
+	clrfqb				; /41/ clear firqb out
+	mov	#FIRQB+FQFUN,r0		; /41
+	movb	#UU.CHK	,(r0)+		; /41/ Convert priv name to bitmask
+	inc	(r0)+			; /41/ Subfunbction code = 1
+	tst	(r0)+			; /41/ skip this field
+	mov	2+14(sp),r1		; /41/ copy the priv over
+10$:	movb	(r1)+	,(r0)+		; /41/ copy the asciz name over
+	bne	10$			; /41/ simple
+	.UUO				; /41/ convert NAME to MASK
+	mov	sp	,r1		; /41/ point back to save area
+	mov	#FIRQB+FQNAM1,r0	; /41/ Where the bit pattern is
+	mov	#4	,r2		; /41/ Four words to check
+20$:	bit	(r0)+	,(r1)+		; /41/ Any bit(s) set here ?
+	bne	30$			; /41/ Yes, we have it
+	sob	r2	,20$		; /41/ No, keep looking
+	clr	r2			; /41/ Flag not found
+	br	40$			; /41/ Restore old priv mask
+30$:	mov	#1	,r2		; /41/ Flag we have it
+40$:	clrfqb				; /41/ Now restore JOB privs
+	mov	#FIRQB+FQFUN,r0		; /41/ point to FQFUN offset
+	movb	#UU.PRV	,(r0)+		; /41/ read current priv mask.
+	mov	sp	,r1		; /41/ Saved OLD priv mask
+	mov	(r1)+	,(r0)+		; /41/ save current priv mask
+	mov	(r1)+	,(r0)+		; /41/ .save current priv mask
+	mov	(r1)+	,(r0)+		; /41/ ..save current priv mask
+	mov	(r1)+	,(r0)+		; /41/ ...save current priv mask
+	.UUO				; /41/ Do it
+	br	100$			; /41/ exit
+
+90$:	clr	r2			; /41/ failure
+100$:	mov	r2	,r0		; /41/ Return the status now
+	add	#10	,sp		; /41/ Pop buffer
+	mov	(sp)+	,r2		; /41/ ...Pop a register
+	mov	(sp)+	,r1		; /41/ Pop a register
+	mov	(sp)+	,(sp)		; /41/ pop parameter
+	return				; /41/ At last
+
+
+
+
+
+
+	.sbttl	setcc	setup a control C trap
+
+
+;	SETCC	arm the control C trap
+;	TTAST	field the ast
+;
+;	It would be REALLY nice if we had the equivalent of an IO.KIL
+;	so we could cancel a pending terminal read as I do in the RSX
+;	based Kermits. While it is true that control C will terminate
+;	a read on your console terminal, we need to be able to cancel
+;	a read that's waiting on another terminal,  as is the case if
+;	Kermit is running LOCAL (set lin ttnn:).  Hopefully, some day
+;	DIGITAL will provide that.
+
+
+
+setcc::	mov	#ttast	,@#24
+	.ttrst
+	.ttech
+	return
+
+ttast:	save	<r0,r1>
+	call	cctrap
+	mov	#lunsize*2,r1
+10$:	tst	linit(r1)
+	beq	20$
+	mov	r1	,-(sp)
+	asr	(sp)
+	call	snoecho
+20$:	sub	#2	,r1
+	bge	10$
+	unsave	<r1,r0>
+	rti
+
+	global	<cctrap>
+
+
+;	dummy epts and symbols for rsx11m/m+ compatibility
+
+tidias::
+tidiar::return
+tmsdia::
+setsla::clr	r0
+	return
+
+wtmask	==	0			; dummy definitions for event flags
+ef.co	==	0			; used under RSX
+ef.ti	==	0
+bit.co	==	0
+bit.ti	==	0
+sf.gmc	==	2560 
+sf.smc	==	2440 
+tc.fdx	==	64 
+tf.ral	==	10    
+tc.tbf	==	71    
+tc.slv	==	0
+tc.abd	==	0
+tc.dlu	==	0
+tc.xsp	==	0
+tc.rsp	==	0
+tf.rne	==	20
+tf.wal	==	10
+
+	.save
+	.psect	$PDATA	,D
+fu$def::.word	177777			; do we need a defdir for RMS11v2
+	.restore
+
+xdorsx::call	doconn
+	return
+
+	global	<doconn>
+
+rstsrv::clr	r0
+	return
+
+
+
+	.end

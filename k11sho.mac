@@ -1,0 +1,774 @@
+	.title	k11sho	do the show command in an overlay
+	.ident	/2.0.01/
+
+;	31-Jan-84  08:28:16  Brian Nelson
+;
+;	Remove SHOW code from K11CMD.MAC for placement into an overlay.
+;	Had not realized how large Kermit was getting.
+
+
+
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.include	/IN:K11CDF.MAC/
+	.endc
+
+	.enabl	lc
+	.enabl	gbl
+	.psect	$code
+
+
+	.sbttl	the show command
+
+
+
+c$show::$name	<SHO>
+	calls	getcm0	,<argbuf,#sholst>
+	tst	r0
+	bmi	110$
+	jsr	pc	,@r1
+	return
+
+110$:	message	<Unknown SHOW topic>,cr
+	return
+
+
+sho$al:	message
+	call	sho$at
+	call	sho$bl
+	call	sho$de
+	call	sho$df
+	call	sho$dl
+	call	sho$es
+	call	sho$fi
+	call	sho$ha
+	call	sho$li
+	call	sho$pa
+	call	sho$pk
+	call	sho$ph
+	call	sho$pr
+	call	sho$ps
+	call	sho$rf
+	call	sho$rx
+	call	sho$so
+	call	sho$ti
+	call	sho$ve
+	message
+	return
+
+
+
+	$cmglob	=	0
+
+	command	sholst	,ALL	,3	,sho$al
+	command	sholst	,BINARY-TYPE,3	,sho$bt
+	command	sholst	,BLOCK_CHECK_TYPE,3,sho$bl
+	command	sholst	,BLOCK-CHECK-TYPE,3,sho$bl
+	command	sholst	,CONSOLE,3	,sho$co
+	command	sholst	,DATE	,3	,sho$da
+	command	sholst	,DEBUG	,3	,sho$de
+	command	sholst	,DEFAULT,3	,sho$df
+	command	sholst	,DELAY	,3	,sho$dl
+	command	sholst	,DIRECTORY,3	,sho$df
+	command	sholst	,ESCAPE	,3	,sho$es
+	command	sholst	,FILETYPE,3	,sho$fi
+	command	sholst	,HANDSHAKE,3	,sho$ha
+	command	sholst	,LINE	,3	,sho$li
+	command	sholst	,PACKET	,3	,sho$pk
+	command	sholst	,PARAMETERS,4	,sho$pa
+	command	sholst	,PARITY	,3	,sho$pr
+	command	sholst	,PAUSE	,3	,sho$ps
+	command	sholst	,PHONE	,3	,sho$ph
+	command	sholst	,RECORD_FORMAT,3,sho$rf
+	command	sholst	,RECORD-FORMAT,3,sho$rf
+	command	sholst	,RELEASE_NOTES,3,sho$rl
+	command	sholst	,RSX	,3	,sho$rx
+	command	sholst	,START-OF-PACKET,3,sho$so
+	command	sholst	,START_OF_PACKET,3,sho$so
+	command	sholst	,TIME	,3	,sho$ti
+	command	sholst	,VERSION,3	,sho$ve
+	command	sholst	,DIAL	,3	,sho$dp
+	command	sholst
+
+sho$dp:	tst	(sp)+			; Show DIAL is a special case
+	jmp	xxsdia			; where we load an adjacent overlay
+
+	global	<xxsdia>
+
+
+	.sbttl	routines for the show command
+	.enabl	lsb
+
+sho$de:	tst	trace			; any debugging turned on now ?
+	bne	10$			; yes
+	message	<No debugging or logging is active>,cr
+	br	100$			; exit
+
+10$:	message	<Debug file is >
+	print	#logfil
+	clr	r0			; index := 0
+	message
+
+20$:	tst	200$(r0)		; end of the list yet ?
+	beq	100$			; yes, bye
+	print	205$(r0)		; print the header
+	bit	200$(r0),trace		; see if a bit is turned on
+	beq	30$			; no
+	message	<enabled>,cr		; say so then
+	br	40$			; next please
+30$:	message	<disabled>,cr		; if off then also say so
+40$:	tst	(r0)+			; next please
+	br	20$			; all done yet ?
+
+100$:	return				; simple
+
+
+	.Save
+	.psect	$Pdata,d
+200$:	.word	log$co	,log$fi	,log$pa	,log$st	,0
+205$:	.word	210$	,220$	,230$	,240$
+210$:	.asciz	/Remote connection logging /
+220$:	.asciz	/File opens and  creations /
+230$:	.asciz	/Packet logging to logfile /
+240$:	.asciz	/State  logging to logfile /
+	.even
+	.restore
+
+
+
+
+sho$li:	tstb	ttdial			; show the terminal show
+	bne	300$			; something is there
+	message	<No remote line has been set>,cr
+	return
+300$:	message	<Current remote link device name is >
+	print	#ttdial			; print it and exit
+	message
+	message	<The current speed for the link  is >
+	calls	ttspee	,<#ttdial>
+	sub	#20	,sp		; try to format the response a little
+	mov	sp	,r1		; allocate a buffer and point to it
+	deccvt	r0,r1,#4		; convert to decimal, 4 wide
+	print	r1	,#4		; print it
+	add	#20	,sp		; pop the buffer
+	message	< baud>,cr		; and finish off the message
+	return
+
+	.dsabl	lsb
+
+
+
+
+	.sbttl	show time and version
+	.enabl	lsb
+
+sho$dy::calls	ascdat	,<#errtxt,#0>
+	print	#errtxt
+	MESSAGE	< >
+	calls	asctim	,<#errtxt,#0>
+	print	#errtxt
+	message
+	return
+
+
+sho$ti:	calls	asctim	,<#errtxt,#0>
+	message	<The time is >
+	print	#errtxt
+	message
+	return
+
+sho$da:	calls	ascdat	,<#errtxt,#0>
+	message	<The date is >
+	print	#errtxt
+	message
+	return
+
+sho$df:	message	<Directory for send opens and receive creates: >
+	tstb	defdir
+	beq	10$
+	print	#defdir
+	message
+	return
+10$:	message	<none>,cr
+	return
+
+
+sho$ve::message	<Kermit-11 >
+	sub	#40	,sp		; allocate a buffer
+	mov	sp	,r1		; point to it
+	movb	#release,(r1)+		; is this test or for real
+	deccvt	#baselev,r1		; convert baseline level to ascii
+	add	#6	,r1		; skip past it
+	movb	#'.	,(r1)+		; a dot
+	deccvt	#edit	,r1		; the edit number now
+	mov	sp	,r1		; point back to the buffer
+	calls	cvt$$	,<r1,#14.,#377>	; drop all the extra spaces out
+	print	r1,r0			; simple
+	print	#lasted
+	message				; a crlf
+	add	#40	,sp
+	return
+
+
+	.dsabl	lsb
+
+	global	<lasted,release,baselev,edit>
+
+
+	.sbttl	show filetype and show block-check
+	.enabl	lsb
+
+
+sho$fi:	cmpb	$image	,#text		; text files
+	bne	10$			; not text
+	message	<Filetype set to ASCII>,cr
+	br	20$
+10$:	cmpb	$image	,#binary	; binary ?
+	bne	20$			; really ?
+	message	<Filetype set to BINARY (fixed 512, no carriage control)>,cr
+20$:	tst	filprot
+	beq	25$
+	message	<Files will not be superceded>,cr
+25$:	return
+	
+
+
+sho$bl:	movb	setrec+p.chkt,r0	; get the checksum type please
+	bne	30$			; it's been set already
+	movb	#defchk	,r0		; no, set the default checktype in
+30$:	sub	#'1	,r0		; convert to an index for printing
+	asl	r0			; times 2 for word addressing
+	print	100$(r0)		; and say so
+	return
+
+
+	.save
+	.psect	$Pdata,d
+100$:	.word	110$,120$,130$
+110$:	.asciz	/1-Character-Checksum/<cr><lf>
+120$:	.asciz	/2-Character-Checksum/<cr><lf>
+130$:	.asciz	/3-Character-CRC-CCITT/<cr><lf>
+	.even
+	.restore
+
+	.dsabl	lsb
+
+
+
+
+
+
+
+	.sbttl	show parameters and show escape
+	.enabl	lsb
+
+sho$es::mov	conesc	,r1
+	bne	10$
+	mov	#con$es	,r1
+10$:	add	#100	,r1		; echo it back out
+	mov	r1	,-(sp)		; allocate a buffer
+	mov	sp	,r1		; point to it
+	message	<Connection escape character set to ^>
+	print	r1	,#1		; simple
+	message
+	tst	(sp)+			; pop buffer and exit
+	return				; bye
+
+
+sho$pa:	message	<SEND  packet  eol character  >
+	movb	conpar+p.eol,r0
+	octout	r0
+	message	<   (octal)>,cr
+	message	<SEND  maximum  packet  size  >
+	movb	conpar+p.spsiz,r0
+	decout	r0
+	message
+	message	<SEND/RECEIVE packet timeout  >
+	movb	conpar+p.time,r0
+	decout	r0
+	message
+	message	<RETRY  maximum for  packets  >
+	decout	maxtry			; retry count
+	message
+	return
+
+	global	<conpar	,maxtry>
+
+	.dsabl	lsb
+
+
+
+
+	.sbttl	show packet statistics
+	.enabl	lsb
+
+c$stat::
+sho$pk:	sub	#120	,sp		; /43/ Allocate a buffer please
+	print	#300$			; /43/ A header
+	clr	r3			; /43/ Current item to Dump
+	mov	#27.	,r4		; /43/ Number items to dump
+10$:	mov	sp	,r5		; /43/ And a pointer to it
+	tst	pcnt.r+2(r3)		; /43/ Anything there to dump?
+	bne	15$			; /43/ Yes
+	tst	pcnt.s+2(r3)		; /43/ No, what about SENT packets?
+	beq	90$			; /43/ No, skip the whole thing
+15$:	mov	r5	,r1		; /43/ Fill the buffer with spaces
+	mov	#110	,r2		; /43/ Count for the fill
+20$:	movb	#40	,(r1)+		; /43/ Stuff a space
+	sob	r2	,20$		; /43/ And go back for more
+	mov	r3	,r1		; /43/ Current TYPE
+	beq	30$			; /43/ So skip TYPE field
+	asr	r1			; /43/ Divide by two
+	asr	r1			; /43/ Again
+	add	#100	,r1		; /43/ Get the letter type now
+	movb	r1	,(r5)+		; /43/ Insert into the buffer
+	br	40$			; /43/ Insert data now
+30$:	tstb	(r5)+			; /43/ First entry is NULL
+40$:	add	#5	,r5		; /43/ Skip over a couple spaces
+	mov	#pcnt.s	,r1		; /43/ SENT packet count
+	call	200$			; /43/ Convert double quantity
+	mov	#pcnt.r	,r1		; /43/ RECEIVED packet count
+	call	200$			; /43/ Convert double quantity
+	mov	totp.s	,r1		; /43/ Total SENT packet count
+	call	200$			; /43/ Convert double quantity
+	mov	totp.r	,r1		; /43/ Total RECEIVED packet count
+	call	200$			; /43/ Convert double quantity
+	movb	#CR	,(r0)+		; /43/ Insert carriage control
+	movb	#LF	,(r0)+		; /43/ Insert carriage control
+	clrb	@r0			; /43/ All done, .asciz
+	mov	sp	,r0		; /43/ Now DUMP it
+	print	r0			; /43/ Simple
+90$:	add	#4	,r3		; /43/ Move up to next entry
+	sob	r4	,10$		; /43/ More to do ?
+					; /43/ No, dump character counts
+	print	#310$			; /43/ A header
+	message	<Characters Sent: >	; /43/
+	mov	sp	,r4		; /43/ Buffer address
+	mov	#charout,r1		; /43/ Data characters in
+	call	190$			; /43/ Print it
+	message	<    Received: >	; /43/ Data characters in
+	mov	#charin	,r1		; /43/ Point to it
+	call	190$			; /43/ And dump
+	message				; /43/ CRLF
+	mov	#times+2,r1		; /43/
+	tst	(r1)+			; /43/ A real clock going ?
+	beq	100$			; /43/ No, may be rt11 today
+	message	<Time in seconds: >	; /43/
+	call	190$			; /43/
+	message				; /43/ CRLF
+	call	brate			; /43/ Data rates also
+100$:	add	#120	,sp		; /43/ Pop local buffer and exit
+	return				; /43/ Bye
+
+
+190$:	clr	r2			; /43/ Convert for character counts
+	mov	r4	,r0		; /43/ Buffer address
+	call	$cddmg			; /43/ Convert 32 bit integer
+	clrb	@r0			; /43/ .asciz
+	print	r4			; /43/ Dump and exit
+	return				; /43/ Bye
+
+
+200$:	add	r3	,r1		; /43/ Get address to convert
+	clr	r2			; /43/ Insure no leading zeroes
+	mov	r5	,r0		; /43/ Set buffer address
+	call	$cddmg			; /43/ Convert
+	add	#14	,r5		; /43/ Position for next time
+	return				; /43/ Exit
+
+
+	.save
+	.psect	$Pdata,D
+300$:	.ascii	/Type  Last Sent   Last Rec    Tot Sent    Tot Rec/
+	.byte	cr,lf,cr,lf,0
+310$:	.ascii	/Total character count, less packet framing, but after data/
+	.byte	cr,lf
+	.ascii	/formatting (ie, includes repeat compression and prefixing)/
+	.byte	cr,lf
+	.ascii	/from last transaction./
+	.byte	cr,lf,cr,lf,0
+	.even
+	.restore
+
+	.dsabl	lsb
+
+	global	<pcnt.r,pcnt.s,totp.r,totp.s,$cddmg>
+
+
+
+
+	.sbttl	More for STAT and SHO PACKETS
+	.enabl	lsb			; /56/
+
+brate:	mov	charout+2,r1		; /43/ Compute effective baud rate
+	mov	charout+0,r0		; /43/ for the last transaction.
+	add	charin+2,r1		; /43/ Don't care which way it was
+	adc	r0			; /43/ Overflow?
+	add	charin	,r0		; /43/ Done
+	div	times+6,r0		; /43/ At last (forget the 16 high)
+	message	<Physical data  rate: >	; /43/ A header
+	decout	r0			; /43/ Dump the DATA
+	message	< char/second>,cr	; /43/
+	mov	fileout+2,r1		; /43/ Compute effective baud rate
+	mov	fileout+0,r0		; /43/ for the last transaction.
+	add	filein+2,r1		; /43/ Don't care which way it was
+	adc	r0			; /43/ Overflow?
+	add	filein	,r0		; /43/ Done
+	div	times+6,r0		; /43/ At last (forget the 16 high)
+	message	<File transfer  rate: >	; /43/ A header
+	decout	r0			; /43/ Dump the DATA
+	message	< char/second>,cr	; /43/
+	mov	rdrate+2,r1		; /56/
+	beq	100$			; /56/
+	mov	rdrate+0,r0		; /56/
+	div	rdrate+4,r0		; /56/
+	message	<Characters per read: >	; /56/
+	decout	r0			; /56/
+	message				; /56/
+100$:	return				; /43/
+
+	.dsabl	lsb			; /56/
+
+	global	<rdrate>		; /56/
+
+
+
+	.sbttl	more show command (delay and pause)
+
+
+
+sho$ps:	message	<Pause time before packet transmission >
+	decout	pauset
+	message
+	return
+
+sho$dl:	message	<Delay time  before sending  SEND-INIT >
+	decout	sendly
+	message
+	return
+
+
+	.enabl	lsb
+
+sho$rf:	cmpb	df$rfm	,#fb$stm	; r.var or stream ascii today ?
+	bne	10$
+	message	<Created files will be Stream Ascii>,cr
+	return
+10$:	message	<Created files will be Variable with implied CRLF>,cr
+	return
+
+
+	global	<df$rfm	,fb$stm	,pauset	,sendly>
+
+	.dsabl	lsb
+
+
+	.sbttl	more show
+	.enabl	lsb
+
+
+sho$ha:	movb	handch	,r0		; any handshake garbage today?
+	beq	100$			; no
+	cmpb	r0	,#'Q&37		; xonning today ?
+	bne	10$			; no
+	message	<Handshake character set to XON (^Q)>,cr
+	return
+10$:	cmpb	r0	,#cr		; carriage return turnaround?
+	bne	20$
+	message	<Handshake character set to CR (^M)>,cr
+	return
+20$:	cmpb	r0	,#'S&37		; xoff is it ? (??)
+	bne	30$			; no
+	message	<Handshake character set to XOFF (^S)>,cr
+	return
+30$:
+100$:	return
+	
+	.dsabl	lsb
+
+
+
+
+	.sbttl	show parity
+
+sho$pr:	mov	parity	,r0
+	message	<Parity is set to >
+	asl	r0
+	print	parlst(r0)
+	clr	r0
+	return
+
+	.save
+	.psect	$pdata
+
+parlst:	.word	50$,10$,20$,30$,40$,50$
+10$:	.asciz	/ODD/<cr><lf>
+20$:	.asciz	/EVEN/<cr><lf>
+30$:	.asciz	/MARK/<cr><lf>
+40$:	.asciz	/SPACE/<cr><lf>
+50$:	.asciz	/NONE/<cr><lf>
+	.restore
+
+	.assume	par$od	eq	1
+	.assume	par$ev	eq	2
+	.assume	par$ma	eq	3
+	.assume	par$sp	eq	4
+	.assume	par$no	eq	5
+
+	global	<parity>
+
+
+
+	.sbttl	show rsx
+
+	.enabl	lsb
+
+sho$rx:	message	<TC.DLU is set to >
+	tstb	tcdlu
+	bne	10$
+	message	<current system setting.>,cr
+	br	20$
+10$:	decout	tcdlu
+	message
+20$:	clr	r0
+	return
+
+
+sho$co:	tst	proflg
+	beq	40$
+	message	<PRO/350 console is set to >
+	tst	con8bit
+	bne	30$
+	message	<7 bit mode>,cr
+	br	40$
+30$:	message	<8 bit mode>,cr
+40$:	clr	r0
+	return
+
+sho$at:	message	<Attribute packet transmission >
+	tst	sendat
+	bne	50$
+	message	<DISABLED>,cr
+	br	60$
+50$:	message	<ENABLED>,cr
+60$:	return
+
+	.dsabl	lsb
+
+
+sho$so:	message	<RECEIVE start of packet character is ^>
+	mov	recsop	,-(sp)
+	add	#100	,@sp
+	mov	sp	,r0
+	print	r0
+	message
+	message	<SEND    start of packet character is ^>
+	mov	sensop	,@sp
+	add	#100	,@sp
+	mov	sp	,r0
+	print	r0
+	tst	(sp)+
+	message
+	return
+
+
+	.sbttl	show binary filetype list
+	.enabl	lsb
+
+
+sho$bt:	message	<Default binary filetype list: >
+	mov	bintyp	,r1
+	tstb	@r1			; is there anything there at all
+	bne	10$			; yes
+	message	<none>,cr		; no
+	br	100$			; exit
+10$:	mov	bintyp	,r1		; get the address of the list
+20$:	mov	#5	,r2		; the list is simply a concatenated
+	message				; string of filetypes rather than
+30$:	tstb	@r1			; the more general one of a list
+	beq	40$			; of pointers.
+	message	< *>			; format it into *.xyz
+	print	r1	,#4		; dump current one
+	add	#4	,r1		; next
+	sob	r2	,30$		; and print the next one
+	br	20$			; insert a newline
+40$:	message				; insert a <cr><lf>
+100$:	return				; and exit
+
+
+
+	.dsabl	lsb
+	.enabl	lsb
+
+sho$ph:	message	<Current defined phone numbers>,cr
+	message
+	mov	#pnhead	,r2
+	tst	(r2)			; /48/ Anything there?
+	bne	10$			; /48/ Yes
+	message	<None defined>,cr	; /48/ No
+	br	20$			; /48/ Exit
+10$:	mov	(r2)	,r2		; /48/ Get pointer to next
+	beq	20$			; /48/ Nothing
+	mov	r2	,r3		; /48/ Copy pointer
+	add	#2	,r3		; /48/ Point to the text
+	print	r3			; /48/ Dump
+	message				; /48/ CR/LF
+	br	10$			; /48/ Next please
+20$:	message				; /48/ Done with phone numbers
+100$:	return
+
+	.dsabl	lsb
+
+	global	<pnhead>		; /48/ Listhead for phone numbers
+
+
+
+
+	.sbttl	show RELEASE_NOTES
+	.enabl	lsb
+
+sho$rl::print	#200$
+	print	#210$
+	print	#220$
+	return
+
+	.save
+	.psect	$pdata	,d
+200$:
+.byte	CR,LF
+.ascii	/ A problem was discovered with attribute  packet  processing/<CR><LF>
+.ascii	/in versions of Kermit-11  prior to  3.49.  This implies that/<CR><LF>
+.ascii	/versions 3.49 or later of Kermit-11 will not  be  completely/<CR><LF>
+.asciz	/compatable  with older versions. The best workaround until a/<CR><LF>
+210$:
+.ascii	/copy of version 3.49 or later can be obtained is to  disable/<CR><LF>
+.ascii	/attribute   packet   processing  with  the  SET  NOATTRIBUTE/<CR><LF>
+.ascii	/command, and manually use the SET FILE TYPE  FIXED  (or  SET/<CR><LF>
+.asciz	/FILE  BINARY)  command  on  both  Kermit-11's  in  order  to/<CR><LF>
+220$:
+.ascii	/transfer binary files (such as  task  images).  For  further/<CR><LF>
+.ascii	/information please see K11.BWR and K11INS.DOC /<CR><LF>
+.byte	CR,LF,0
+
+	.even
+	.restore
+	.dsabl	lsb
+
+
+
+
+	.sbttl	the copy command
+	.enabl	lsb
+
+c$copy::$name	<COP>
+	call	gettwo			; insure the 'to:' argument is here
+	tst	r0			; did it work out ok ?
+	bne	100$			; we really could have done this in
+	mov	argbuf	,r2		; the command macro.
+	calls	copy	,<cmdbuf,r2,#0>	; do the rename now
+	tst	r0			; did it work ?
+	bne	40$			; yes
+	decout	r1			; print the block count
+	print	#210$			; and a header
+	print	r2			; and the file copied to
+	print	#200$			; a cr/lf
+	br	100$			; bye
+40$:	direrr	r0			; no, print the error message
+
+100$:	return
+
+	.save
+	.psect	$Pdata,d
+200$:	.byte	cr,lf,0
+210$:	.asciz	/ blocks copied /
+	.even
+	.restore
+	.dsabl	lsb
+
+	global	<argbuf	,cmdbuf	,gettwo>
+
+
+
+
+
+
+	.sbttl	the rename command
+
+c$rena::$name	<REN>
+	call	gettwo			; insure a 'to:' argument is here
+	tst	r0			; did it work out ok?
+	bne	100$			; no
+	mov	argbuf	,r2		; point to the arguement buffer
+	calls	rename	,<cmdbuf,r2,#0>	; do the rename now
+	tst	r0			; did it work ?
+	beq	100$			; yes
+	direrr	r0			; no, print the error message
+
+100$:	return
+
+	global	<argbuf	,cmdbuf	,gettwo>
+
+
+
+c$del::	$name	<DEL>
+	calls	delete	,<argbuf,#0>
+	direrr	r0
+	return
+
+	global	<argbuf	,cmdbuf>
+
+
+	.sbttl	get/and or read second command argument
+	.enabl	lsb
+
+;	input:	argbuf	command args
+;	output:	cmdbuf	first arg
+;		argbuf	second arg
+;		r0	error code from read if done, else zero
+
+
+gettwo::save	<r1,r2>			; save temps please
+	mov	argbuf	,r2		; point to the arguement buffer
+	tstb	@r2			; anything there (should be) ?
+	beq	100$			; no
+	dec	r2
+10$:	inc	r2			; next byte
+	tstb	@r2			; We have to finish parsing this
+	beq	20$			; end of it, prompt for 'To:'
+	cmpb	@r2	,#40		; find a space yet ?
+	bne	10$			; no
+	clrb	(r2)+			; yes, make it .asciz
+	copyz	argbuf	,cmdbuf		; save the first part of the arg
+	br	30$			; got old and new so we are all set
+
+20$:	mov	argbuf	,r2		; point to the 'to:' part to read
+	copyz	r2	,cmdbuf		; save the from part
+	print	#200$			; and read the rest of it
+	calls	echo	,<#0>		; ensure terminal can echo
+	calls	kbread	,<r2>		; do it
+	tst	r0			; did it work ?
+	bne	100$			; no
+	calls	cvt$$	,<r2,r1,#377>	; yes, remove all junk
+	tst	r0			; anything left ?
+	beq	20$			; no
+	add	r2	,r0		; yes, make it .asciz
+	clrb	@r0			; simple
+
+30$:	copyz	r2	,argbuf		; return arg number two in argbuf
+	clr	r0			; no errors please
+100$:	unsave	<r2,r1>			; pop temps and exit
+	return
+
+	.save
+	.psect	$Pdata,D
+200$:	.asciz	/To:   /
+	.even
+	.restore
+	.dsabl	lsb
+
+
+
+	.end

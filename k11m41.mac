@@ -1,0 +1,2426 @@
+	.title	k11m41	kermit i/o for RSX11M/M+ v4.1 and 2.1
+
+	.ident	/5.0.05/	; Jerry Hudgins (see below)
+
+;	define macros and things we want for KERMIT-11
+
+
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.endc
+
+	.iif ndf, k11inc, .error ; INCLUDE for IN:K11MAC.MAC failed
+	.enabl	gbl
+
+
+;	Copyright (C) 1983 1984 1985 1986  Change Software, Inc.
+;
+;
+;	This software is furnished under a license and may
+;	be  used  and  copied  only in accordance with the
+;	terms of such license and with  the  inclusion  of
+;	the  above copyright notice.  This software or any
+;	other copies thereof may not be provided or other-
+;	wise made available to any other person.  No title
+;	to and ownership of the software is hereby  trans-
+;	ferred.
+;
+;	The information in this  software  is  subject  to
+;	change  without notice and should not be construed
+;	as a commitment by the author.
+;
+;
+
+	.sbttl	edits
+
+
+;	20-Jan-84  09:50:18 BDN	Test and fix TTSPEED, SETSPD and BINREAD
+;
+; 03-Mar-84 Bob Denny	4.2.00  [RBD01]
+;			Rewrote namcvt().  Eliminated FCS parsing
+;			in favor of home-brew code which can handle
+;			the infinite variety of filespecs that may
+;			crop up when doing DECnet remote file access.
+;
+; 07-Mar-84 Bob Denny	5.0.00  [Edit trails removed]
+;			Fair rewrite, particularly of terminal handling.
+;			Changed within the existing KERMIT-11 architecture,
+;			which is better suited to RSTS/E (which seems to
+;			have a lot more terminal & communications options).
+;			Modes for RSX now allow operation at 9600 baud for
+;			packet communication.  CONNECT is still a problem.
+;
+; 10-Mar-84 Bob Denny	5.0.01   The method used for CONNECT on RSTS/RSX
+;			will not work reliably on native RSX at baud rates
+;			over 1200 on a busy system.  The "doconn()" routine
+;			was rewritten.  Now there are 2 separate modules.
+;			Also, the binrea() function is now used only for
+;			packet reading, and has been greatly simplified.
+;
+; 16-mar-84 Brian Nelson
+;
+;			Merged origional K11M41 with Bob Denny's mods.
+;
+; 11-Dec-85 Robin Miller 5.0.02  Attach the terminal in the TTYINI routine
+;	(RTM01)		so incoming characters are not lost.  On a /SLAVE
+;			terminal, the terminal must be attached so charac-
+;			ters will be placed in the typeahead buffer.
+;			Also detach the terminal in the TTYFIN routine.
+;
+; 11-Dec-85 Robin Miller 5.0.03  Change routine TTPARS to allow device names
+;	(RTM02)		other name XK, TI, or TT for logical names.  Also
+;			check for an error from ALUN$S directive in ASSDEV.
+;
+; 12-Dec-85 Robin Miller 5.0.04  Change routine ASSDEV to check for logged
+;	(RTM03)		on terminal and to get real device name via GLUN$
+;			incase we've assigned a logical name.
+;
+;
+; 25-Dec-85 Brian Nelson
+; 08-Feb-86 Steve Heflin
+; 10-Feb-86 Brian Nelson
+;			Finish added Steve Heflin's mods for ATOZ in.
+;
+; 03-Feb-89 Jerry Hudgins 5.0.05
+;			Moved GETPRV call in ASSDEV to ensure priv's are
+;			up for SF.SMC; will otherwise crash M+ V4.0.  Set
+;			priv's on in EXIT routine also.
+;
+;
+;	RSX11M,M+ and P/OS support.
+;
+;	If this looks like it's a mess, it's because it IS. It gets changed
+;	a little bit here and there (for the past 2 years),  and thus has a
+;	number of contributions and changes from others, and changes due to
+;	'NEW' versions of M+ and MicroRSX (ie, things stop working).
+
+	.sbttl	macros
+
+
+	.macro	moverr	val,dst
+	movb	val	,-(sp)
+	call	$mover
+	movb	(sp)+	,dst
+	.endm	moverr
+
+	.iif ndf, r$rsts, r$rsts = 0
+
+
+	.save
+	.psect	CLECTX	,RW,D,GBL,REL,CON
+	.restore
+
+	ef.tmp	=	17
+	ef.tt	=	20
+	ef.tmo	=	21
+	er.tmo	==	176		; for now, timeout
+	er.nod	==	177		; pseudo error for no data
+	nodata	==	er.nod
+
+	.library	/LB:[1,1]EXEMC.MLB/
+	.mcall	UCBDF$
+	UCBDF$
+
+	.sbttl	data areas
+
+	.psect	$idata	rw,d,lcl,rel,con
+
+fu$def::.word	0			; if rms needs the DNA filled in
+;	The following defaults can be changed in the TKB command file as in:
+;
+;	GBLPAT=K11PAK:DO$APP:1
+;	GBLPAT=K11PAK:DO$APP:0
+;	GBLPAT=K11PAK:DO$APP:0
+
+do$dte::.word	0			; if NE, force PROCOMM to default
+do$app::.word	0			; if NE, then append to logfiles
+do$msg::.word	1			; if EQ, then don't be verbose at times
+do$tra::.word	1			; if we look in logical name tables
+					; for an available terminal.
+do$alt::.word	1			; Force SET RSX CON ALT
+
+	.psect	$idata	rw,d,lcl,rel,con
+
+;
+; Terminal settings and parameter lists for line setting
+;
+;
+;	Add mods from Steve Heflin in (SSH and /41/ comments)
+;
+;	Do not include the TC.TBC in the main GMC or SMC as we will
+;	not know if we are running on M, M+ or Micro-RSX. TC.TBS is
+;	not available on M. If built on M, the undefined global for
+;	TC.TBS won't hurt anything.   BDN 20-DEC-1985 10:29
+
+savass:					; Remote line saved attributes
+savdlu::.byte	TC.DLU,0		; /{no}REMOTE		   /41/
+	.byte   TC.SLV,0                ; /{no}SLAVE
+	.byte	TC.BIN,0		; /{no}READ_PASSALL	   /45/
+	.byte	TC.NEC,0		; /{no}ECHO		   /41/
+	.byte	TC.RAT,0		; /{no}TYPEAHEAD	   /41/
+	.byte	TC.8BC,0		; /{no}EIGHT_BIT	   /41/
+savtbs:	.byte	TC.TBS,0		; typeahead buffer size	   /41/
+	.byte	TC.NBR,0		; /{no}BROADCAST	   /41/
+diarst	= . - savass			; Restore this much for DIAL /45/
+savxsp: .byte	TC.XSP,0		; /SPEED:xmt		   /41/
+savrsp: .byte	TC.RSP,0		; /SPEED:rcv		   /41/
+asvlen = .-savass			;			   /41/
+
+
+
+setass: .byte   TC.SLV,1                ; /SLAVE=TTnn:
+	.byte	TC.NEC,1		; /NOECHO		   /41/
+	.byte	TC.RAT,1		; /TYPEAHEAD		   /41/
+	.byte	TC.8BC,1		; /EIGHT_BIT		   /41/
+settbs:	.byte	TC.TBS,220.		; typeahead buffer size	   /41/
+	.byte	TC.NBR,1		; /NOBROADCAST		   /41/
+astlen = .-setass			;			   /41/
+
+
+assdon: .word   0			; flag remote save/set done
+ 
+aslspd:					; Assigned line speed block/41/
+aslxsp::.byte	TC.XSP,0		; /SPEED:xmt		   /41/
+aslrsp::.byte	TC.RSP,0		; /SPEED:rcv		   /41/
+
+iopend:	.word	0			; /36/ lun i/o waiting on
+
+savchr:					; Saved line parameters
+	.byte	TC.ACR,0		; /{NO}WRAP
+	.byte	TC.FDX,0		; /{NO}FULLDUPLEX
+	.byte	TC.HFF,0		; /{NO}FORMFEED
+	.byte	TC.HHT,0		; /{NO}TAB
+	.byte	TC.NEC,0		; /{NO}ECHO
+	.byte	TC.SLV,0		; /{NO}SLAVE
+	.byte	TC.SMR,0		; /{NO}LOWERCASE
+	.byte	TC.WID,0		; /WIDTH = n
+	.byte	TC.8BC,0		; /{NO}EIGHTBIT
+	.byte	TC.BIN,0		; /{NO}RPA	(BDN 04-Aug-84)
+savlen = .-savchr
+savdon:	.word	0
+;
+; Local line buffer for binary reading
+;
+inilun:	.word	0
+linbuf:	.blkb	MAXLNG+<MAXLNG/10>		; /42/ (larger) Buffer itself
+	.even					; /42/ Safety
+maxlin 	= 	.-linbuf			; Maximum read length
+	.even
+linptr:	.word	linbuf				; Scan pointer
+icrem:	.rept	15.				; # characters remaining
+	.word	0
+	.endr
+privon:	.word	0				; /41/ Save priv on/off status
+
+	ALSIZE	==	440
+	SDBSIZ	==	440
+
+$albuf:	.blkb	ALSIZE				; /51/ Moved from K11DAT
+$phnum:	.blkb	60
+$lnrea::.word	RDLIN			; Default for packet reading
+
+; Other r/w data for dialout line set routines				/45/
+;
+	.psect	rwdata	,rw,d,lcl,rel,con ; read/write data
+
+;  Buffers for Autocall modem fix	;				/45/
+
+fixti2:	.byte	TC.DLU,2,TC.ABD,0	; values we need for a modem    /45/
+sizti2 = . - fixti2			; size of buffers for autocall	/45/
+
+
+
+; Read only code section
+
+
+	.psect	$pdata	ro,d,lcl,rel,con	; Read-only data
+
+
+; System Macros used to get/set characteristics for dial out		/45/
+
+	.mcall	qiow$,dir$		; call in system macroes	/45/
+
+	ef.rem = 14.			; use remote event flag (14)	/45/
+
+set.dlu:    qiow$ sf.smc,lun.ti,ef.rem,,,,<fixti2,sizti2>	;	/45/
+set.chars:  qiow$ sf.smc,lun.ti,ef.rem,,,,<diachr,dialen> 	;	/45/
+rest.chars: qiow$ sf.smc,lun.ti,ef.rem,,,,<datchr,datlen>	;	/45/
+
+;	M+3.0 Carrier loss detection
+
+dtrast:	.byte	TC.MHU,0
+	.word	carast		
+dtrclr:	.byte	TC.MHU,0
+	.word	0
+
+
+; Attributes needed to dialout						/45/
+
+diachr:	.byte	TC.BIN,1	; binary mode to pass CNTR chars	/45/
+dialen = .-diachr		; - length of dialout char set		/45/
+
+
+
+; Other r/w data
+
+
+
+	.psect	$pdata	ro,d,lcl,rel,con	; Read-only data
+
+datchr:						; Data mode line parameters
+	.byte	TC.ACR,0			; /NOWRAP
+	.byte	TC.FDX,1			; /FULLDUPLEX
+	.byte	TC.HFF,1			; /FORMFEED
+	.byte	TC.HHT,1			; /TAB
+	.byte	TC.NEC,1			; /NOECHO
+	.byte	TC.SLV,1			; /SLAVE
+	.byte	TC.SMR,1			; /LOWERCASE
+	.byte	TC.WID,200.			; /WIDTH = 200.
+	.byte	TC.8BC,1			; /EIGHTBIT
+	.byte	TC.BIN,0			; /NORPA
+datlen	= . - datchr
+ibmmod:	.byte	tc.bin,1			; /RPA (need to read XON's)
+
+
+
+
+	.sbttl	xinit - assign & attach command terminal
+	.mcall	alun$s	,astx$s	,QIOW$S	,SREX$S	,FEAT$S
+
+	FE$EXT	=	1
+
+	.psect	$code
+
+; XINIT - Assign and attach the command terminal
+;
+; This routine assigns and attaches the command terminal (the
+; terminal that "ran" this copy of Kermit-11.
+; *** N O T E *** Later, this routine should establish a ^C
+; AST so that user can abort in-progress file transfers, and
+; get Kermit out of server mode without having to send it a
+; finish command.  I'll wait for Brian to send me his changes
+; for graceful transfer abort before I implement this, though.
+;
+; 23-Dec-85  19:28:43 BDN
+;
+;  For P/OS,  M+ v3 and Micro Rsx v3, also do a TLOG (or TRAN) and
+; if we we a translation, do an implicit SET LINE. Can be disabled
+; by setting DO$TRAN eq to zero.
+
+	.enabl	lsb
+
+xinit::	call	rmsini			; /53/ Setup SST
+	FEAT$S	#FE$EXT			; /56/ See if 4.2 or M+ 3.x
+	bcc	1$			; /56/ Ok
+	mov	sp	,rsx32		; /56/ Set 3.2 flag
+	SREX$S	#1$			; /56/ See if this is OLD Rsx (3.2)
+	bcs	1$			; /56/ Must be old RSX
+	clr	rsx32			; /56/ 4.0 or later, or M+ 1.0 and later
+	SREX$S				; /56/ Clear requested exit address
+1$:	mov	#$albuf	,albuff		; /51/ Fill in
+	mov	#$phnum	,phnum		; /51/ Fill in
+	clrb	@phnum			; /51/ Zero it
+	clr	@albuff			; /51/ Init to empty.
+	mov	#$cmdbuf,cmdbuf		; /53/ $CMDBUF defined in K11RMS
+	mov	#$argbuf,argbuf		; /53/ $ARGBUF defined in K11RMS
+	mov	do$tran	,dotran		; /41/ flag for translation
+	mov	do$msg	,infomsg	; /41/ flag for msg displaying
+	mov	do$app	,logapp		; /41/ Append to logfile flag
+	mov	do$dte	,procom		; /50/ Set default for PRO/COMM
+	message	<Linked for RSX11M/M+ and P/OS >
+	tst	#dapsup			; /56/
+	bne	4$			; /56/
+	message	<no DAP support>	; /56/
+4$:	message				; /56/
+	tst	do$alt			; /46/ Force alternate code?
+	beq	5$			; /46/ No
+	mov	#xdorsx	,con$ds		; /46/ Yes
+5$:	mov	#xdorsx	,altcon		; /44/
+	call	getsys			; Find out whats running
+	cmpb	r0	,#SY$MPL	; M+?
+	bne	10$			; No
+	mov	sp	,fu$def		; m+, set SY: as def
+10$:	cmpb	r0	,#sy$pro	; p/os?
+	bne	20$			; no
+	mov	sp	,proflg		; yes, flag it
+20$:	tst	dotran			; /41/ look for logical name
+	beq	30$			; /41/ no
+	CALLS	trntrm	,<#ttname>	; /41/ see if translation exits
+	tst	r0			; /41/ did this succeed ?
+	bne	30$			; /41/ no
+	MESSAGE	<Logical name translation returned >; /41/ inform the user
+	print	#ttname			; /41/ print the equivalence name
+	MESSAGE				; /41/
+	STRCPY	#ttdial	,#ttname	; /41/ copy it over here also 
+	clr	remote			; /41/ and we are local
+	br	40$			; /41/ continue
+30$:	tst	proflg			; /41/ assume default line for P/OS?
+	beq	40$			; /41/ not P/OS
+	mov	#poscon	,con$ds		; /44/ Force my connect code for p/os
+	STRCPY	#ttname	,#xk$dev	; /41/ use xk0: device
+	STRCPY	#ttdial	,#xk$dev	; /41/ use xk0: device
+	clr	remote			; and we are local
+	clr	con8bit			; clear bit 7
+	MESSAGE	<Link default set to XK0: for P/OS>,cr	; tell the user
+	CALLS	ttspeed	,<#ttname>	; /54/ Find out current speed
+	tst	r0			; /54/ Can't faile
+	beq	40$			; /54/ It did
+	MESSAGE	<Current speed: >	; /54/ A MESSAGE
+	DECOUT	r0			; /54/ Simple
+	MESSAGE				; cr/lf
+40$:	ALUN$S	#LUN.TT,#"TI,#TIUNIT	; Assign command term.
+	QIOW$S	#IO.ATT,#LUN.TT,#EF.TT,,#kbiost; Attach it, also
+	QIOW$S	#SF.SMC,#LUN.TT,,,,,<#echoch,#2>
+	sub	#10	,sp		; /53/ Get terminal driver support
+	mov	sp	,r2		; /53/ A buffer
+	QIOW$S	#IO.GTS,#LUN.TT,,,,,<r2,#4>
+	bcs	50$			; /53/ Oops
+	bit	#F2.EIO	,2(r2)		; /53/ Extended IO today?
+	beq	50$			; /53/ No
+	mov	#eioread,$lnread	; /53/ M+, try IO.EIO for version 3
+50$:	add	#10	,sp		; /53/ Pop buffer
+	clr	tcdlu			; don't change tc.dlu
+	call	setcc			; enable ^C asts
+	call	inqter			; /45/ No, get the terminal type
+	mov	r0	,vttype		; /45/ Done
+	return
+
+	.save
+	.psect	$xkdev	,ro,d,lcl,rel,con
+echoch:	.byte	TC.NEC,0
+xk$dev::.asciz	/XK0:/
+	.even
+	.dsabl	lsb
+	.restore
+
+
+	global	<altcon, xdorsx	,con$ds	,poscon>	; /44/
+	global	<lun.tt, tiunit>
+	global	<ARGBUF,CMDBUF,$ARGBUF,$CMDBUF>	; /53/
+	global	<DAPSUP,RSX32>			; /56/
+
+inqbuf::mov	#200.	,-(sp)		; /42/ Assume M+
+	call	getsys			; /42/ M+ today?
+	cmpb	r0	,#SY$MPL	; /42/ If so, large buffering
+	beq	100$			; /42/ M+
+	mov	#500.	,(sp)		; /42/ Assume P/OS
+	tst	proflg			; /42/ P/OS and XK:?
+	bne	100$			; /42/ Yes, return(500)
+	mov	#90.	,(sp)		; /42/ Vanilla RSX11M
+100$:	mov	(sp)+	,r0		; /42/ Return buffering available
+	return				; /42/ for LONG PACKET support.
+
+
+setcc::	QIOW$S	#io.det,#lun.tt,#ef.tt,,#kbiost
+	QIOW$S	#io.ata,#lun.tt,#ef.tt,,#kbiost,,<,0,#ttast>
+	return
+
+
+ttast:	cmpb	(sp)	,#'c&37		; control C ?
+	bne	100$			; no
+	call	cctrap			; yes, call handler to check it
+	tst	iopend			; /36/ Is a QIO pending for packet?
+	beq	100$			; /36/ no
+	QIOW$S	#IO.KIL,iopend		; /36/ Yes, force an IO.ABO error
+100$:	tst	(sp)+
+	astx$s				; and exit from ast service
+
+	global	<cctrap>
+
+
+
+
+	.sbttl	ttyini - Save & switch line to data mode
+
+;	T T Y I N I
+;
+;	ttyini( %loc device_name ,%val channel_number ,%val ccflag )
+;
+;
+;	input:	@r5	.asciz string of device name (Ignored on native RSX)
+;		2(r5)	channel number (LUN)
+;		4(r5)	mode bits:		     (Ignored on native RSX)
+;
+;	output:	r0	error codes
+;
+;	On RSX, this routine does dynamic switching of terminal from
+;	interactive mode(s) to data mode(s).  The ttysav(), ttyset()
+;	and noecho() routines are no-ops ...
+;
+;	It is used only for packet communications.  The "doconn()" in
+;	this module handles the setup and restoration of the terminal
+;	lines for CONNECT modes.
+;
+;    ** Someday, the whole command terminal and communication line handling
+;	architecture should be smoothed out and simplified, once Brian and
+;	I get together and compare notes re: native RSX versus emulated RSX,
+;	and what is required for compatibility without too much pain ...
+;
+;	Added SREX 22-Jun-84  11:15:46  Brian Nelson
+;
+;	Bob Denny
+;
+
+	.mcall	srex$s	,exit$s
+
+ttyini::save	<r1>
+	call	getprv				; /41/ May need privs
+	call	ttpars				; Get unit number
+	bcs	1$
+	alun$s	2(r5),r1,r0			; Assign LUN
+	mov	$dsw,r0				; get the result
+	bcc	2$				; oops
+1$:	jmp	10$				; Too far to branch
+2$:	clr	r0				; Make return success
+	clr	savdon				; not saved tt settings yet
+	cmp	2(r5),#lun.co			; Command terminal (SAFETY)
+	beq	10$				; (yes, ignore this)
+	QIOW$S	#io.att,2(r5),#ef.tt		; Attach the terminal.	(RTM01)
+	QIOW$S	#sf.gmc,2(r5),#ef.tt,,#kbiost,,<#savchr,#savlen>
+	mov	kbiost,r0
+	cmpb	r0,#IS.SUC			; OK?
+	bne	10$				; (no)
+	mov	sp	,savdon			; we have done the save
+	mov	2(r5)	,inilun			; save this lun (BDN)
+	srex$s	#abort				; in case server aborted (BDN)
+	tstb	handch				; IBM crap (BDN 04-Aug-84)
+	beq	5$				; no
+	QIOW$S	#sf.smc,2(r5),#ef.tt,,#kbiost,,<#ibmmod,#2> ;
+5$:	QIOW$S	#sf.smc,2(r5),#ef.tt,,#kbiost,,<#datchr,#datlen>
+	clr	eioinit				;
+	mov	kbiost,r0
+	cmpb	r0,#IS.SUC			; OK?
+	bne	10$				; (no)
+	clr	r0				; Yes - clear r0 = OK
+	QIOW$S	#SF.SMC,2(r5),,,,,<#dtrast,#4>	; Set this up for carrier loss
+10$:	tst	proflg				; if a pro/350, ignore errors
+	beq	100$				; not a 350
+	clr	r0				; a 350, forget about the errors
+100$:	unsave	<r1>
+	call	drpprv				; /41/ No privs wanted now
+	return
+
+
+rstsrv::tst	inserv
+	beq	100$
+	call	..abort
+100$:	return
+
+
+..abort:call	getprv			; /41/ May need privs turned on
+	QIOW$S	#sf.smc,inilun,#ef.tt,,#kbiost,,<#savchr,#savlen>
+	call	drpprv			; /41/ Don't want privs anymore
+	return
+
+
+abort:	call	..abort
+	jmp	exit
+
+	global	<inserv>
+
+
+;	T T Y F I N
+;
+;	ttyfin( %loc device_name ,%val channel_number )
+;
+;
+;	input:	@r5	.asciz string of device name (Ignored on native RSX)
+;		2(r5)	channel number (LUN)
+;
+;	No need for ttyrst()
+;
+
+ttyfin::call	getprv				; /41/ May need privs up now
+	srex$s					; no more abort handling
+	cmp	2(r5),#lun.co			; Command terminal?
+	beq	10$				; (yes, skip it)
+	QIOW$S	#SF.SMC,2(r5),,,,,<#dtrclr,#4>	; Set this up for carrier loss
+	QIOW$S	#io.det,2(r5),#ef.tt		; Attach the terminal.	(RTM01)
+	tst	savdon				; ever save the crap?
+	beq	10$				; no, don't reset it
+	QIOW$S	#sf.smc,2(r5),#ef.tt,,,,<#savchr,#savlen>
+10$:	call	drpprv				; /41/ Don't want privs up
+	clr	r0
+	return
+
+;	STUB ROUTINES - Not needed here
+;
+ttrini::
+ttrfin::
+ttysav::
+ttyset::
+ttyrst::
+noecho::
+echo::
+	clr	r0
+	return
+
+
+
+	.sbttl	get terminal name
+
+;	G T T N A M
+;
+;	input:	@r5	address of 8 character buffer for terminal name
+;	output:		.asciz name of terminal
+
+	.mcall	glun$s
+
+gttnam::save	<r1,r2,r3>		; save temps please
+	mov	@r5	,r3		; point to output buffer please
+	sub	#20	,sp		; allocate a buffer for GLUN$S
+	mov	sp	,r2		; point to it please
+	glun$s	#lun.tt	,r2		; try it
+	cmpb	@#$DSW	,#is.suc	; did it work ?
+	bne	90$			; no, return the error code please
+	movb	g.luna+0(r2),(r3)+	; get the device name next
+	movb	g.luna+1(r2),(r3)+	; both bytes of it please
+	clr	r1			; get the unit number next please
+	bisb	g.lunu(r2),r1		; simple
+	clr	r0			; now compute the ascii name
+	div	#10	,r0		; simple (in octal please for RSX)
+	mov	r1	,-(sp)		; save the low order unit number
+	cmp	r0	,#7		; unit number > 77 octal ?
+	blos	10$			; no
+	mov	r0	,r1		; yes, do it again please
+	clr	r0			; simple
+	div	#10	,r0		; and so on
+	add	#'0	,r0		; convert to ascii please
+	movb	r0	,(r3)+		; get the high part copied
+	mov	r1	,r0		; and now put the next digit back
+10$:	mov	(sp)+	,r1		; get the low digit back now
+	add	#'0	,r0		; convert to ascii
+	add	#'0	,r1		; likewise
+	movb	r0	,(r3)+		; move the unit number in now
+	movb	r1	,(r3)+		; at last ....
+	movb	#':	,(r3)+		; please insert a colon:
+	clrb	@r3			; make it .asciz
+	clr	r0			; no errors
+	br	100$			; exit
+90$:	moverr	@#$dsw	,r0		; get the directive error code
+100$:	add	#20	,sp		; pop glun$s buffer
+	unsave	<r3,r2,r1>
+	return
+
+	.sbttl	Vanilla read from command terminal
+
+
+;	K B R E A D
+;
+; Read a line from the command terminal (80 characters max)
+;
+;	Input:	@r5	Address of 80 character buffer
+;
+;	Output:	r0 =	0 if OK, else error code
+;		r1 = 	Number of characters if OK, else 0
+;
+;	Echoes a <LF> on completion to counter Dave Cutler's old
+;	FORTRAN record processing view of the world.
+
+kbread::
+	QIOW$S	#io.rvb,#5,#ef.tt,,#kbiost,,<@r5,#80.>
+	clr	r0			; assume no errors
+	mov	kbiost+2,r1		; return bytecount in r1
+	cmpb	kbiost	,#is.suc	; successful read ?
+	beq	100$			; yes
+	clr	r1			; no data please
+	moverr	kbiost	,r0		; return the error
+100$:	print	#lf1
+	return
+
+	.save
+	.psect	$PDATA	,D
+lf1:	.byte	lf,0
+	.restore
+
+
+
+
+	.sbttl	terminal read/write binary mode
+
+
+;	B I N R E A
+;
+;	binread( %val channel_number, %val timeout )
+;
+;
+;	input:	@r5	channel number
+;		2(r5)	timeout	(if -1, then no wait) (do this for RSX??)
+;
+;	output:	r0	error
+;		r1	character read
+;
+;	This version uses "normal" reading, as KERMIT sends its packets
+;	ending in its "EOL" character, which we need to be a <CR>.  This
+;	makes reading packets a piece'o cake.  We simply buffer lines
+;	here and scan off characters as needed.  Terminal modes have
+;	been set for reasonably low driver overhead.
+;
+;	No longer used by CONNECT
+;
+
+pakrea::
+binrea::mov	@r5	,iopend		; /36/ save lun i/o is waiting on
+	tstb	handch			; doing ibm style xon handshaking  BDN
+	beq	5$			; then we must do single char qios BDN
+	call	xbinrea			; do that and exit		   BDN
+	br	100$			; /36/ exit
+
+5$:	save	<r2>
+	mov	@r5	,r2		; lun to use today
+	asl	r2			; fix it for word indexing
+10$:	tst	icrem(r2)		; Anything remaining in current line?
+	bne	40$			; (yes)
+	jsr	pc	,@$lnread	; Call someone to read data
+	bcs	50$			; (read error)
+	br	10$			; Try again
+
+40$:	clr	r1			; Move next char unsigned ...
+	bisb	@linptr,r1		; ... into r1
+	inc	linptr			; Advance pointer
+	dec	icrem(r2)		; Decrement # characters remaining
+	clr	r0			; Success
+50$:	unsave	<r2>
+100$:	clr	iopend			; /36/ i/o no longer pending
+	return				; Return
+
+
+;
+; RDLIN - Local read routine
+;
+; Inputs:
+;	@r5	LUN to read on
+;	2(r5)	timeout, seconds
+;
+; Outputs:
+;	C-bit clear	Successful read (something read before timeout)
+;			icrem = number of characters in this line
+;			linptr -> 1st character in the line
+;
+;	C-bit set	Failed
+;			R0 = error code
+;			icrem = 0
+
+	.mcall	mrkt$s	,wtse$s	,qiow$s
+
+rdlin:
+	clr	icrem(r2)		; Reset buffer counter
+	mov	#linbuf,linptr		; Reset scan pointer
+10$:	clr	r0			; Assume no timeout
+	mov	2(r5),r1		; R1 = timeout in seconds
+	ble	20$			; (no timeout)
+	add	#9.,r1			; Round up to nearest 10 second clicks
+	div	#10.,r0			; Convert to 10 sec. clicks
+
+20$:	tst	proflg			; pro/350?
+	bne	25$			; yes
+	tst	chario			; force pro/350 style reads today?
+	bne	25$			; yes
+	tstb	parity			; /39/ must check if TTDRV may never
+	beq	24$			; /39/ see it's <CR> to terminate the
+	cmpb	parity	,#PAR$NO	; /39/ line. Use a read with terminator
+	beq	24$			; /39/ QIO if parity is on.
+	br	25$			; /41/ IO.RTT did not work
+
+;-/41/	mov	#<IO.RTT!TF.RNE!TF.TMO>,r1 ; /39/ 
+;-/41/	QIOW$S	r1,@r5,#ef.tt,,#kbiost,,<#linbuf,#maxlin,r0,#tt$trm> ; /39/
+;-/41/	br	30$			; /39/
+
+24$:	QIOW$S	#<io.rlb!tf.tmo>,@r5,#ef.tt,,#kbiost,,<#linbuf,#maxlin,r0>
+	br	30$
+
+25$:	call	getprv			; /41/ May need for SF.GMC call
+	clr	-(sp)			; get the typehead buffer size
+	mov	sp	,r1		; point to the parameter area
+	movb	#tc.tbf	,@r1		; we want amount in the buffer
+	QIOW$S	#sf.gmc,@r5,#ef.tt,,,,<r1,#2>
+	movb	1(r1)	,r1		; get the typeahead size
+	bne	26$			; we have something to get there
+	inc	r1			; nothing, wait for one character
+26$:	QIOW$S	#<io.ral!tf.tmo!tf.rne>,@r5,#ef.tt,,#kbiost,,<#linbuf,r1,r0>
+	tst	(sp)+			; pop sf.gmc buffer please
+	call	drpprv			; /41/ Drop privs if need be
+
+30$:	movb	kbiost	,r0		; /41/
+	cmpb	r0	,#IE.DNR	; /45/ Did we drop carrier ?
+	bne	31$			; /45/ No
+	mrkt$s	#2,#1,#2		; /45/ Yes, suspend for 1 second
+	wtse$s	#2			; /45/ ...
+	br	40$			; /45/ Treat as timeout at upper lev
+31$:	cmpb	r0	,#IS.TMO	; timed out on the read ?
+	beq	40$			; yes
+	cmpb	r0	,#IE.ABO	; /36/ from IO.KIL on control C ast?
+	beq	40$			; /36/ yes, treat as a timeout then
+	cmpb	r0	,#IE.EOF	; /41/ End of file today (control Z)?
+	beq	80$			; /41/ Yes, return control Z and 1 byte
+	cmpb	kbiost+1,#33		; /47/ Was \033 the terminator?
+	beq	80$			; /41/ Yes, Again return control Z
+	cmpb	linbuf	,#'Z&37		; /41/ P/OS style reads and control Z?
+	beq	80$			; /41/ Yes, exit
+	tst	r0			; Some kind of success?
+	bmi	90$			; no
+	mov	kbiost+2,icrem(r2)	; Yes, set up number of characters
+	mov	#linbuf,r1		; R1 --> line buffer
+	add	icrem(r2),r1		; R1 --> first free byte at end of line
+	movb	kbiost+1,(r1)		; Get possible terminator character
+	beq	35$			; (none)
+	inc	icrem(r2)		; Adjust for terminator
+35$:	clrb	(r1)			; Null terminate just for grins
+	clr	r0			; Clear r0 and C-bit
+	return				; Finished
+
+40$:	movb	#er.tmo	,r0		; return timeout error code
+	clr	icrem(r2)		; just to be safe
+	sec				; say it failed
+	return
+
+80$:	movb	#'Z&37	,linbuf		; /41/ EOF or Escape sequence, return
+	mov	#1	,icrem(r2)	; /41/ control Z and char_count == 1
+	clc				; /41/ success
+	return				; /41/ exit
+
+90$:	clr	icrem(r2)		; to be safe
+	sec				; Error
+	return				; bye
+
+
+
+	.sbttl	Extended I/O read for M+ and MicroRsx version 3.x
+	.enabl	lsb
+
+;	Added 27-Jun-86  13:24:18  Brian Nelson
+;
+;	Now that I finally have an 11/73 running M+, I can do stuff
+;	like this.
+
+	E$MOD1	=	0		; Modifier word 1
+	E$MOD2	=	2		; Modifier word 2
+	E$BUFF	=	4		; Buffer address
+	E$LEN	=	6		; Buffer length
+	E$TMO	=	10		; Timeout (in seconds here)
+	E$PRM	=	12		; Prompt address
+	E$PRML	=	14		; Prompt length
+	E$PRMV	=	16		; Prompt VFC
+	E$TT	=	20		; Terminator table address
+	E$TTL	=	22		; Terminator table length
+	E$DFD	=	24		; Default data address
+	E$DFDL	=	26		; Default data length
+
+	.save				; Save current code psect
+	.psect	rwdata	,d		; New psect
+	.even				; Insure
+eiojnk:	.word	0
+eiolst:	.word	0,0,0,0,0,0,0,0,0,0,0,0,0 ; Itemlist for IO.EIO
+eioios:	.word	0,0,0,0
+eioini:	.word	0
+eiochr:	.byte	TC.BIN,0,TC.PTH,0
+eiosav:	.byte	TC.BIN,0,TC.PTH,0
+	$$eiol	=	. - eiosav
+	.restore			; Restore old psect
+
+
+eiorea::mov	r3	,-(sp)		; Save please
+	tst	eioini			; Need to set chars for EIO?
+	bne	10$			; No (reset to zero in TTYINI)
+	mov	sp	,eioini		; Yes, change to /NORPA and /PASTHRU
+	tstb	handch			; Hand shaking in effect?
+	bne	10$			; Yes, leave TC.BIN on please
+	call	getprv			; May need privs on
+	QIOW$S	#SF.GMC,(r5),#EF.TT,,,,<#eiosav,#$$EIOL>
+	QIOW$S	#SF.SMC,(r5),#EF.TT,,,,<#eiochr,#$$EIOL>
+	call	drpprv			; Drop them now.
+10$:	clr	ICREM(r2)		; Reset buffer counter
+	mov	#linbuf,linptr		; Reset scan pointer
+	mov	#eiolst	,r3		; The itemlist
+	mov	2(r5)	,E$TMO(r3)	; Insert the timeout please
+	mov	#linbuf	,E$BUFF(r3)	; Insert the buffer address next.
+	mov	#maxlin	,E$LEN(r3)	; Insert the buffer size also.
+	mov	#TF.TMO	,E$MOD1(r3)	; Insert desired read modifiers.
+	tst	chario			; Do we read EXACTLY whats in buffer?
+	bne	15$			; Yes.
+	tstb	parity			; Is parity on ?
+	beq	20$			; No, wait for terminators
+	cmpb	parity	,#PAR$NO	; Well?
+	beq	20$			; Ok. Otherwise, read typeahead ONLY
+15$:	clr	E$TMO(r3)		; Yes, later we will not timeout first
+	bis	#TF.RAL	,E$MOD1(r3)	; Also, we want everything AS IS!
+					;
+20$:	QIOW$S	#IO.EIO!TF.RLB,(r5),#EF.TT,,#eioios,,<#eiolst,#30>
+	bcs	90$			; The directive completely died
+	movb	eioios	,r0		; Get the QIO result.
+	cmpb	r0	,#IE.IFC	; Did it die because of this
+	beq	90$			; Yes, reset to old read mode.
+	cmpb	r0	,#IE.ABO	; Did the ^C ast routine do IO.KIL
+	beq	80$			; Yes, return(TIMEOUT)
+	cmpb	r0	,#IE.DNR	; Do we lack carrier now?
+	beq	70$			; Yes, sleep a moment, return(TMO)
+	cmpb	r0	,#IE.EOF	; Well, what about END of FILE?
+	beq	60$			; Thats it, return a control Z
+	tst	r0			; Did we get ANY kind of success?
+	bmi	90$			; No, reset reader address, redo.
+	cmpb	eioios+1,#33		; Did we get ESCAPE as terminator?
+	beq	60$			; Yes, also treat as control Z
+	cmpb	linbuf	,#'Z&37		; Does the buffer START with ^Z?
+	beq	60$			; Yes, same thing.
+	cmpb	r0	,#IS.TMO	; Success with a TIMEOUT?
+	bne	30$			; No
+	tst	eioios+2		; Yes, was there ANY data present?
+	bne	30$			; There was data, return it please.
+	tstb	E$TMO(r3)		; No data, but did we want only the
+	bne	80$			; typeahead that was there? No
+	mov	2(r5)	,E$TMO(r3)	; Yes, stuff a REAL timeout in.
+	mov	#1	,E$LEN(r3)	; And only ONE character this time.
+	bis	#TF.RAL	,E$MOD1(r3)	; Insure no waits for terminators.
+	br	20$			; Try the read over again now.
+					;
+30$:	mov	eioios+2,ICREM(r2)	; Return the size of the read now.
+	mov	#linbuf	,r1		; Get the buffer address
+	add	ICREM(r2),r1		; And point to the end of it.
+	movb	eioios+1,(r1)		; Get possible terminator character
+	beq	40$			; (none)
+	inc	ICREM(r2)		; Adjust for terminator
+40$:	clrb	(r1)			; Null terminate just for grins
+	clr	r0			; Clear r0 and C-bit
+	br	100$			; Exit at last....
+					;
+					;
+60$:	movb	#'Z&37	,linbuf		; Force a control Z to be returned
+	inc	ICREM(r2)		; Return exactly ONE character.
+	clc				; Successfull
+	br	100$			; Exit
+					;
+70$:	MRKT$S	#2,#1,#2		; Lost carrier, suspend for a
+	WTSE$S	#2			; moment and return(TIMEOUT)
+					; Drop through to timeout
+80$:	movb	#ER.TMO	,r0		; Return timeout error code
+	sec				; Say the read failed
+	br	100$			; And exit
+					;
+90$:	mov	#rdlin	,$lnread	; Total failure, switch readers.
+	call	getprv			; May need privs on
+	QIOW$S	#SF.SMC,(r5),#EF.TT,,,,<#eiosav,#$$EIOL>
+	call	drpprv			; Drop them now.
+	clc				; Force caller to try again.
+100$:	mov	(sp)+	,r3		; Restore r3
+	return
+
+	.dsabl	lsb
+
+
+	.sbttl	BINWRITE(&buffer,size,channel)
+
+;		0(r5)	Buffer address
+;		2(r5)	buffer size
+;		4(r5)	channel number
+;	output:	r0	error code
+
+
+;	Edit:	/40/ 16-Dec-85  14:58:01 BDN	Set timer in case line xoffed
+
+
+	.mcall	mrkt$s	,cmkt$s	,QIOW$S	,astx$s	; /40/
+	.enabl	lsb				; /40/
+
+pakwri::
+binwri::mov	4(r5)	,310$			; /40/ Registers saved in ASTs?
+	mrkt$s	#ef.tmo,#7,#2,#200$		; /40/ start 7 second timeout
+	QIOW$S	#io.wal,4(r5),#ef.tt,,#kbiost,,<@r5,2(r5)>
+	cmpb	kbiost	,#IE.ABO		; /41/ Did the timeout occur?
+	beq	90$				; /41/ Yes, try again
+	cmkt$s	#ef.tmo,#200$			; /40/ write ok, cancel timer
+	br	100$				; /40/ and exit
+90$:	QIOW$S	#io.wal,4(r5),#ef.tt,,#kbiost,,<@r5,2(r5)> ; /40/
+100$:	clr	r0
+	return
+
+
+200$:	QIOW$S	#IO.KIL,310$			; /40/ abort the pending I/O
+	call	getprv				; /41/ May need privs up now
+	QIOW$S	#SF.SMC,310$,,,,,<#300$,#2>	; /40/ insure line is XON'ED
+	call	drpprv				; /41/ Don't want privs anymore
+	tst	(sp)+				; /40/ pop timeout flag and
+	astx$s					; /40/ exit
+
+	.save
+	.psect	$idata	rw,d,lcl,rel,con
+	.even
+300$:	.byte	TC.CTS,0
+310$:	.word	0
+	.restore
+	.dsabl	lsb
+
+
+
+
+
+
+
+	.sbttl	real binary i/o for doing ^X and ^Z things
+
+;	X B I N R E A
+;
+;	binread( %val channel_number, %val timeout )
+;
+;
+;	 XBINREAD is used in Kermit-11 for the DIAL command to read the
+;	responses from the modem on a character by character basis, and
+;	also  is called once per  packet if in local  mode to check for
+;	typeahead  in the form of  CTRL E, X or Z to implement graceful
+;	transfer aborts. While this could be done under M/M+ via an un-
+;	solicited character AST,  that won't work for RT11  and RSTS/E.
+;	Thus the sampling method (XBINREA called by CHKABO).
+;
+;	/38/ Change  QIO timed read to untimed with a MARKTIME (MRKT$S)
+;	to allow better  granularity on the timeout interval.  If time-
+;	out occures, do a IO.KIL
+;
+;
+;	input:	@r5	channel number
+;		2(r5)	timeout	(if -1, then no wait) (do this for RSX??)
+;
+;	output:	r0	error
+;		r1	character read
+;
+
+	.mcall	QIOW$S	,mrkt$s	,cmkt$s	,astx$s
+
+
+xbinre::save	<r2,r3>			; save a register for a friend
+	clr	-(sp)			; allocate a buffer please
+	mov	sp	,r2		; and point to it now
+	clr	-(sp)			; allocate a buffer for SF.GMC
+	mov	sp	,r3		; and point to it please
+	cmp	2(r5)	,#-1		; get without any wait today ?
+	bne	20$			; no, check for timeouts now
+
+	movb	#tc.tbf	,@r3		; create a .byte tc.tbf,0
+	QIOW$S	#sf.gmc,@r5,#ef.tt,#50,#kbiost,,<r3,#2>
+	cmpb	kbiost	,#is.suc	; did the read terminal thing work?
+	bne	90$			; no
+	tstb	1(r3)			; any data in the typeahead buffer?
+	bne	20$			; yes
+	movb	#nodata	,r0		; fake a psuedo no data error
+	br	100$			; and exit
+	
+20$:	tst	2(r5)			; /38/ a real timed read ?
+	ble	30$			; /38/ no
+	mov	@r5	,iopend		; /38/ save LUN
+	mrkt$s	#ef.tmo,2(r5),#2,#200$	; /38/ we really want 1 second chuncks
+30$:	QIOW$S	#io.ral!tf.rne,@r5,#ef.tt,#50,#kbiost,,<r2,#1>
+	cmkt$s	#ef.tmo,#200$		; /38/ cancel marktime please
+	clr	r1			; get the character now please
+	bisb	@r2	,r1		; copy it with sign extension!
+	clr	r0			; assume no errors
+	cmpb	#is.suc	,kbiost		; did it work ?
+	beq	100$			; yes, exit
+	cmpb	#IE.ABO	,kbiost		; /38/ convert IO.KIL to timeout
+	beq	40$			; /38/
+	cmpb	#is.tmo	,kbiost		; timeout
+	bne	90$			; no
+40$:	movb	#er.tmo	,r0		; yes
+	br	100$			; bye
+
+90$:	moverr	kbiost	,r0		; no, return the error
+100$:	cmp	(sp)+	,(sp)+		; pop the 2 buffers please
+	unsave	<r3,r2>			; from DIRECTIVE errors
+	clr	iopend			; /38/
+	return				; bye
+
+200$:	tst	(sp)+			; mark time ast entry
+	QIOW$S	#IO.KIL,iopend,#ef.tt	; kill the i/o
+	astx$s				; exit
+
+chkabo::CALLS	xbinrea	,<#lun.tt,#-1>	; simple read on console terminal
+	tst	r0			; did it work ok ?
+	bne	100$			; no
+	mov	r1	,r0		; yes, return ch in r0 please
+	return
+100$:	clr	r0			; it failed
+	return
+
+
+
+	.sbttl	Special routines for command line editor
+
+read1c::clr	-(sp)
+	mov	sp	,r0
+	QIOW$S	#IO.RAL!TF.RNE,#5,#EF.TT,,#kbiost,,<r0,#1>
+	cmpb	kbiost	,#IS.SUC
+	beq	10$
+	clrb	@r0
+10$:	movb	kbiost	,r0
+	mov	(sp)+	,r0
+	cmpb	r0	,#CR
+	bne	100$
+	mov	#LF	,r0
+100$:	bic	#^C377	,r0
+	return
+
+wrtall::SAVE	<r0,r2>			; Must use IO.WAL for CLE for
+	mov	2+4(sp)	,r2		; some versions of RSX11M
+	STRLEN	r2			; Get the string length.
+	QIOW$S	#IO.WAL,#5,,,,,<r2,r0>	; Dump the string in pass-all mode
+	UNSAVE	<r2,r0>			; Pop register
+	mov	(sp)+	,(sp)		; Move return address over parameter
+	return				; Exit
+
+
+clrcns::QIOW$S	#SF.SMC,#5,,,,,<#can,#2>; Simple
+	return
+
+	.save
+	.psect	rwdata	,d
+can:	.byte	TC.TBF,0
+	.restore
+
+
+	.sbttl	normal i/o to the terminal
+
+;	S T T Y O U
+;
+;	input:	2(sp)	buffer address
+;		4(sp)	buffer length
+;	output:	'c' 	set on error
+;		'c'	clear on no error
+;
+;
+;	L $ T T Y O
+;
+;	l$ttyou( %loc buffer, %val string_length )
+;
+;	input:	@r5	buffer address
+;		2(r5)	buffer length
+
+
+l$ttyo::
+	save	<r0,r1>			; save temps here please
+	movb	kbiost	,-(sp)		; save old io status
+	mov	2(r5)	,r0		; string length
+	bne	20$			; length was passed
+	mov	@r5	,r0		; no length, assume .asciz
+10$:	tstb	(r0)+			; move along looking for a null
+	bne	10$			; none yet so far
+	sub	@r5	,r0		; get the length
+	dec	r0			; off by one
+20$:	QIOW$S	#io.wvb,#5,#ef.tt,,#kbiost,,<@r5,r0>
+	cmpb	kbiost	,#is.suc	; did it work ?
+	bne	90$			; no, exit with carry set
+	clc				; yes, it worked
+	br	100$			; exit
+90$:	sec				; write failed, set error flag and exit
+100$:	movb	(sp)+	,kbiost
+	unsave	<r1,r0>			; pop registers that we used
+	return				; and exit
+
+
+sttyou::
+	mov	r5	,-(sp)
+	mov	sp	,r5
+	add	#4	,r5
+	call	l$ttyo
+	mov	(sp)+	,r5
+	return
+
+
+l$pcrl::MESSAGE
+	return
+
+
+
+
+	.sbttl	exit kermit and logout
+
+;	Logout a server (LOGOUT:) by requesting ...BYE
+;	Exit Kermit-11
+;
+;	Steve Heflin's mods added 25-Dec-85  12:46:29  BDN
+
+
+	.mcall	exit$s	,rpoi$s	,exst$s; /41/ add EXST$S
+
+	.save
+	.psect	$PDATA	,D
+bye:	.rad50	/...BYE/
+	.restore
+
+logout::
+	tst	assdon			; ever slave the line?
+	beq	10$			; no
+	call	rstass			; /41/ restore more things now
+10$:	RPOI$S	#BYE			; request ...BYE
+	br	exits			; /41/ exit with status please
+
+exit::	tst	eioini			; /54/ Extended IO init
+	beq	10$			; /54/ No
+	Call	getprv			; /60/ privs on
+	QIOW$S	#SF.SMC,#LUN.AS,#EF.TT,,,,<#eiosav,#$$EIOL>
+	Call	drpprv			; /60/ privs off
+10$:	tst	assdon			; ever slave the line?
+	beq	exits			; no
+	call	rstass			; /41/ restore more things now
+exits:	mov	exstac	,r0		; /41/ get exit status
+	bne	20$			; /41/ something is there to emit
+	EXIT$S				; /41/ nothing there, exit w/o status
+20$:	asl	r0			; /41/ shift over 4 bits
+	asl	r0			; /41/  ...
+	asl	r0			; /41/   ...
+	asl	r0			; /41/    ... done
+	cmp	exstal	,#15.		; /41/ Will command file line number
+	blos	30$			; /41/ fit into exit status word ?
+	mov	#15.	,exstal		; /41/ No, stuff 15 (10) into it
+30$:	bisb	exstal	,r0		; /41/ Set bits in from line number
+	EXST$S	r0			; /41/ Exit with status now
+
+quochk::
+	clr	r0			; try to see if the logout will work
+	return
+
+
+dskuse::
+	mov	@r5	,r0
+	copyz	#nogu	,r0
+	return
+
+	.save
+	.psect	$PDATA	,D
+nogu:	.asciz	/Can't do space enquiry for RSX/
+	.even
+	.restore
+
+
+
+
+
+	.sbttl	cantyp	cancel typeahead
+
+
+;	C A N T Y P
+;
+;	cantyp(%val channel_number)
+;
+;	input:	@r5	device name
+;		2(r5)	lun
+;
+;
+;	 Cantyp tries to dump all pending input on a given terminal
+;	line.
+
+
+cantyp::
+	save	<r0,r1>			; use r0 to point into xrb
+	call	getprv			; /41/ May need privs now
+	clr	-(sp)			; allocate buffer for SF.SMC
+	mov	sp	,r1		; point to it please
+	movb	#tc.tbf	,@r1		; cancel all typeahead please
+	mov	2(r5)	,r0		; get the channel number please
+	asl	r0			; purge internally buffer chars
+	clr	icrem(r0)		; simple
+	asr	r0			; restore lun
+	bne	10$			; ok
+	mov	#5	,r0
+10$:	QIOW$S	#sf.smc,r0,#ef.tt,,#kbiost,,<r1,#2>
+100$:	tst	(sp)+
+	call	drpprv			; /41/ Don't want privs right now
+	unsave	<r1,r0>			; all done
+	return				; bye
+
+
+;	T T X O N
+;
+;	input:	@r5	device name
+;		2(r5)	lun
+;	output:	r0	error code (really, it will be zero)
+;
+;
+;	TTXON cancels xoff on a line
+
+
+ttxon::	save	<r1,r2>			; use r0 to point into xrb
+	call	getprv			; /41/ May need privs turned on
+	clr	-(sp)			; allocate buffer for SF.SMC
+	mov	sp	,r1		; point to it please
+	movb	#tc.cts	,@r1		; cancel all typeahead please
+	clrb	1(r1)			; zero means to cancel xoff
+	mov	2(r5)	,r2		; get the channel number please
+	bne	10$			; ok
+	mov	#5	,r2
+10$:	QIOW$S	#sf.smc,r2,#ef.tmp,,,,<r1,#2>
+	QIOW$S	#io.wal,r2,#ef.tmp,,,,<#xon1,#1>
+100$:	tst	(sp)+
+	unsave	<r2,r1>			; all done
+	call	drpprv			; /41/ Don't want privs anymore
+	clr	r0			; no errors
+	return				; bye
+
+	.save
+	.psect	$PDATA	,D
+xon1:	.byte	'Q&37,0
+	.even
+	.restore
+
+
+
+	.sbttl	get uic
+
+
+;	G E T U I C
+;
+;	input:	nothing
+;	output:	r0	current UIC/PPN of the user
+
+	.mcall	gtsk$s
+
+
+getuic::
+	sub	#40	,sp		; allocate gtsk buffer
+	mov	sp	,r0		; point to the buffer please
+	gtsk$s	r0			; simple
+	mov	g.tspc(r0),r0		; return the uic
+	add	#40	,sp		; pop the buffer and exit
+	return
+
+
+
+;	Drop/Regain privs for M+ v3 and Micro/Rsx V3 /41/
+
+	.mcall	GIN$S			; /41/ the macro that does such things
+
+
+drpprv::mov	r1	,-(sp)		; /41/ save a register today
+	clr	r1			; /41/ say we want to drop it all
+	br	doprv			; /41/ off to common code now
+
+getprv::mov	r1	,-(sp)		; /41/ save a register today
+	mov	#-1.,R1			; /60/ set bit 0 to request privs
+
+doprv:	mov	r0	,-(sp)		; /41/ Lets not trash r0 this time
+	call	getsys			; /41/ insure that it's not virgin 11M
+	cmpb	r0	,#SY$11M	; /41/ old type 11M today ?
+	beq	100$			; /41/ yes, do nothing
+	tst	proflg			; /41/ Also skip for P/OS
+	bne	100$			; /41/ P/OS, then exit
+	tst	#GI.SPR			; /41/ if this is not defined then skip
+	beq	100$			; /41/ it
+	mov	r1	,privon		; /41/ Save priv on/off status
+	GIN$S	#GI.SPR,r1		; /41/ Set the privs up/down now
+100$:	mov	(sp)+	,r0		; /41/ Restore R0
+	mov	(sp)+	,r1		; /41/ pop a register now
+	return
+
+
+
+
+
+
+	.sbttl	suspend the job for a while
+
+;	S U S P E N
+;
+;	suspend(%val sleep_time)
+;
+;	input:	@r5	time to go away for
+
+	.mcall	mrkt$s	,wtse$s
+
+suspen::
+	tst	@r5			; nonzero seconds call ?
+	bne	10$			; yes
+	mrkt$s	#ef.tt,2(r5),#1		; no, sleep passed # of ticks
+	br	20$			; and now wait for the timeout
+10$:	mrkt$s	#ef.tt,@r5,#2		; sleep integral # of seconds
+20$:	wtse$s	#ef.tt
+	return
+
+
+	.sbttl	ttypar	set parity stuff for kermit
+
+
+;	T T Y P A R
+;
+;	ttypar( %loc terminal name, %val paritycode )
+;
+;	input:	@r5	address of terminal name
+;		2(r5)	parity code
+;	output:	r0	error code
+
+	.if ne	,0			; we are doing it in software as of
+	.ift				; 28-Mar-84  09:11:18  (BDN)
+
+ttypar::
+	call	ttpars			; get the terminal unit number
+	bcs	100$			; oops
+100$:	movb	@#$DSW	,r0		; get any errors
+	return
+
+	.endc
+
+chkpar::clr	r0
+	return
+
+
+	.enabl	lsb
+
+;	Inqpar added /53/
+
+Inqpar::SAVE	<r1>			; Save this one
+	clr	-(sp)			; Allocate a buffer
+	call	ttpars			; the usual, parse the device name
+	bcs	90$			; oops
+	ALUN$S	#LUN.CO,r1,r0		; assign the terminal please
+	mov	sp	,r1		; Point to it
+	movb	#TC.PAR	,(r1)		; Want to know about parity
+	QIOW$S	#SF.GMC,#LUN.CO,,,,,<r1,#2>
+	bcs	90$			; Oops
+	movb	1(r1)	,r0
+	mov	sp	,r0		; Assume parity
+	tstb	1(r1)			; Is parity set?
+	bne	100$			; Yes
+90$:	clr	r0			; No parity or directive error
+100$:	tst	(sp)+			; Pop buffer
+	UNSAVE	<r1>			; Restore this one
+	return				; Exit
+
+	GLOBAL	<TC.PAR,LUN.CO>
+
+	.dsabl	lsb
+
+
+
+	.sbttl	hangup a terminal, set dtr on a terminal
+
+
+;	T T Y H A N
+;
+;	ttyhan( %loc terminalname )
+;
+;	input:	@r5	address of the terminal name
+;	output:	r0	error code
+
+
+	.mcall	ALUN$S	,CMKT$S	,MRKT$S	,QIOW$S
+ 
+
+ttyhan::save    <r1>
+	MRKT$S	#EF.TMO,#2,#2,#200$	; /41/ Set a timeout up please
+	call	getprv			; get privs			  +SSH
+	tst	assdon			; /41/ assign ever done ?
+	bne	5$			; /41/ Yes
+	call	ttpars			; /41/ No, likely we are on P/OS
+	bcs	100$			; /41/ Parse failed (?)
+	ALUN$S	#LUN.AS,r1,r0		; /41/ Never assigned, do it now
+	QIOW$S	#IO.ATT,#LUN.AS		; /41/ 
+5$:	tstb	logstr			; /41/if logoff MESSAGE len > 0	  +SSH
+	beq	10$			; /41/no			  +SSH
+	strlen	#logstr			; /41/yes, send logout line	  +SSH
+	QIOW$S	#IO.WLB,#lun.as,#ef.tt,,,,<#logstr,r0,#53> ;/41/	  +SSH
+	MRKT$S	#ef.tt,#2,#2		; wait 2 seconds		  +SSH
+	WTSE$S	#ef.tt			; 2 seconds up when ef set	  +SSH
+10$:
+	QIOW$S  #IO.HNG,#lun.as,#ef.tt,#50,#kbiost	;		  /SSH
+	tst	assdon			; /41/ Ever reach ASSDEV ?
+	beq	20$			; /41/ No
+	QIOW$S	#IO.DET,#lun.as		; /41/ Likely P/OS, so detach NOW
+20$:	call	rstass			; restore any old line setting	  +SSH
+	CMKT$S	#EF.TMO,#200$		; /41/ Kill the mark time now
+        moverr  kbiost  ,r0
+	unsave  <r1>
+100$:	return
+
+
+200$:	QIOW$S	#IO.KIL,#LUN.AS		; /41/ We get here on a timeout
+	tst	(sp)+			; /41/ Pop EF
+	ASTX$S				; /41/ Exit from the AST
+
+
+
+carast:	MESSAGE
+	MESSAGE	<?Carrier lost>,CR
+	ASTX$S
+
+
+;	raise DTR on a terminal line
+;
+;	T T Y D T R
+;
+;	ttydtr( %loc terminalname )
+;
+;	input:	@r5	address of the terminal name
+;	output:	r0	error code
+
+
+ttydtr::
+	call	ttpars			; the usual, parse the device name
+	bcs	100$			; oops
+100$:	movb	@#$DSW	,r0		; return error code and exit
+	return				; bye
+
+
+;	For INQDTR, see same in K11E80.MAC (RSTS/E version)
+
+inqdtr::mov	#-1	,r0
+	return
+
+
+
+	.sbttl	ttspeed	get speed for line
+
+
+;	T T S P E E D
+;
+;	input:	@r5	name of terminal or address of null for current
+;	output:	r0	current speed
+;
+
+	.psect	$pdata
+
+splst:	.word	0	,50.	,75.	,110.	,134.	,150.	,200.
+	.word	300.	,600.	,1200.	,1800.	,2000.	,2400.	,3600.
+	.word	4800.	,7200.	,9600.	,19200. ,38400. ,-1
+
+setlst:	.word	s.0	,s.50	,s.75	,s.110	,s.134	,s.150	,s.200
+	.word	s.300	,s.600	,s.1200	,s.1800	,s.2000	,s.2400	,s.3600
+	.word	s.4800.	,s.7200	,s.9600	,s.19.2 ,s.38.4 ,-1
+
+
+	.psect	$code
+
+ttspee::call	getprv			; /41/ May need privs turned on
+	save	<r1,r2>
+	clr	-(sp)			; allocate buffer for SF.GMC
+	clr	-(sp)
+	call	ttpars			; parse the terminal device name
+	bcs	90$			; error in device name ?
+	alun$s	#lun.co,r1,r0		; assign the terminal please
+	mov	sp	,r2
+	movb	#tc.xsp	,@r2
+	movb	#tc.rsp	,2(r2)
+	QIOW$S	#sf.gmc,#lun.co,#ef.tt,,#kbiost,,<r2,#4>
+	movb	kbiost	,-(sp)
+	movb	(sp)+	,kbiost
+	clr	r0			; assume zero speed
+	cmpb	kbiost	,#is.suc	; did the read speed thing work ?
+	bne	90$			; not really
+	movb	1(r2)	,r2		; get the speed setting please
+	clr	r1			; find the index into speed table
+10$:	cmp	setlst(r1),#-1		; reached the end of table yet ?
+	beq	90$			; yes, exit
+	cmpb	setlst(r1),r2		; a match yet
+	beq	20$			; yes
+	tst	(r1)+			; no, index := index + 2
+	br	10$			; next please
+20$:	mov	splst(r1),r0		; return decimal of the speed
+	br	100$			; bye
+
+90$:
+100$:	cmp	(sp)+	,(sp)+
+	unsave	<r2,r1>
+	call	drpprv			; /41/ Insure privs are turned off
+	return
+
+
+
+
+
+
+	.sbttl	set the speed of a terminal line
+	.mcall	astx$s	,cmkt$s	,mrkt$s	,QIOW$S
+
+
+
+;	S E T S P D
+;
+;	setspd(%loc devicename, %val speed)
+;
+;	input:	@r5	device name
+;		2(r5)	speed
+;		4(r5)	lun
+;	output:	r0	error code, 255 if invalid speed
+
+setspd::save	<r1,r2,r3,r4>
+	call	getprv			; /41/ May need privs turned on
+	mov	2(r5)	,r2		; the speed
+	mov	4(r5)	,r4		; save the lun
+	call	ttpars			; parse the terminal name
+	bcs	90$			; oops
+	clr	r3			; match the passed speed to the
+10$:	cmp	splst(r3),#-1		; speed desired to get the index
+	beq	80$			; end of the table, invalid speed
+	cmp	splst(r3),r2		; a match yet ?
+	beq	20$			; yes
+	tst	(r3)+			; no, look again please
+	br	10$			; next
+
+20$:	movb	setlst(r3),aslxsp+1	; /41/ insert the transmitted speed
+	movb	setlst(r3),aslrsp+1	; /41/ insert the received speed also
+	mov	#aslspd	,r2		; /41/ pointer to it
+	alun$s	r4,r1,r0		; assign the terminal please
+	mrkt$s	#ef.tmo,#2,#2,#spdtmo	; in case we can't get the device
+	QIOW$S	#sf.smc,r4,#ef.tt,#50,#kbiost,,<r2,#4>
+	cmkt$s	#ef.tmo,#spdtmo		; we got it ok
+	clr	r0			; assume success
+	cmpb	kbiost	,#is.suc	; did it work ?
+	beq	100$			; yes, exit without error
+70$:	moverr	kbiost	,r0		; no, return the error and exit
+	br	100$			; and exit with the error code
+
+80$:	mov	#377	,r0		; unknown speed
+	br	100$			; exit
+
+90$:	moverr	@#$dsw	,r0		; error from parse
+	br	100$
+
+100$:	unsave	<r4,r3,r2,r1>		; bye
+	call	drpprv			; /41/ Don't want privs on now
+	return
+
+spdtmo:	tst	(sp)+			; remove the event flag number
+	QIOW$S	#io.kil,r4,#ef.tt,#50,#kbiost
+	movb	#ie.abo	,kbiost		; insure that's the error code
+	astx$s				; exit from this timeout ast
+
+
+
+
+
+	.sbttl	ttpars	get unit number from ttname
+
+;	T T P A R S
+;
+;	ttpars( %loc ttname )
+;
+;	output:	r0	unit number or 377 for null string
+;		r1	device name
+
+ttpars::				; NEEDS TO BE GLOBAL(RBD)
+	save	<r2,r3>			; parse a device name
+	clr	r1			; no device name yet
+	clrb	@#$DSW			; set no error as of yet
+	mov	#377	,r0		; presume no device name
+	mov	@r5	,r3		; get the string address
+	tstb	@r3			; anything there ?
+	beq	90$			; no, error
+
+;	cmpb	@r3	,#'X&137	; i may try this on 350 some day(RTM02)
+;	beq	10$			; ok				(RTM02)
+	cmpb	@r3	,#'A&137	; must be of the format ?Tnnn:
+	blo	90$			; ok so far
+	cmpb	@r3	,#'Z&137	; must be of the format ?Tnnn:
+	blos	10$			; no
+
+	cmpb	@r3	,#'A!40		; must be of the format ?Tnnn:
+	blo	90$			; ok so far
+	cmpb	@r3	,#'Z!40		; must be of the format ?Tnnn:
+	bhi	90$			; no
+10$:	bisb	(r3)	,r1		; ok, save the first character	(RTM02)
+	swab	r1			; and make a place for the next
+	cmpb	(r3)+	,#'T&137	; Is this possibly "TI:" ?	(RTM02)
+	bne	15$			; If NE, no.			(RTM02)
+	cmpb	@r3	,#'I&137	; passed 'TI:' ?
+	beq	105$			; return unit of 377 then please
+	cmpb	@r3	,#'I!40		; passed 'TI:' ?
+	beq	105$			; return unit of 377 then please
+	
+;	cmpb	@r3	,#'K&137	; XK: (?)			(RTM02)
+;	beq	20$			; yep				(RTM02)
+;	cmpb	@r3	,#'T&137	; must be of the format TTnnn:	(RTM02)
+;	beq	20$			; ok so far			(RTM02)
+;	cmpb	@r3	,#'T!40		; must be of the format TTnnn:	(RTM02)
+;	bne	90$			; no				(RTM02)
+
+15$:	cmpb	@r3	,#'A&137	; Is this possibly uppercase ?	(RTM02)
+	blo	90$			; If LO, no.			(RTM02)
+	cmpb	@r3	,#'Z&137	; Is this really uppercase ?	(RTM02)
+	blos	20$			; If LOS, yes.			(RTM02)
+	cmpb	@r3	,#'A!40		; Is this possibly lowercase ?	(RTM02)
+	blo	90$			; If LO, no.			(RTM02)
+	cmpb	@r3	,#'Z!40		; Is this really lowercase ?	(RTM02)
+	bhi	90$			; If HI, no.			(RTM02)
+
+20$:	bisb	(r3)+	,r1
+	swab	r1			; have the device name in r1 now
+	clr	r0			; could use .parse but this is
+
+30$:	movb	(r3)+	,r2		; get the next digit in the string
+	beq	90$			; hit end of string
+	cmpb	r2	,#':		; end of the device name ?
+	beq	105$			; yes, exit please
+	cmpb	r2	,#'0		; in the range '0'..'7' ?
+	blo	90$			; oops
+	cmpb	r2	,#'7		; keep checking please
+	bhi	90$			; bad device name
+	asl	r0			; r0 = r0 * 8
+	asl	r0			; ditto
+	asl	r0			; and so forth
+	sub	#'0	,r2		; convert to binary
+	add	r2	,r0		; and sum the digit in please
+	br	30$			; next
+
+90$:	movb	#ie.idu	,@#$dsw		; fake a bad device name and exit
+	sec				; ok
+	br	110$			; bye
+105$:	clr	@#$dsw			; no errors
+	clc				; success
+110$:	unsave	<r3,r2>			; bye
+	return
+
+
+
+	.sbttl	assign device
+
+
+;	Fake a device assignment by attaching to a dummy lun. Also
+;	check for someone else having it via issueing a mark time.
+;	Thanks to Bob Denny for that one.
+;
+
+	.mcall	alun$s	,astx$s	,cmkt$s	,mrkt$s	,QIOW$S	,wtse$s
+
+
+assdev::tst	proflg			; if this is a pro/350 we don't
+	beq	1$			; have to worry about all these
+	clr	r0			; characteristics.
+	return				; simply exit
+1$:	save	<r1,r2,r3>
+	call	rstass			; /41/ restore possible previous set
+	call	getprv			; /60/ restore privs again
+	call	ttpars
+	bcc	5$
+	jmp	100$
+5$:	mov	r0	,r3		; save the unit number please
+	cmpb	r3	,#377		; local terminal ?
+	bne	10$			; no
+	alun$s	#lun.as,#"TI,#0		; assign the terminal please
+	br	20$
+10$:	alun$s	#lun.as,r1,r3		; assign the terminal please
+	bcc	12$			; If CC, device is assigned.	(RTM02)
+	jmp	100$			; Else, report the error.	(RTM02)
+12$:	sub	#20	,sp		; Allocate a buffer for glun.	(RTM03)
+	mov	sp	,r2		; Set pointer to the buffer.	(RTM03)
+	glun$s	#lun.as	,r2		; Get real name of terminal.	(RTM03)
+	mov	g.luna(r2),r1		; Copy the device name.		(RTM03)
+	movb	g.lunu(r2),r3		; Copy the unit number.		(RTM03)
+	mov	g.lucw(r2),r2		; Copy the device char. word.	(BDN53)
+	add	#20	,sp		; Pop the glun buffer.		(RTM03)
+	bit	#DV.F11!DV.COM!DV.MNT,r2; Insure not disk or tape	(BDN53)
+	beq	15$			; Yes				(BDN53)
+	movb	#IE.IDU	,@#$DSW		; No, force an error please	(BDN53)
+	jmp	100$			; Exit 				(BDN53)
+15$:	mov	@r5,r0			; Copy the device name buffer.	(RTM03)
+	call	fmtdev			; Format the real device name.	(RTM03)
+
+20$:	clr	r2			; flag if we timed out		(RTM03)
+	mrkt$s	#ef.tmo,#2,#2,#asstmo	; give 2 seconds to do this	(RTM03)
+	QIOW$S	#io.att,#lun.as,#ef.tt,,#kbiost
+	mov	r2	,r0		; did we ever time out
+	beq	25$			; no
+	jmp	110$			; yes, return busy device
+25$:	cmkt$s	#ef.tmo,#asstmo		; and cancel the mark time
+	sub	#20	,sp		; allocate a buffer for glun
+	mov	sp	,r2		; and a pointer to it
+	glun$s	#lun.tt	,r2		; get name of the console terminal
+	cmpb	r3	,#377		; no unit?
+	beq	40$			; yes, must be TI:
+	cmp	g.luna(r2),r1		; device name of console same as dev?
+	bne	30$			; no
+	cmpb	g.lunu(r2),r3		; unit number the same ?
+	beq	40$			; yes
+30$:	QIOW$S	#SF.GMC,#lun.as,#ef.tt,,,,<#savass,#asvlen> ; /41/ more things
+	QIOW$S	#SF.SMC,#lun.as,#ef.tt,,,,<#setass,#astlen> ; /41/ ditto
+	Call	drpprv			; /60/ drop privs now
+	movb	savrsp+1,aslrsp+1	; /41/ copy to assigned recv speed
+	movb	savxsp+1,aslxsp+1	; /41/ copy to assigned xmit speed
+	mov	sp	,assdon		; flag we did the set /slave=ttnn:
+40$:	add	#20	,sp		; pop glun buffer
+	clr	r0
+	cmpb	kbiost	,#is.suc	; did it work
+	beq	110$			; yes, return error zero
+	cmpb	kbiost	,#ie.daa	; ignore already attached errors
+	beq	110$			; simple to do
+	moverr	kbiost	,r0		; no, get the error code
+	br	110$			; and exit
+100$:	moverr	@#$DSW	,r0
+110$:	unsave	<r3,r2,r1>
+	return
+
+
+asstmo:	tst	(sp)+			; remove the event flag number
+	QIOW$S	#io.kil,#lun.as,#ef.tt,#50,#kbiost
+	moverr	#ie.daa	,r2		; get the error code and exit
+	astx$s				; exit from this timeout ast
+
+
+rstass:	tst	assdon			; /41/ If line was ever assigned then
+	beq	100$			; /41/ we need to reset the prev line
+	clr	assdon			; /41/ no longer assigned
+	call	getprv			; /41/ insure privs are up
+	QIOW$S	#SF.SMC,#lun.as,#ef.tt,,,,<#savass,#asvlen>
+	QIOW$S	#IO.DET,#lun.as		; /41/ detach it
+	call	drpprv			; /41/ Insure no privs now
+100$:	return
+
+
+
+
+
+	.sbttl	fmtdev - Format the real device name.
+;+
+;
+; fmtdev - Format the real device name.
+;
+; Inputs:
+;	R0 = The output buffer.
+;	R1 = The ASCII device name.
+;	R3 = The BINARY unit number.
+;
+; Outputs:
+;	All registers are preserved.
+;
+;-
+fmtdev:	save	<r0,r1,r2>		; Save some registers.		(RTM03)
+	swab	r1			; Copy 				(RTM03)
+	movb	r1,(r0)+		;     the			(RTM03)
+	swab	r1			;       device			(RTM03)
+	movb	r1,(r0)+		;	    name.		(RTM03)
+	mov	r3,r1			; Copy the binary unit number.	(RTM03)
+	clr	r2			; Set for zero supression.	(RTM03)
+	call	$cbtmg			; Convert it to octal ASCII.	(RTM03)
+	movb	#':,(r0)+		; Finish the device name.	(RTM03)
+	clrb	(r0)			; And terminate with a null.	(RTM03)
+	unsave	<r0,r1,r2>		; Restore the registers.	(RTM03)
+	return
+
+
+
+	.sbttl	get date and time
+
+	.enabl	lc
+	.mcall	gtim$s
+
+
+ascdat::save
+	mov	@r5	,r0		; r0 := caller result addr
+	sub	#16.	,sp		; make room for result
+	mov	sp	,r1		; result addr for gtim$
+	gtim$s	r1			; get time and date
+	mov	g.tida(r1),r2		; r2 := day
+	jsr	pc	,cnvert		; convert and store day
+	movb	#'-	,(r0)+		; insert dash
+	mov	g.timo(r1),r2		; r2 := month
+	asl	r2
+	add	g.timo(r1),r2		; r2 := 3*month
+	add	#mnthtab-3,r2		; r2 := mnthtab[3*month]@
+	movb	(r2)+	,(r0)+
+	movb	(r2)+	,(r0)+		; store month name
+	movb	(r2)+	,(r0)+
+	movb	#'-	,(r0)+		; insert dash
+	mov	@r1	,r2		; r2 := year
+	jsr	pc	,cnvert		; convert and store year
+	movb	#40 	,(r0)+		; final space
+	clrb	@r0
+	add	#16.	,sp
+	unsave
+	return
+
+asctim::save
+	mov	@r5	,r0		; the desitination
+	sub	#16.	,sp		; make room for result
+	mov	sp	,r1		; result addr for gtim$
+	gtim$s	r1			; get time and date
+	mov	#3,r3			; loop count := 3
+	add	#g.tihr,r1		; start with hours
+1$:	mov	(r1)+,r2		; begin loop
+	jsr	pc,cnvert		;   convert to ascii and store
+	dec	r3			;   if done
+	beq	2$			;     then exit loop
+	movb	#':,(r0)+		;     else insert colon
+	br	1$			; end loop
+2$:	clrb	@r0
+	add	#16.	,sp
+	unsave
+	return
+
+; cnvert: internal procedure to convert
+; integer in r2 to ascii.
+cnvert:	add	#366,r2		;begin loop
+	tstb	r2
+	bpl	cnvert		;end loop
+	add	#"00-366,r2	;convert to ascii
+	swab	r2		;reorder bytes
+	movb	r2,(r0)+	;store digit
+	swab	r2
+	movb	r2,(r0)+	;store digit
+	rts	pc
+
+	.save
+	.psect	$PDATA	,D
+mnthtab:.ascii	/JanFebMarAprMayJunJulAugSepOctNovDec/
+	.even
+	.restore
+
+
+
+
+	.sbttl	systat	get list of users logged in
+
+sercmd::
+systat::
+	moverr	#-1	,r0
+	return
+
+
+
+	.sbttl	dodir	get a reasonable directory printed
+
+	.save
+	.psect	dirctx	,rw,d,lcl,rel,con
+dirnam:	.blkb	120
+dirbuf:	.blkb	120
+diridx:	.word	0
+dirptr:	.word	dirbuf
+dcrlf:	.byte	15,12,0
+wild:	.asciz	/*.*;*/
+	.even
+	.restore
+
+;	D O D I R
+;
+;	input:	@r5	wildcarded filespec
+;	output:	r0	error code
+;
+;	DODIR prints a directory listing at the local terminal.
+;
+;
+;	S D O D I R
+;
+;	Passed:	@r5	wildcarded name
+;	Return:	r0	error code, zero for no errors
+;		r1	next character in the directory listing
+;
+;	SDODIR is called by the server to respond to a remote directory
+;	command.  Instead of the pre 2.38 method of dumping output to a
+;	disk file and then sending the disk file in an extended replay,
+;	SDODIR  returns the next  character so that  BUFFIL can use it.
+;	The routine  GETCR0  is actually a dispatch routine to call the
+;	currently selected GET_NEXT_CHARACTER routine.
+
+
+dodir::save	<r1,r2,r3,r4>		; /38/ Entirely rewritten
+	STRCPY	#dirnam	,@r5		; copy the filespec to save area
+	call	dirini			; initialize things
+10$:	call	dirnex			; get next entry to display
+	bcs	100$			; error, exit please
+	.print	#dirbuf			; ok, dump it
+	br	10$			; next please
+100$:	unsave	<r4,r3,r2,r1>		; exit
+	clr	diridx			; clear flag and exit
+	return				; bye
+
+sdirin::STRCPY	#dirnam	,@r5		; copy name over
+	clr	diridx			; ditto
+	call	dirini			; init for CALLS to sdodir
+	bcs	100$
+	mov	#dirbuf	,dirptr		; yes, init pointers please
+	clrb	@dirptr			; yes, zap the buffer
+	call	dirnex			; preload buffer
+100$:	return
+
+
+sdodir::save	<r2,r3,r4>
+10$:	movb	@dirptr	,r1		; get the next character please
+	bne	20$			; something was there
+	mov	#dirbuf	,dirptr		; reset the pointer
+	clrb	@dirptr			; yes, zap the buffer
+	call	dirnex			; empty buffer, load with next file
+	bcs	90$			; no more, return ER$EOF
+	br	10$			; and try again
+20$:	inc	dirptr			; pointer++
+	clr	r0			; no errors
+	br	100$			; exit
+90$:	mov	#ER$EOF	,r0		; failure, return(EOF)
+95$:	clr	r1			; return no data also
+	clr	diridx			; init for next time through
+100$:	unsave	<r4,r3,r2>
+	return
+	
+
+
+
+	.sbttl	return next directory entry and init directory
+
+dirini:	clr	diridx			; clear context flag
+	mov	#dirbuf	,dirptr		; set pointer up for SDODIR
+	clrb	@dirptr			; clear buffer
+	return				; thats all folks
+
+
+
+dirnex:	movb	defdir	,-(sp)		; anything in DEFDIR ?
+	bne	10$			; yes, don't alter it please
+	STRCPY	#defdir	,#wild		; nothing, insert *.*;*
+10$:	CALLS	lookup	,<#3,#dirnam,#diridx,#dirbuf>
+	tst	r0			; successfull?
+	bne	20$			; no
+	strcat	#dirbuf	,#dcrlf		; yes, append <cr><lf>
+	clr	r0			; strcat returns DST addr in r0
+	br	100$			; exit
+20$:	cmp	r0	,#ER$NMF	; no more files error ?
+	bne	90$			; no
+	tst	diridx			; ever do anything?
+	bne	90$			; yes
+	mov	#ER$FNF	,r0		; no, convert to file not found
+90$:	sec
+100$:	movb	(sp)+	,defdir		; restore DEFDIR
+	return
+	
+
+
+
+
+	.sbttl	fix up error codes
+
+
+$mover:	tstb	2(sp)
+	bmi	10$
+	clr	2(sp)
+	return
+10$:	neg	2(sp)
+	return
+
+
+	.sbttl	rsxsys	sys command for RSX11M/M+
+
+
+;	21-Aug-83  16:12:37	Brian Nelson
+;	12-Jan-84  09:54:02	Created from MINITAB v82 source
+;	07-Mar-84  21:58:10	Bob Denny - Stop instead of wait, nicer.
+
+	.enabl	gbl
+	.mcall	spwn$s	,stse$s	,r50$
+	.enabl	lsb
+
+runjob::
+	mov	#cli...	,r0
+	call	rsxsys
+	return
+
+runmcr::
+	mov	#mcr...	,r0
+	call	rsxsys
+	return
+
+rsxsys::
+	save	<r1,r2,r3,r4>
+	QIOW$S	#io.det,#lun.tt,#ef.tt,#50,#kbiost
+	mov	r0	,r4		; save the CLI we want to use
+	sub	#12*2	,sp		; need eight word exit block BDN
+	mov	sp	,r2		; Get address of exit block  BDN
+	clr	@r2			; to be safe ?
+	mov	2(r5)	,r1		; the command buffer address
+	mov	r1	,r3		; save it
+	strlen	r1			; get the command string length
+	add	r0	,r3		; point to the end
+	cmpb	-(r3)	,#cr		; trailing carriage return ?
+	bne	5$			; no
+	dec	r0			; yes, fix the length up
+5$:	mov	r0	,r3		; save the length
+	clr	r0			; assume no error please
+	spwn$s	r4,,,,,#6,,r2,r1,r3	; do it
+	bcc	10$			; Ignore error for now
+	moverr	@#$DSW	,r0		; get the error code please
+	QIOW$S	#io.att,#lun.tt,#ef.tt,#50,#kbiost
+	print	#100$
+	br	20$
+10$:	stse$s	#6			; Stop for task to exit
+20$:	add	#12*2	,sp		; pop exit status block
+	QIOW$S	#io.att,#lun.tt,#ef.tt,#50,#kbiost
+	unsave	<r4,r3,r2,r1>		; pop registers and exit
+	return
+
+
+
+	.save
+	.psect	$PDATA	,D
+100$:	.asciz	<15><12>/Spawn failure for SYS command/<15><12>
+	.even
+
+mcr...:	r50$	MCR...
+cli...:	r50$	CLI...
+
+	.restore
+	.dsabl	lsb
+
+
+	.sbttl	spool to printer
+
+
+	.mcall	print$
+
+;	can we do this with RMS i/o ?????
+
+qspool::movb	#1	,r0
+	return
+;	CALLS	open	,<@r5,2(r5)>
+;	CALLS	rsxspl	,<2(r5)>
+;100$:	return
+;
+;
+;rsxspl::mov	r0	,-(sp)		; save temps
+;	mov	r1	,-(sp)		; also this one
+;	mov	@r5	,r1		; unit number file is open on
+;	asl	r1			; get into word offset
+;	mov	fdblst(r1),r1		; fdb for that file
+;	clr	errsav
+;	print$	r1,,,#"LP,#1		; spool file to lp0 now
+;	bcc	100$
+;	moverr	f.err(r1)
+;100$:	mov	(sp)+	,r1		; pop temps and exit
+;	mov	(sp)+	,r0		;
+;	return				; bye
+
+
+
+
+
+	.sbttl	detach for the server
+
+;	Much simpler for RSX than for RSTS
+
+detach::QIOW$S	#io.det,#5,#ef.tt,,#kbiost
+	clr	r0
+	return
+
+
+login::	mov	4(r5)	,r0
+	STRCPY	r0,#nologin
+	mov	#1	,r0
+	return
+
+	.save
+	.psect	$PDATA	,D
+nologin:.asciz	#Can't do REMOTE LOGIN for RSX11M/M+ and P/OS#<15><12>
+	.even
+	.restore
+
+
+
+
+	.sbttl	error MESSAGE text
+
+syserp::
+	save	<r0>
+	mov	@r5	,r0
+	call	rmserp
+	MESSAGE
+	unsave	<r0>
+	return
+
+
+
+syserr::
+	save	<r1>			; save a register
+	clr	-(sp)			; allocate variable for error #
+	mov	sp	,r1		; and point to it
+	mov	@r5	,@r1		; if errornumber > 0
+	bmi	10$			;  then
+	CALLS	direrr	,<#2,r1,2(r5)>	;   call fiperr(num,text)
+	br	100$			;  else
+10$:	CALLS	rmserr	,<#2,r1,2(r5)>	;   call rmserr(num,text)
+100$:	tst	(sp)+
+	unsave	<r1>
+	return
+
+	global	<direrr	,rmserp	,rmserr>
+
+
+
+
+
+
+	.sbttl	dodial for the DIAL command
+	.enabl	lsb
+
+;	This is Steve Covey's code for dialing on XT1 or XT2 on the
+;	PRO/TMS Telephone Management System. BDN 06-Dec-85 11:00:40
+;
+; TMS
+; TMS for a Telephone Management System (TMS) on a PRO/350
+; TMS supports lines XT1: or XT2: under P/OS V2
+; TMS
+; TMS the DIAL command establishes the phone connection
+; TMS assuming that the appropriate SET LINE XTn: and SET SPEED n
+; TMS commands have been issued, and that the lun has been assigned
+; TMS and attached.
+; TMS
+; TMS the phone number can consist of the following:
+; TMS	digits	to be dialed
+; TMS	!	6 second access pause for dial tone
+; TMS	!!	40 second access pause for dial tone
+; TMS	,	2 second delay
+; TMS	#	changes to DTMF if initially pulse mode
+; TMS	*ABCD	other valid DTMF codes
+; TMS	^	as the first character causes a "hook flash"
+; TMS	()- and spaces ignored.  max total number 48 characters
+
+
+	.mcall	QIOW$S	,alun$s		; TMS 
+					; TMS 
+ef.rem	= 14.				; TMS 
+
+tmsdia::save	<r1>			; TMS 
+	CALLS	ttpars	,<#ttname>	; TMS
+	bcs	5$			; TMS 
+	alun$s	#lun.ti,r1,r0		; TMS 
+	QIOW$S	#io.att,#lun.ti,#ef.rem,,#tmsios ; TMS 
+	QIOW$S	#sf.smc,#lun.ti,#ef.rem,,#tmsios,,<#smctms,#smclen> 	; TMS 
+	strlen	argbuf			; TMS get length of phone number
+	QIOW$S	#io.con,#lun.ti,#ef.rem,,#tmsios,,<argbuf,r0>		; TMS 
+	cmpb	tmsios,#is.suc		; TMS did it work?
+	beq	10$			; TMS yes
+5$:	unsave	<r1>			; TMS 
+	MESSAGE	<Unsuccessful call>,cr	; TMS/BDN
+	mov	#-1	,r0		; TMS/BDN
+	return				; TMS 
+10$:	unsave	<r1>			; TMS 
+	MESSAGE	<Call complete, type CONNECT to access system>,cr ; TMS/BDN
+	clr	r0			; TMS/BDN
+	return				; TMS 
+
+	.save
+	.psect	$PDATA	,D
+
+tmsios:	.word	0,0		; TMS iosb for tms CALLS
+smctms:	.byte	xt.dmd		; TMS set data mode
+	.byte	xt.ser		; TMS serial data (not codec, dtmf, or voice)
+	.byte	xt.dlm		; TMS set dial mode
+	.byte	xt.dtm		; TMS DTMF (not pulse 10 or 20, or off hook)
+	.byte	xt.dit		; TMS set DTMF intertone time * 10ms
+	.byte	10.		; TMS 100 milliseconds
+	.byte	xt.dtt		; TMS set DTMF tone time * 10ms
+	.byte	10.		; TMS 100 milliseconds
+;	.byte	xt.mtp		; TMS set modem type - should default from speed
+;	.byte	xtm.ps		; TMS DPSK - 1200 baud Bell 212
+smclen	= . - smctms		; TMS 
+
+	.restore
+	.dsabl	lsb
+
+
+
+	.sbttl	Look in logical name tables for KERMIT$LINEn
+
+
+	.mcall	tlog$s	,alun$s	,QIOW$S	,cmkt$s	,astx$s	,mrkt$s
+
+
+;	TRNTRM(&return_name)		; Added edit /41/
+;
+;	Passed:	0(r5)	address of where to return first available dev
+;	Return:	r0	zero for success, else directive error code.
+;
+;
+;	Look through logical name tables for a free terminal to use. The
+;	first translation will be on KERMIT$LINEn, where N is null, then
+;	1 though NN. Stop on first translation that has a free terminal,
+;	or when we fail on the translation (IE.LNF).  For now, to see if
+;	the line is free,  try IO.ATT with a short marktime to abort the
+;	attach in case the line is already in use (actually call ASSDEV)
+;
+;	Added edit /41/ 23-DEC-1985 10:20
+;
+;	Local copy of TLON$S from M+ v3
+;
+;	Since I may have to do this on M+ 2.1 or RSTS v9, those RSXMAC's
+;	have TLOG$S but not TLON$S.  Thus lets define it here. Note that
+;	trying to execute TLON or TLOG on old RSX's won't hurt anything,
+;	they will simply return an error.
+
+	.MACRO	TLON$S	MOD,TBMSK,STATUS,LNS,LNSSZ,ENS,ENSSZ,RSIZE,RTBMOD,ERR
+	.MCALL	DIR$,MOV$,MVB$,LNMOD$
+	LNMOD$
+	MOV$	STATUS
+	MOV$	RTBMOD
+	MOV$	RSIZE
+	MOV$	ENSSZ
+	MOV$	ENS
+	MOV$	LNSSZ
+	MOV$	LNS
+	MVB$	TBMSK,#0
+	MVB$	#13.,MOD
+	MOV	(PC)+,-(SP)
+	.BYTE	207.,10.
+	DIR$	,ERR
+	.ENDM	TLON$S
+
+
+	tr$res	=	0
+	tr$nam	=	2
+	tr$uni	=	4
+
+trntrm::save	<r1,r2,r3,r4>		; +/41/ save temp registers 
+	sub	#10	,sp		; local r/w things
+	mov	sp	,r3		; base it off of r3
+	sub	#30	,sp		; allocate a result buffer
+	mov	sp	,tr$res(r3)	; and a pointer to it
+	sub	#30	,sp		; allocate buffer for xlate name
+	mov	sp	,tr$nam(r3)	; and a pointer to the buffer
+	mov	#-1	,tr$uni(r3)	; 'unit' number counter
+	call	getsys			; vanilla RSX 11M today?
+	cmpb	r0	,#SY$11M	; well ?
+	bne	10$			; no
+	jmp	90$			; yes, do nothing at all then
+
+10$:	STRCPY	tr$nam(r3),#ln$nam	; copy the prototype name over
+	tst	tr$uni(r3)		; is this the first time through?
+	bmi	30$			; yes (ie, it's -1)
+	mov	tr$uni(r3),r1		; no, append the 'unit' on logical
+	clr	r2			; so we get a name like KERMIT$LINE2
+20$:	tstb	(r0)+			; get to the end of the logical
+	bne	20$			; not yet
+	dec	r0			; r0 --> end of copy of prototype
+	call	$cbdmg			; r0 already had address from STRCPY
+	clrb	@r0			; insure .asciz
+30$:	clr	-(sp)			; allocate buffer for returned_size
+	mov	sp	,r1		; and a pointer to it
+	clr	-(sp)			; allocate buffer for 'RTBMOD'
+	mov	sp	,r2		; and a pointer to it also
+	strlen	tr$nam(r3)		; get length of name to translate
+	tst	proflg			; is this P/OS today ?
+	bne	40$			; yes, use TLOG$S then
+	TLON$S	#0,ln$msk,#0,tr$nam(r3),r0,tr$res(r3),#27,r1,r2
+	br	50$			;	
+40$:	TLOG$S	#0,ln$msk,#0,tr$nam(r3),r0,tr$res(r3),#27,r1,r2
+50$:	tst	(sp)+			; ignore the returned table number
+	mov	(sp)+	,r1		; get the length of translated string
+	cmpb	@#$DSW	,#IS.SUC	; successfull translation ?
+	bne	70$			; no
+60$:	add	tr$res(r3),r1		; success, make name .asciz
+	clrb	@r1			; simple
+	CALLS	assdev	,<tr$res(r3)>	; parse and assign the device
+	cmpb	r0	,#IE.DAA	; device busy today ?
+	beq	80$			; yes, try next logical
+	tst	r0			; other errors are fatal
+	bne	100$			; exit
+	STRCPY	@r5	,tr$res(r3)	; success, return device name
+	clr	r0			; success
+	br	100$			; exit
+
+70$:	tst	tr$uni(r3)		; translation failure, first time?
+	bpl	90$			; no, error is fatal
+80$:	inc	tr$uni(r3)		; first time, goto KERMIT$LINE0
+	jmp	10$			; next logical name please
+
+90$:	clr	r0			; return an error
+	bisb	#IE.IDU	,r0		; return invalid device name
+100$:	add	#10+<2*30>,sp		; pop local buffers
+	unsave	<r4,r3,r2,r1>		; and pop registers we saved
+	return				; -/41/ exit
+
+
+	.save
+	.psect	$idata
+ln$nam::.asciz	/KERMIT$LINE/		; prototype logical name
+	.even				; always please
+ln$msk::.word	0			; may want .word IN.SYS!IN.GRP
+	.restore
+
+
+
+	.sbttl	dialout line setup routines	;			  /45/
+
+
+;	From Steve Heflin, 08-Feb-86
+;
+;	These SET and RESTORE line characteristics for the DIAL command
+;	that are special for talking to the modem. These are NOT needed
+;	for RSTS/E and RT11,  so thus are return stubbs to  resolve the
+;	global symbol references.
+
+
+tidias::				; Setup line for dialout	  /45/
+	call	getprv			; get privledges		  /45/
+	cmpb	savdlu+1,tcdlu		; already in dialout mode ?	  /45/
+	beq	45$			; yes, no need to change it	  /45/
+	tstb	tcdlu			; allowing tc.dlu change?	  /45/
+	beq	45$			; no				  /45/
+	movb	tcdlu	,fixti2+1 	; adust setting for TC.DLU	  /45/
+	dir$	#set.dlu		; issue set			  /45/
+45$:	dir$	#set.chars		; set other attribs. for dialout  /45/
+	call	drpprv			; drop privs			  /45/
+	return				; 				  /45/
+
+
+
+tidiar::				; Restore remote line attrib.	  /45/
+	call	getprv			; get privledges		  /45/
+	cmpb	savdlu+1,fixti2+1	; if TC.DLU param got changed	  /45/
+	beq	50$			; no, 				  /45/
+	movb	savdlu+1,fixti2+1	; yes, restore it like it was	  /45/
+	dir$	#set.dlu		;      issue request		  /45/
+50$:	dir$	#rest.chars		; restore remote line attributes  /45/
+					; that could have been lost when  /45/
+					; carrier was detected		  /45/
+	call	drpprv			; drop privs			  /45/
+	return				; 				  /45/
+
+
+	.sbttl	find out kind of terminal
+
+;	INQTER 12-Feb-86  14:51:00 Brian Nelson
+;
+;	This returns VT100 for all VT1xx and VT2xx terminals.
+;	Since we  don't treat VT200's different,  why bother.
+;	If TC.ANI is unknown on old RSX's, SF.GMC will simply
+;	stop there,  returning only TC.TPP.  For applications
+;	that REALLY need to know the terminal type,  take out
+;	the check for TC.ANI. Including the TC.ANI helps when
+;	Digital adds new VTxxx terminals.
+
+	.enabl	lsb
+
+inqter:	save	<r1,r2>			; /45/ Get the type of terminal
+	clr	-(sp)			; /45/ A small buffer to use
+	clr	-(sp)			; /45/ Another one
+	mov	sp	,r2		; /45/ A pointer to that buffer
+	movb	#TC.TTP	,@r2		; /45/ Characteristic to read
+	movb	#TC.ANI	,2(r2)		; /45/ Does this one work on old RSXs
+	qiow$s	#SF.GMC,#5,,,,,<r2,#4>	; /45/ Get RSX to tell us now
+	bcs	90$			; /45/ Failed, return TTY
+	tstb	3(r2)			; /45/ See if ANSICRT
+	bne	20$			; /45/ YES, exit now with VT100
+	mov	#200$	,r1		; /45/ Check for it
+10$:	tstb	@r1			; /45/ End of the list
+	beq	90$			; /45/ Yes, return TTY
+	cmpb	(r1)+	,1(r2)		; /45/ A match ?
+	bne	10$			; /45/ No, exit please
+20$:	mov	#VT100	,r0		; /45/ Yes, return(VT100)
+	br	100$			; /45/ Exit
+
+90$:	clr	r0			; /45/ No match, return(TTY)
+100$:	cmp	(sp)+	,(sp)+		; /45/ Pop buffer and exit
+	unsave	<r2,r1>			; /45/ Pop registers and exit
+	return
+
+
+;	Note: If the PRO/350 is to actually be used for, say, editing
+;	or if it is to use the Kermit-11 connect code's GRAY key  re-
+;	mapping, then we should ALWAYS map T.BMP1 to a VT100. This is
+;	a problem,  however, as the value of T.BMP1 is the same as it
+;	is for T.V2XX. At least, according to the Micro-RSX doc vt2xx
+;	code is 35 (8), actual task build shows T.BMP1 to be 35 also.
+;	Please note the the PRO is NOT totally compatible with VT2xxs
+;	TC.BMP1 is the PRO terminal type (Bit MaPped)
+
+	.save
+	.psect	$PDATA	,D
+200$:	.byte	T.V100	,T.V101	,T.V102	,T.V105	,T.V125	,T.V131
+	.byte	T.V132	,T.BMP1	,T.V2XX
+	.byte	0
+	.even
+	.restore
+	.dsabl	lsb
+
+
+	.end

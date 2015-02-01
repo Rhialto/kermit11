@@ -1,0 +1,62 @@
+	.psect	topmem	,d,rw,gbl,ovr,rel
+	.name	utl
+	.name	err
+	.name	sr
+
+	.root	rm-rmsrot,rmsall,senrec,utilty,error,topmem
+rm:	.fctr	a-b-c-d-e-f-errdvr-mem-sub
+a:	.fctr	k11pak
+b:	.fctr	k11dat
+c:	.fctr	k11rms
+d:	.fctr	k11m41
+e:	.fctr	k11cmd
+f:	.fctr	k11lcl
+
+senrec:	.fctr	sr-*(k11sen,k11rec,k11cm1-k11edi)
+
+set0:	.fctr	k11st0
+set1:	.fctr	k11st1
+show:	.fctr	k11sho
+connec:	.fctr	k11pco
+alt:	.fctr	k11mco
+help:	.fctr	k11hlp
+server:	.fctr	k11ser
+transf:	.fctr	k11tra
+debug:	.fctr	k11deb
+dial:	.fctr	k11dia
+utilty:	.fctr	utl-*(set0,set1,show,server,connec,help,transf,debug,dial,alt)
+errdvr:	.fctr	k11err
+
+;	 This overlay must  NOT contain ANY routines called by the
+;	command parser  (GETCMD, GETCM0 and GETCM1) as the command
+;	lists for LOCAl and REMOTE commands are in here and loaded
+;	via calls to LOACMD  and LOAREM,  which simply force $AUTO
+;	to load the overlay and then they return the  command list
+;	address in R0.
+
+error:	.fctr	err-*(x1,x2)
+x1:	.fctr	*(er1,er2,er3,direrr,k11rmz)
+x2:	.fctr	*(hl,copy,cmdlst,setlst,conver-atr,ini)
+
+copy:	.fctr	k11cpy
+er1:	.fctr	k11er1
+er2:	.fctr	k11er2
+er3:	.fctr	k11er3
+direrr:	.fctr	k11der
+sub:	.fctr	k11sub
+hl:	.fctr	k11dfh
+cmdlst:	.fctr	k11com
+setlst:	.fctr	k11std
+conver:	.fctr	k11cvt
+atr:	.fctr	k11atr
+ini:	.fctr	k11ini
+
+;	Get some memory please
+
+mem:	.fctr	lb:[1,1]VMLIB/lb:extsk
+
+
+@k11dap.m41
+
+
+	.end

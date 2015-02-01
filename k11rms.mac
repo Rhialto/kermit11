@@ -1,0 +1,1835 @@
+	.title	k11rms	rms i/o for KERMIT-11
+	.ident	/3.56.0/
+	.library	/LB:[1,1]RMSMAC.MLB/
+
+
+;	Brian Nelson  30-Nov-83  09:53:49
+;
+;	Copyright (C) 1983   Change Software, Inc.
+;
+; Edited by:
+; RBD01 - Bob Denny 03-Mar-84	See K11CMD for edit trails
+;
+;
+;	*******************************************************
+;	*  NOTES REGARDING DECnet (DAP) REMOTE FILE SUPPORT)  *
+;	*******************************************************
+;
+; The code here contains some magic for DECnet (DAP) remote file
+; access.  I have not been able to find documentation on the DAP
+; support that is present in RMS-11 (V2).  My current understanding
+; of this, through experimentation, is as follows:
+;
+;	1. $PARSE fails with RMS status ER$UIN when given a file
+;	   specification containing a node name, but seems to
+;	   merge the input string and defaults into the expanded
+;	   string buffer anyway.  It also sets the file specification
+;	   mask.  I have assumed that the ER$UIN error is encountered
+;	   in $PARSE after the merging of the default and input
+;	   filespec information, and reflects the "fact" that RMS-11
+;	   (V2) DOES NOT SUPPORT WILDCARDING ON REMOTE FILE ACCESS.
+;
+;	2. Therefore, lookup() has been modified to return the
+;	   expanded string if its second calling parameter (index)
+;	   is zero (1st call) and there is either a node name or a
+;	   quoted literal in the spec, no wildcards and the error
+;	   is ER$UIN.
+;
+;	3. fparse() has been modified to accept if the error is ER$UIN,
+;	   and if there are no wildcards and there is a node name present.
+;	   The FB$FID bit is cleared, however, so that the original
+;	   file spec string and the defaults will be used by $OPEN.
+;
+;	4. The "SY:" defaulting is not necessary, and in fact causes
+;	   remote accesses to fail on VMS systems, where "SY:" has
+;	   no conventional meaning.
+;
+;	5. The other routines which use $parse have been similarly
+;	   modified to use the expanded string once only.
+;
+;	6. Finally, the NAMCVT routine in K11M41 was changed to handle
+;	   quoted sections in strings and node names.  This was the
+;	   hardest part of the DAP adaptation.
+;
+; I have to believe that $parse and friends act this way because remote
+; wildcarding got "left out" at the last minute because of scheduling
+; problems in the RMS group.  The code I have added here should permit
+; remote wildcarding when it is turned on by the RMS folks.
+;
+; Bob Denny	03-Mar-84
+;
+;
+;
+; Please note that RSTS rms11 requires a real default device. I thus
+; have to put my origional default for SY: back in for RSTS only. We
+; will determine this at tkb time by defining a global called FU$DEF
+; to be <> 0 in K11E80.MAC  and = 0 in K11M41.MAC.
+;
+;
+; Brian Nelson  16-Mar-84  17:34:19
+;
+; BDN 17-Feb-87  08:57:48  Re-do the allocation of record buffers so
+;			   can GBLDEF the size during TKB. This will
+;			   allow the I/D space Kermit to handle much
+;			   larger ascii records.
+
+
+;	define macros and things we want for KERMIT-11
+
+	.if ndf, k11inc
+	.ift
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.endc
+
+	.endc
+	.iif ndf, k11inc, .error ; INCLUDE for IN:K11MAC.MAC failed
+
+
+;	This is K11RMS.MAC,  the RMS11 version 2 i/o interface for
+;	Kermit on RSTS version 8, RSX11M+ v2.1 and RSX11M v4.1. It
+;	is,  without a doubt,  the worst part of Kermit due RMS11,
+;	but it's strong points are  future uses and the RSX / RSTS
+;	transportability.  An example of "future uses" is DECnet
+;	remote file access (DAP) support now present.
+;
+;
+;	open  ( %loc filename, %val channel_number ,%val type )
+;	create( %loc filename, %val channel_number ,%val type )
+;	getrec( %loc buffer  , %val channel_number ) { returns RSZ in R1}
+;	putrec( %loc buffer  , %val record_size    ,%val channel_number )
+;	close ( %val channel_number )
+;	putc  ( %val char    , %val channel_number )
+;	getc  ( %val channel_number )
+
+
+	cr	=	15
+	lf	=	12
+	ff	=	14
+	soh	=	1
+;
+; This isn't defined globally. (??)
+;
+	nb$nod	=	400	; Node in file or default string (FNB in NAM)
+
+	.enabl	gbl
+
+	.psect	$code	,ro,i,lcl,rel,con
+	.psect	rmssup	,rw,d,lcl,rel,con
+
+
+	.mcall	fabof$
+	.mcall	rabof$
+	.mcall	xabof$
+	.mcall	ifaof$
+
+	fabof$	RMS$L
+	rabof$	RMS$L
+	xabof$	RMS$L
+	ifaof$	RMS$L
+
+
+	.mcall	fab$b	,fab$e	,rab$b	,rab$e
+	.mcall	xab$b	,xab$e
+	.mcall	nam$b	,nam$e
+	.mcall	$initif	,org$
+	.mcall	pool$b	,pool$e	,p$bdb	,p$fab
+	.mcall	p$rabx	,p$idx	,p$buf
+
+	.mcall	$compar	,$fetch	,$store	,$rewin
+	.mcall	$close	,$creat	,$erase	,$open
+	.mcall	$connec	,$delet	,$discon,$find
+	.mcall	$get	,$put	,$updat	,$flush
+	.mcall	$read	,$write	,$off	,$set
+	.mcall	$testbits
+
+
+	org$	SEQ,<CRE,DEL,GET,PUT>
+
+	.psect	rmssup	,rw,d,lcl,rel,con ; ORG$ macro needs .save/.restore
+
+
+	.if ne	,0			; Decide whether or not to use
+	.ift				; dynamic space allocation by
+					; task extension or to use
+rmsbuf:	pool$b				; static pools
+	p$rab	6			; plenty of record streams
+	p$bdb	6			; same goes for block buffers
+	p$fab	4			; up to 3 fabs (needed for search)
+	p$buf	3072.			; for 2 files and directory i/o
+	pool$e				; end of static pool
+
+	.iff				; use task extension for space
+					; routine modifed from GSA example
+	.mcall	gsa$			; from RMS v2.0 distribution.
+	gsa$	gsa			; set our GSA address
+	.globl	gsa			; it may be global
+
+	.endc				; to decide on pool allocation
+
+	.psect	rmssup	,rw,d,lcl,rel,con ; GSA$ macro needs .save/.restore
+
+
+
+	.sbttl	rms file access blocks
+
+	facc	=	fb$get ! fb$put
+
+fab1:	fab$b
+	f$alq	0			; initial allocation of 10 blocks
+	f$fac	facc			; allowed i/o operations
+	f$fna	nam1			; name of the file
+	f$fns	0			; length of the filename
+	f$fop	fb$sup			; supercede old versions
+	f$lch	lun1			; channel number to use
+	f$org	fb$seq			; seq
+	f$rat	fb$cr			; implied carriage control
+	f$rfm	fb$var			; variable length records
+	f$xab	datxb1			; Date info
+	fab$e
+fab1en:
+
+fab2:	fab$b
+	f$alq	0			; initial allocation of 10 blocks
+	f$fac	facc			; allowed i/o operations
+	f$fna	nam2			; name of the file
+	f$fns	0			; length of the filename
+	f$fop	fb$sup			; supercede old versions
+	f$lch	lun2			; channel number to use
+	f$org	fb$seq			; seq
+	f$rat	fb$cr			; implied carriage control
+	f$rfm	fb$var			; variable length records
+	f$xab	datxb2			; Date info
+	fab$e
+fab2en:
+
+
+fab3:	fab$b
+	f$alq	0			; initial allocation of 10 blocks
+	f$fac	facc			; allowed i/o operations
+	f$fna	nam3			; name of the file
+	f$fns	0			; length of the filename
+	f$fop	fb$sup			; supercede old versions
+	f$lch	lun3			; channel number to use
+	f$org	fb$seq			; seq
+	f$rat	fb$cr			; implied carriage control
+	f$rfm	fb$var			; variable length records
+	f$xab	datxb3			; Date info
+	fab$e
+fab3en:
+
+
+fab4:	fab$b
+	f$alq	0			; initial allocation of 10 blocks
+	f$fac	facc			; allowed i/o operations
+	f$fna	nam4			; name of the file
+	f$fns	0			; length of the filename
+	f$fop	fb$sup			; supercede old versions
+	f$lch	lun4			; channel number to use
+	f$org	fb$seq			; seq
+	f$rat	fb$cr			; implied carriage control
+	f$rfm	fb$var			; variable length records
+	f$xab	datxb4			; Date info
+	fab$e
+
+	GLOBAL	<MAXSIZ>
+
+
+	.psect	rmssup	,rw,d,lcl,rel,con
+
+sydisk::.ascii	/SY:/
+sylen	==	. - sydisk
+	.even
+sydska	==	sydisk
+sydskl	==	sylen
+
+;								;RBD01--
+;	pointers to buffer and fabs
+;
+;	While none of this is really needed since all this info is
+;	available in  the FAB and RAB,  I find it cleaner to do it
+;	this way and thus avoid having to look at the  RMS control
+;	structures.
+
+fablst::.word	0	,fab1	,fab2	,fab3	,fab4
+namlst::.word	0	,nam1	,nam2	,nam3	,nam4
+namlen::.word	0	,0	,0	,0	,0
+rablst::.word	0	,rab1	,rab2	,rab3	,rab4
+buflst:	.word	ttbuf	,buf1	,buf2	,buf3	,buf4
+bufdef:	.word	ttbuf	,buf1	,buf2	,buf3	,buf4
+bufsiz:	.word	TTBSIZ	,MAXSIZ	,MAXSIZ	,MAXSIZ	,MAXSIZ
+bigbuf:	.word	bufx	,bufx	,bufx	,bufx	,bufx
+filtyp:	.word	TERMINAL,TEXT	,TEXT	,TEXT	,TEXT
+bufp:	.word	0	,0	,0	,0	,0
+bufs:	.word	0	,0	,0	,0	,0
+mode:	.word	1	,0	,0	,0	,0
+blknum:	.word	0	,0	,0	,0	,0
+itsopen:.word	0	,0	,0	,0	,0
+
+	FILSIZ	==	110.
+	BINLSIZ	==	30*4
+
+defdir::.blkb	FILSIZ+2		; default directory for send and rec
+srcnam::.blkb	FILSIZ+2		; original send filespec
+filnam::.blkb	FILSIZ+2		; output from directory lookup routine
+asname::.blkb	FILSIZ+2		; for SEND file [as] file
+$cmdbu::.blkb	120
+$argbu::.blkb	120
+bintyp::.word	10$
+10$:	.rept	BINLSIZE
+	.byte	0
+	.endr
+totp.r::.word	10$
+10$:	.rept	34
+	.word	0,0
+	.endr
+totp.s::.word	10$
+10$:	.rept	34
+	.word	0,0
+	.endr
+
+;	this sets the default for creating text files
+
+df$rat::.word	fb$cr
+df$rfm::.word	fb$var
+en$siz::.word	0			; for RT11 compatibilty
+
+namln1	=	namlen+2
+namln2	=	namlen+4
+namln3	=	namlen+6
+namln4	=	namlen+10
+
+nam1:	.rept	100
+	.byte	0
+	.endr
+
+nam2:	.rept	100
+	.byte	0
+	.endr
+
+nam3:	.rept	100
+	.byte	0
+	.endr
+
+nam4:	.rept	100
+	.byte	0
+	.endr
+	.even
+
+
+packet::.blkb	MAXLNG+100		; /51/ Moved.
+	.even
+
+top:	.LIMIT
+
+	TTBSIZ	=	40
+ttbuf:	.blkb	TTBSIZ+2
+
+buf1:	.iif df, MAXSIZ, .blkb MAXSIZ+2	; /56/ Dynamic or static setup?
+buf2:	.iif df, MAXSIZ, .blkb MAXSIZ+2	; /56/ ...
+buf3:	.iif df, MAXSIZ, .blkb MAXSIZ+2	; /56/ ....
+buf4:	.iif df, MAXSIZ, .blkb MAXSIZ+2	; /56/ .....
+
+bufx:	.blkb	1002			; one large buffer to share
+
+
+lun1	=	1
+lun2	=	2
+lun3	=	3
+lun4	=	4
+maxlun	=	lun4
+
+
+
+	.sbttl	rms record access blocks
+
+rab1:	rab$b				; define record access block
+	r$fab	fab1			; associate a fab with this rab
+	r$rac	rb$seq			; access by keys
+	r$rbf	buf1			; where to return the data
+	r$ubf	buf1			; where to return the data
+	rab$e				; end of record access block
+
+rab2:	rab$b				; define record access block
+	r$fab	fab2			; associate a fab with this rab
+	r$rac	rb$seq			; access by keys
+	r$rbf	buf2			; where to return the data
+	r$ubf	buf2			; where to return the data
+	rab$e				; end of record access block
+
+rab3:	rab$b				; define record access block
+	r$fab	fab3			; associate a fab with this rab
+	r$rac	rb$seq			; access by keys
+	r$rbf	buf3			; where to return the data
+	r$ubf	buf3			; where to return the data
+	rab$e				; end of record access block
+
+rab4:	rab$b				; define record access block
+	r$fab	fab4			; associate a fab with this rab
+	r$rac	rb$seq			; access by keys
+	r$rbf	buf4			; where to return the data
+	r$ubf	buf4			; where to return the data
+	rab$e				; end of record access block
+
+
+
+proxab:	xab$b	XB$PRO			; file protection xab
+	x$nxt	0			; no more links
+	x$pro	60.			; normal protection of <60>
+	xab$e				; end of file protection xab
+
+datxb1:	xab$b	XB$DAT
+	x$nxt	0
+	xab$e
+datxb2:	xab$b	XB$DAT
+	x$nxt	0
+	xab$e
+datxb3:	xab$b	XB$DAT
+	x$nxt	0
+	xab$e
+datxb4:	xab$b	XB$DAT
+	x$nxt	0
+	xab$e
+
+	.psect	$code
+
+
+	.sbttl	Set up SST table to catch RMSRES missing
+
+	.mcall	SVTK$S,EXST$S,EXTK$S	; This code added /53/
+	.mcall	GTSK$S
+
+;	Dynamic record buffer allocation and dynamic recall buffer
+;	allocation added /56/
+
+
+	.save				; Save current PSECT
+	.psect	RMSSUP	,D		; Switch to a data psect
+	.even				; Insure this
+tbl:	.word	0,0,norms		; Missing RMS gives a BPT trap
+nolib:	.byte	CR,LF
+	.ascii	/Probable cause: Either RMSRES or an RMS satellite/<CR><LF>
+	.asciz	/resident library is not installed on this system./<CR><LF>
+	.even
+	.restore			; Pop old psect
+	.enabl	lsb
+
+
+Rmsini::mov	#MAXSIZ	,r3		; Allocate record buffers
+	mov	r3	,O$MRS+fab1	; Since we are allocating
+	mov	r3	,O$MRS+fab2	; the RMS record buffers at
+	mov	r3	,O$MRS+fab3	; run time we will can't
+	mov	r3	,O$MRS+fab4	; fill these fields in with
+	mov	r3	,O$USZ+rab1	; ...MAC
+	mov	r3	,O$USZ+rab2	; .... and so on
+	mov	r3	,O$USZ+rab3	; ....
+	mov	r3	,O$USZ+rab4	; ....
+					;
+	.If df	,MAXSIZ			; Dynamic or static today?
+	.Ift				; Static
+					;
+	mov	#buf1	,r2		; So get the preallocated buffers
+	mov	top+2	,r4		;
+	.Iff				; Dynamic allocation
+					;
+	ash	#-<6-2>	,r3		; We need 4 buffers, in 64 byte
+	add	#2	,r3		; chuncks. Add a safety margin
+	EXTK$S	r3			; Ask for the memory
+	bcs	110$			; Oops, we will have to die.
+	mov	top+2	,r2		; The higest virtual address+2
+	add	#2	,r2		; filled in by TKB via .LIMIT
+	bic	#1	,r2		; Insure even
+					;
+	.Endc				; .If DF, Maxsiz
+					;
+	mov	#4	,r0		; Number of fields to update
+	clr	r3			; Offset into BUFDEF and BUFLST
+10$:	mov	r2	,bufdef+2(r3)	; Insert a record buffer address
+	mov	r2	,buflst+2(r3)	; Ditto for here also
+	add	#2	,r3		; Next please
+	add	#MAXSIZ+2,r2		; Point to the next buffer
+	sob	r0	,10$		; And go do another
+	.If ndf	,MAXSIZ			; Setup pointer for command line
+	mov	r2	,r4		; recall buffers if dynamic RMS
+	.Endc				; buffer allocation was used
+					; Now for command line recall
+	mov	#LNCNT$	,r1		; buffers. The count is defined
+	cmp	r1	,#LN$ALL	; via a GBLDEF=LNCNT$:n by TKB.
+	bgt	120$			; Ensure enough vector space. No, die
+	mov	#<LN$MAX+2>*LNCNT$,r3	; Total byte count for recall buffers
+	ash	#-6	,r3		; In 64 byte chunks
+	add	#<LN$MAX+2>/100,r3	; Fix for truncation
+	EXTK$S	r3			; Ask for it
+	bcs	130$			; No room, die (should never happen)
+	mov	r1	,lastcnt	; Save the number of recall buffers
+	mov	#lastli	,r2		; The pointer array
+40$:	mov	r4	,(r2)+		; Insert the buffer address
+	clrb	@r4			; Insure the buffer is zapped
+	add	#LN$MAX+2,r4		; Get to the next one
+	sob	r1	,40$		; And loop
+					;
+					; Finally, our original purpose.
+	SVTK$S	#tbl,#3			; Only want TBIT traps
+	return				; Exit
+
+
+110$:	Message	<Failure to allocate record buffers>,CR
+	br	200$
+120$:	Message	<LN$ALL is less than LNCNT$>,CR
+	br	200$
+130$:	Message	<Failure to allocate command recall buffers>,CR
+
+200$:	EXST$S	#EX$SEV			; Die...
+
+	.dsabl	lsb
+
+
+
+Norms:	MESSAGE	<Breakpoint trap, >	; A message
+	mov	(sp)	,r1		; Dump PC and PS
+	MESSAGE	< PC: >			; A header
+	OCTOUT	R1			; ...
+	mov	2(sp)	,r1		; PS
+	MESSAGE	<  PSW: >		; ...
+	OCTOUT	r1			; ...
+	cmp	(sp)	,#140000	; Perhaps RMSRES missing?
+	blo	100$			; No
+	PRINT	#nolib			; Dump the cause
+100$:	EXST$S	#EX$SEV			; Die
+
+	Global	<LNCNT$>
+
+
+
+
+	.sbttl	create sequential file
+	.psect	$code
+	.even
+
+;	F C R E A T E    and   FOPEN
+;
+;	fcreate( %loc filename; %val channel_number, %val type ,%val mb_count)
+;	fopen  ( %loc filename; %val channel_number, %val type ,%val mb_count)
+;
+;	input:	@r5	filename address
+;		2(r5)	channel number
+;		4(r5)	val 'binary' or 'text' or 0
+;		6(r5)	RMS multiblock count for the stream
+;
+;	output:	r0	rms error code
+;
+;	 Create a variable length sequential implied carriage control
+;	disk file.  If 'type' is 'binary'  then use read/write access
+;	to write  a fixed  512 byte image file. If  channel number is
+;	zero (0),  then initialize  buffer single character  terminal
+;	output.  It is always assumed that channel '0' implies writes
+;	to the attached console terminal.
+
+	.enabl	lsb
+open::	calls	fopen	,<@r5,2(r5),4(r5),#0>
+	return
+
+create::calls	fcreate	,<@r5,2(r5),4(r5),#0>
+	return
+
+append::calls	fapnd	,<@r5,2(r5),4(r5),#0>
+	return
+
+
+fopen::	save	<r1,r2,r3>		; save registers
+	call	drpprv			; insure no privs are up now	+MJG
+	clr	-(sp)			; flag for open not create
+	br	5$			; and try to do it
+
+
+fapnd::	save	<r1,r2,r3>		; save registers		+SSH
+	call	drpprv			; insure no privs		+SSH
+	mov	#1,-(sp)		; flag for open / append	+SSH
+	br	5$			; and try to do it		+SSH
+
+
+fcreat::save	<r1,r2,r3>		; save registers
+	call	drpprv			; insure no privs are up now	+MJG
+tcreat:	mov	#-1	,-(sp)		; flag for create
+
+5$:	$initif				; initialize rms i/o system if needed
+	mov	2(r5)	,r0		; get channel number please
+	bne	10$			; not channel zero, do it normally
+
+	mov	sp	,itsopen+0	; flag it as having been initted
+	mov	sp	,mode+0		; psuedo writing to the terminal
+	clr	bufp+0			; initialize the terminal's buffer
+	br	120$			; pointer and exit
+
+10$:	asl	r0			; times 2
+	mov	r0	,r2		; save it please
+	mov	namlst(r2),r1		; get address of name block
+	calls	fparse	,<@r5,r1>	; parse and fill in defaults
+	tst	r0			; did the parse succeed ?
+	bne	120$			; no, exit with RMS error in r0
+	strlen	r1			; get the expanded filename length
+	mov	r0	,namlen(r2)	; and save the length
+	mov	r2	,r0		; get r0 back again please
+	mov	fablst(r0),r1		; get the file access block
+	mov	@sp	,r2		; pass create/open/append flag	   /SSH
+	call	settyp			; setup the FAB now
+	mov	r0	,r2		; save the channel number*2
+	tst	@sp			; create or open or append	   /SSH
+	bmi	30$			; if negative then create	   /SSH
+
+	$open	r1			; try to open existing file	   /SSH
+	tst	@sp			; opening for append ?		   +SSH
+	beq	28$			; no, go setup for read		   +SSH
+	mov	sp	,mode(r2)	; indicate open for writing	   +SSH
+	clr	bufp(r2)		; clear single char i/o pointer    +SSH
+	br	40$			; continue with status check	   +SSH
+28$:					;				   +SSH
+	mov	#-1	,bufp(r2)	; init for buffer needing a read
+	clr	mode(r2)		; no writing please
+	br	40$			; check RMS status out now
+
+30$:	$creat	r1			; try hard to create the file
+	mov	sp	,mode(r2)	; open for writing
+	clr	bufp(r2)		; clear single character i/o pointer
+
+40$:	$fetch	r0,sts,r1		; get status back out please
+	tst	r0			; if status > 0 then status = 0
+	bmi	130$			; error if less than zero	   /SSH
+	mov	2(r5)	,r0		; connect access up now
+	asl	r0			; flag also that we are open
+	mov	sp	,itsopen(r0)	; simple
+	asr	r0			; restore r0 now
+	mov	6(r5)	,r1		; and the multiblock count also
+	mov	(sp)	,r2		; and the create/open/append opt   +SSH
+	call	rmscon			; connect record stream up
+	tst	r0			; if error > 0 then error = 0
+	bmi	120$			; yep
+	clr	r0			; error = 0
+
+120$:	tst	(sp)+			; pop open/create flag
+125$:	unsave	<r3,r2,r1>		; pop registers we saved
+	return				; and exit
+
+130$:	tst	(sp)+			; if error on open for append	   +SSH
+	ble	125$			; no, return with error		   +SSH
+	br	tcreat			; yes, try creating the file	   +SSH
+
+	global	<drpprv>		;				+MJG
+
+	.dsabl	lsb
+
+	.sbttl	setup things for open/create in the FAB
+
+
+;	S E T T Y P
+;
+;	input:	r0	channel number times 2
+;		r2	<> 0 implies create
+;		r5	--> open/create parameter list
+;
+	fbrw	=	fb$rea ! fb$wri
+
+settyp::mov	fablst(r0),r1
+	clr	blknum(r0)		; in case of read/write mode
+	mov	#MAXSIZ	,bufsiz(r0)	; default for the buffer size
+	mov	#text	,filtyp(r0)	; assume ascii text files for now
+	mov	bufdef(r0),buflst(r0)	; set a default record buffer also
+	clr	bufs(r0)		; clear single character i/o recsiz
+	$store	#proxab,XAB,r1		; /59/ Get the protection out.
+	$store	namlen(r0),FNS,r1
+	$store	#fb$seq,ORG,r1		; insure sequential by default
+	$store	df$rat ,RAT,r1		; implied carriage control
+	$store	df$rfm ,RFM,r1		; and also variable length records
+	$store	#fb$get,FAC,r1		; insure readonly please
+	tst	fu$def			; do we require a default device
+	beq	1$			; no
+	$store	#sydisk,DNA,r1		; yes, stuff the correct def dev in
+	$store	#sylen ,DNS,r1		; and the length of it also please
+1$:	tst	r2			; if creating or appending the file /SSH
+	beq	10$			; no				    /SSH
+	$store	#<fb$put>,FAC,r1 	; yes, get put access   	    /SSH
+	mov	at$pr0	,proxab+O$PRO	; /59/ Protection explicity set?
+	bne	10$			; /59/ Yes
+	$store	#0,XAB,r1		; /59/ No, remove the protection XAB
+10$:	cmp	4(r5)	,#binary	; is this a binary file ?
+	bne	100$			; no, just exit
+
+	mov	#1000	,bufsiz(r0)	; yes, fix it up for that
+	mov	bigbuf(r0),buflst(r0)	; setup a large i/o buffer please
+	mov	#binary	,filtyp(r0)	; please
+	$store	#0	,RAT,r1		; no cr/lf implied please
+	$store	#fb$fix	,RFM,r1		; fixed length also
+	$store	#fb$rea	,FAC,r1		; assume read only please
+	tst	r2			; readonly ?
+	beq	30$			; yes
+	$store	#fbrw	,FAC,r1		; read/write mode needed ?
+30$:	save	<r2,r3>			; zero out the big buffer
+	mov	buflst(r0),r2		; get the buffer address
+	mov	#1000	,r3		; 1000 (8) bytes please
+40$:	clrb	(r2)+			; simple
+	sob	r3	,40$		; next please
+	unsave	<r3,r2>			; pop registers we just used
+
+100$:	$store	bufsiz(r0),MRS,r1	; stuff max recordsize in please
+	return
+
+	global	<fu$def>
+	GLOBAL	<AT$PR0>		; /59/ Protection mask
+
+
+
+	.sbttl	close a file
+
+
+close::	save	<r1,r2,r3>		; save registers we may have
+	mov	@r5	,r0		; get the lun
+	asl	r0			; times 2
+	tst	itsopen(r0)		; check for lun being open
+	beq	90$			; no, skip all this then
+	clr	itsopen(r0)		; not anymore please
+	call	flush			; dump out any remaining buffer
+	mov	@r5	,r0		; then disconnect the access stream
+	beq	100$			; terminal
+
+	asl	r0			; channel number times 2
+	tst	mode(r0)		; writing to it today?
+	beq	10$			; no
+	calls	atrfin	,<@r5>		; yes, perhaps do attribute things
+10$:	mov	@r5	,r0		; then disconnect the access stream
+	call	rmsdis			; by doing a $disconnect
+	mov	@r5	,r1		; get the FAB for the file open on
+	asl	r1			; the passed channel
+	mov	fablst(r1),r1		;
+	$close	r1			; try hard to close the file
+	$fetch	r0,sts,r1		; get status back out please
+	tst	r0			; if status > 0 then status = 0
+	blt	100$			; error if less than zero
+90$:	clr	r0			; make > 0 status eq 0
+100$:	unsave	<r3,r2,r1>
+	return
+
+
+rewind::mov	@r5	,r0
+	beq	100$
+	asl	r0
+	mov	rablst(r0),r0
+	$rewind	r0
+100$:	clr	r0
+	return
+
+
+
+	.sbttl	try to determine if a file needs binary xfer mode
+
+;	B I N F I L
+;
+;	input:	@r5	address of the filename
+;		2(r5)	lun
+;	output:	r0	< 0 then RMS error
+;		r0	> 0 then the file is most likely binary
+
+
+binfil::save	<r1,r2,r3,r4>		; save registers we may use
+	clr	r4			; nothing is open as of yet
+	calls	chkext	,<@r5>		; check file based on filetype
+	tst	r0			; assume a binary file ?
+	bne	100$			; yep
+	mov	2(r5)	,r2		; get the lun
+	asl	r2			; times 2
+	mov	fablst(r2),r2		; get the fab address now
+	$fetch	r3,XAB,r2		; save the xab link address
+	call	getuic			; for RSTS, skip the protection XAB
+	swab	r0			; if the user is not privledged
+	cmpb	r0	,#1		; since RMS uses the UU.LOK directive
+	bne	5$			; which may be patched to fail.
+	$store	#proxab,XAB,r2		; and stuff our own into it
+5$:	calls	open	,<@r5,2(r5),#binary>
+	tst	r0			; did the open work
+	bmi	90$			; no
+	mov	sp	,r4		; flag that it's open
+
+	call	getsys			; if this is RSTS then a protection
+	cmpb	r0	,#sy$rsts	; bit of 100 being set indicates an
+	bne	10$			; executable file
+	mov	#proxab	,r1		; get the xab for the protection code
+	$testbit #100,PRO,r1		; if set, then it's executable
+	bne	40$			; assume it's binary
+
+10$:	$testbit #<fb$rel!fb$idx>,ORG,r2; indexed or relative file ?
+	bne	40$			; yes, it must be sent as a binary file
+	$compare #fb$stm,RFM,r2		; stream ascii file ?
+	beq	30$			; yes, assume not binary then
+	$testbit #FB$FTN,RAT,r2		; /47/ Please not for Fortran files
+	bne	30$			; /47/ Ok
+	$testbit #fb$cr,RAT,r2		; implied carriage control ?
+	bne	30$			; yes, assume not 8 bit then
+	br	40$			; anything else is binary please
+	
+
+30$:	clr	-(sp)			; flag as most likely being ascii
+	br	50$			; bye
+40$:	mov	#1	,-(sp)		; flag as being binary and exit
+50$:	tst	r4			; ever opened up ?
+	beq	60$			; no
+	calls	close	,<2(r5)>	; close up
+60$:	mov	(sp)+	,r0
+90$:	$store	r3,XAB,r2		; restore old xab links, if any
+
+100$:	unsave	<r4,r3,r2,r1>		; bye
+	return
+
+
+	.sbttl	getatr	return attributes for a file already open
+
+	.mcall	ifaof$			; access the ifab for the fab
+	ifaof$	rms$l			; get the ifab symbols defined
+
+
+getsiz::mov	@r5	,r1		; return error in r0, size in r1
+	asl	r1			; lun times 2
+	mov	fablst(r1),r1		; fab for this file
+	mov	<o$alq+0>(r1),r1	; get the size please
+	clr	r0			; no errors 
+	return				; exit
+
+getpro::mov	@r5	,r0		; size in r0
+	asl	r0			; lun times 2
+	mov	fablst(r0),r0		; fab for this file
+	mov	O$XAB(r0),r0		; get the protection please
+	mov	O$PRO(r0),r0		; ...
+	return				; exit
+
+
+
+;	Getcdt	Return time/date of creation, system (ie, RMS vs RT) dep.
+;
+;	Passed:	2(r5)	Channel number file is open on
+;	Return:	R0	Zero if failure (internal error) else address of
+;			64 byte Smithsonian date format
+
+
+Getcdt::mov	@r5	,r0		; Channel
+	beq	100$			; Oops
+	asl	r0			; Word offsets
+	mov	FABLST(r0),r0		; Get the fab
+	beq	100$			; Impossible
+	mov	O$XAB(r0),r0		; XAB address
+	beq	100$			; Nothing
+	add	#O$CDT	,r0		; Point to 4word creation dat/tim
+100$:	return				; Exit
+
+Putcdt::mov	@r5	,r0		; Channel
+	beq	100$			; Oops
+	asl	r0			; Word offsets
+	mov	FABLST(r0),r0		; Get the fab
+	beq	100$			; Impossible
+	mov	O$XAB(r0),r0		; XAB address
+	beq	100$			; Nothing
+	add	#O$CDT	,r0		; Point to 4word creation dat/tim
+	mov	2(r5)	,r1		; Data
+	mov	(r1)+	,(r0)+		; Copy it
+	mov	(r1)+	,(r0)+		; .Copy it
+	mov	(r1)+	,(r0)+		; ..Copy it
+	mov	(r1)+	,(r0)+		; ...Copy it
+100$:	return				; Exit
+
+
+getatr::save	<r1,r2>			; save these please
+	mov	@r5	,r1		; the channel number please
+	asl	r1			; times two please
+	mov	fablst(r1),r1		; simple
+	mov	o$ifi(r1),r1		; and now we are at the ifab
+	mov	2(r5)	,r2		; where to copy the attributes to
+	movb	f$ratt(r1),(r2)+	; stuff the input record attributes
+	movb	f$forg(r1),(r2)+	; also stuff the input file org in
+	mov	f$rsiz(r1),(r2)+	; and the input record size please
+	mov	f$hvbn(r1),(r2)+	; and the input eof markers
+	mov	f$lvbn(r1),(r2)+	; like hi and low virtual block
+	mov	f$heof(r1),(r2)+	; and the high and low eof block
+	mov	f$leof(r1),(r2)+	; numbers also
+	mov	f$ffby(r1),(r2)+	; and, at last, the first free byte
+	movb	f$hdsz(r1),(r2)+	; VFC header size next
+	movb	f$bksz(r1),(r2)+	; and largest bucket size
+	mov	f$mrs(r1) ,(r2)+	; the maximum record size
+	mov	f$deq(r1) ,(r2)+	; and the default extenstion size
+	mov	f$rtde(r1),(r2)+	; and the run time extentsion size
+100$:	unsave	<r2,r1>			; all done
+	clr	r0			; say it worked ok
+	return
+
+
+
+putatr::save	<r1,r2>			; save these please
+	mov	@r5	,r1		; the channel number please
+	asl	r1			; times two please
+	mov	fablst(r1),r1		; simple
+	mov	o$ifi(r1),r1		; and now we are at the ifab
+	mov	2(r5)	,r2		; where to get the attributes from
+	movb	(r2)+	,f$ratt(r1)	; stuff the input record attributes
+	movb	(r2)+	,f$forg(r1)	; also stuff the input file org in
+	mov	(r2)+	,f$rsiz(r1)	; and the input record size please
+	mov	(r2)+	,f$hvbn(r1)	; and the input eof markers
+	mov	(r2)+	,f$lvbn(r1)	; like hi and low virtual block
+	mov	(r2)+	,f$heof(r1)	; and the high and low eof block
+	mov	(r2)+	,f$leof(r1)	; numbers also
+	mov	(r2)+	,f$ffby(r1)	; and, at last, the first free byte
+	movb	(r2)+	,f$hdsz(r1)	; VFC header size next
+	movb	(r2)+	,f$bksz(r1)	; and largest bucket size
+	mov	(r2)+	,f$mrs(r1) 	; the maximum record size
+	mov	(r2)+	,f$deq(r1) 	; and the default extenstion size
+	mov	(r2)+	,f$rtde(r1)	; and the run time extentsion size
+100$:	unsave	<r2,r1>			; all done
+	clr	r0			; say it worked ok
+	return
+
+
+
+
+
+	.sbttl	connect record access block to file access block
+
+
+;	C O N N E C T
+;
+;	connect( %val channel_number )
+;
+;	input:	r0	channel number
+;		r1	multiblock count
+;		r2	create/open/append option flag			+SSH
+;	output:	r0	rms sts
+;
+;	Connect a record access block to a file access block.
+;	Called only from OPEN and CREATE
+
+
+rmscon:	mov	r1	,-(sp)		; the block count size
+	mov	r0	,r1		; get address of record access block
+	asl	r1			; channel number times 2
+	mov	rablst(r1),r1		; address of a rab to use
+	$store	(sp)+,MBC,r1		; the block buffer count
+	$store	#0,ROP,r1		; assume no processing options	   +SSH
+	tst	r2			; if appending to existing file	   +SSH
+	ble	7$			; no, leave options alone	   +SSH
+	$store	#rb$eof,ROP,r1		; yes, set position to EOF option  +SSH
+7$:					;				   +SSH
+	$conne	r1			; try hard to connect access up
+	$fetch	r0,sts,r1		; get status back out please
+	tst	r0			; if status > 0 then status = 0
+	blt	10$			; error if less than zero
+	clr	r0			; make > 0 status eq 0
+10$:	return
+
+
+
+
+	.sbttl	disconnect record access block from file access block
+
+
+;	R M S D I S
+;
+;	input:	r0	channel number
+;		r0	error sts
+;
+
+rmsdis:	mov	r0	,r1
+	asl	r1
+	mov	rablst(r1),r1
+	$discon	r1			; disconnect access stream from file
+	$fetch	r0,sts,r1		; get status back out please
+	tst	r0			; if status > 0 then status = 0
+	blt	10$			; error if less than zero
+	clr	r0			; make > 0 status eq 0
+10$:	return
+
+
+
+	.sbttl	read a record from a sequential file
+
+
+;	G E T R E C
+;
+;	getrec( %loc buffer, %val channel_number )
+;
+;	input:	@r5	address of user buffer, at least 80 bytes
+;		2(r5)	channel number
+;
+;	output:	r0	rms sts
+;		r1	record size
+;
+;	Read the next record from a disk file. Assumes that the
+;	user  has supplied a buffer of 80 characters to  return
+;	the record to.
+
+
+getrec::mov	2(r5)	,r0		; get the channel number
+	asl	r0			; times 2 to index into table
+	mov	rablst(r0),r1		; get the record access buffer
+	$store	#0  ,RSZ,r1
+	$store	@r5 ,UBF,r1		; stuff a record buffer in
+	$store	bufsiz(r0),USZ,r1	; and a maximum record size
+	cmp	filtyp(r0),#binary	; a binary file today ?
+	bne	10$			; no, use normal get$
+	clr	o$bkt+0(r1)		; use sequential mode please
+	clr	o$bkt+2(r1)		; both words are to have zero
+	$read	r1			; get next virtual block please
+	br	20$			; get error code out now
+10$:	$get	r1			; read a record now
+20$:	$fetch	r0,STS,r1		; get the return STATUS field
+	tst	r0			; did it work ?
+	blt	100$			; no
+	clr	r0			; say no errors
+	$fetch	r1,RSZ,r1		; get the record size now
+100$:	return
+
+	global	<o$bkt>
+
+
+	.sbttl	put a record to an rms sequential file
+
+
+;	P U T R E C
+;
+;	putrec( %loc buffer, %val record_size, %val channel_number )
+;
+;	input:	@r5	address of user buffer
+;		2(r5)	record size
+;		4(r5)	channel number
+;
+;	output:	r0	rms sts
+;
+;	Write the next record to  a disk file.
+
+
+putrec::mov	r1	,-(sp)
+	mov	4(r5)	,r0		; get the channel number
+	bne	5$			; if zero then assume TI:
+	print	@r5	,2(r5)		; dump the buffer to ti: then
+	br	100$			; and exit
+5$:	asl	r0			; times 2 to index into table
+	mov	rablst(r0),r1		; get the record access buffer
+	$store	@r5  ,RBF,r1		; stuff a record buffer in
+	$store	2(r5),RSZ,r1		; and a current record size
+	cmp	filtyp(r0),#binary	; image mode today ?
+	bne	10$			; no
+	$store	#1000,RSZ,r1		; yes, insure block write
+	clr	o$bkt+0(r1)		; yes, clear the VBN fields
+	clr	o$bkt+2(r1)		; yes, clear the VBN fields
+	$write	r1			; simple
+	br	20$			; get the status and exit
+10$:	$put	r1			; write a record now		   /SSH
+20$:	$fetch	r0,STS,r1		; get the return STATUS field
+	tst	r0			; did it work ?
+	blt	99$			; no
+	clr	r0			; say no errors
+	br	100$
+99$:	mov	r0,tmperr		; store error code for debugging
+100$:	mov	(sp)+	,r1
+	return
+
+
+	.sbttl	getc	get one character from an input file
+
+
+;	G E T C
+;
+;	getc(%val channel_number)
+;
+;	input:	@r5	channel_number
+;	output:	r0	rms error status
+;		r1	the character just read
+
+getc::	mov	@r5	,r0
+	call	getcr0
+	return
+
+
+fgetcr::save	<r2,r3>			; save temps
+	mov	r0	,r2		; channel number please
+	asl	r2			; times 2
+	cmp	bufp(r2),#-1		; need to initialize the buffer?
+	bne	10$			; no
+	calls	getrec	,<buflst(r2),r0>; yes, load it please
+	tst	r0			; did the read work ?
+	bne	100$			; no, return rms error code
+	clr	bufp(r2)		; it worked. clear current pointer
+	mov	r1	,bufs(r2)	; and save the record size
+	br	30$			; and goto common code
+
+10$:	cmp	bufp(r2),#-2		; flag to return <cr> ?
+	bne	20$			; no
+	movb	#cr	,r1		; yes, return it in r1
+	mov	#-3	,bufp(r2)	; and setup for a <lf> nexttime
+	clr	r0			; no error
+	br	100$			; bye
+
+20$:	cmp	bufp(r2),#-3		; flag to return a <lf> ?
+	bne	30$			; no
+	movb	#lf	,r1		; yes, return <lf> in r1
+	mov	#-1	,bufp(r2)	; flag buffer reload next time
+	clr	r0			; no error
+	br	100$
+
+
+30$:	tst	bufs(r2)		; anything left to get in record?
+	bne	40$			; yes
+	mov	#-2	,bufp(r2)	; no, flag for a <cr> next
+	cmp	filtyp(r2),#binary	; a binary file today ?
+	bne	35$			; yes, need data as is please
+	mov	#-1	,bufp(r2)	; yes, flag for a read next
+35$:	mov	r2	,r0		; channel number please
+	asr	r0			; NOT times two
+	call	getcr0			; call ourselves to do it
+	br	100$			; and exit
+
+40$:	mov	buflst(r2),r3		; get the address of the buffer
+	add	bufp(r2),r3		; and point to the next character
+	clr	r1			; to be returned in r1
+	bisb	@r3	,r1		; simple
+	inc	bufp(r2)		; buffer.pointer := succ(buffer.pointer)
+	dec	bufs(r2)		; amountleft := pred( amountleft )
+	clr	r0			; no errors please
+
+100$:	unsave	<r3,r2>
+	return
+
+
+
+	.sbttl	putc	put a single character to an rms file
+
+;	P U T C
+;
+;	input:	@r5	the character to put
+;		2(r5)	the channel number to use
+;
+;	Buffer single character i/o to internal disk buffer.
+;	Buffer is dumped if internal buffer is  full or, for
+;	FB$VAR records (default for TEXT), a carraige return
+;	is found. For FB$VAR with FB$CR format, all carraige
+;	returns  and line feeds are  flushed as  this record
+;	format will have them put back later.
+;	The local buffers are allocated in CREATE and OPEN.
+
+
+putc::	save	<r1>			; simply save r1 and call putcr0
+	mov	2(r5)	,r1		; to do it. putcr0 will be somewhat
+	clr	r0			; faster to call directly due to the
+	bisb	@r5	,r0		; overhead involved in setting up an
+	call	putcr0			; argument list.
+	unsave	<r1>			; pop saved r1 and exit
+	return				; bye
+
+
+putcr0::save	<r1,r2,r3,r4>		; save registers we use
+	mov	r1	,r2		; channel number
+	asl	r2			; times 2 of course
+	cmp	filtyp(r2),#binary	; is this a binary file today ?
+	beq	5$			; yes, don't dump buffer on <cr>
+	cmpb	r0	,recdlm		; /56/ end of line time today ?
+	beq	10$			; yes, dump the record out
+5$:	cmp	bufp(r2),bufsiz(r2)	; is the buffer full ?
+	blo	20$			; no, store some more characters in it
+10$:	movb	r0	,r3		; yes, save the input character r0
+	calls	putrec	,<buflst(r2),bufp(r2),r1> ; yes, dump the buffer please
+	clr	bufp(r2)		; pointer := 0
+	tst	r0			; did it work ?
+	bne	100$			; no, die
+	mov	buflst(r2),r4		; it worked. zero the buffer now
+	mov	bufsiz(r2),r0		; get the buffer address and size
+15$:	clrb	(r4)+			; for i := 1 to bufsiz
+	sob	r0	,15$		;   do buffer[i] := chr(0)
+	movb	r3	,r0		; ok, restore the old character
+
+20$:	cmp	filtyp(r2),#binary	; once again, is this a binary file ?
+	beq	30$			; yes, ignore checks for <LF> and ^Z.
+	cmp	filtyp(r2),#terminal	; terminal file today ?
+	beq	30$			; yes, we want cr's and lf's
+	cmpb	r0	,#lf		; we simply like to ignore line feeds
+	beq	90$			; bye
+	cmpb	r0	,#'Z&37		; control Z ?
+	beq	90$			; yes, ignore the control Z's please
+	cmpb	r0	,#cr		; carraige return today ?
+	beq	90$			; yes, ignore it
+30$:	mov	bufp(r2),r1		; get the current buffer pointer
+	add	buflst(r2),r1		; and point to a new home for the
+	movb	r0	,@r1		; the input character in r0
+	inc	bufp(r2)		; pointer := succ( pointer )
+
+90$:	clr	r0			; no errors
+100$:	unsave	<r4,r3,r2,r1>
+	return
+
+	GLOBAL	<recdlm>		; /56/
+
+
+	.sbttl	flush
+
+
+flush:	mov	@r5	,r0		; get the internal channel number
+	asl	r0			; times 2 for indexing
+	tst	bufp(r0)		; anything in the buffer
+	beq	100$			; no
+	tst	mode(r0)		; writing today ?
+	beq	100$			; no
+	calls	putrec	,<buflst(r0),bufp(r0),@r5> ; yes, dump it
+	return
+100$:	clr	r0
+	return
+
+
+
+
+
+	.sbttl	lookup	do a filename lookup, wildcarding supported
+	.enabl	gbl
+
+
+;	L O O K U P
+;
+;	input:	@r5	arg count	(DEC standard Fortran convention)
+;		2(r5)	address of input string
+;		@4(r5)	flag word for initializing with a $PARSE
+;		6(r5)	address of output string
+;
+;	output:	r0	RMS error code
+;
+;
+;	clr	index
+;10$:	calls	lookup	,<#3,#inbuf,#index,#outbuf>
+;	tst	r0
+;	bne	100$
+;	do something
+;	br	10$
+
+
+
+
+	.mcall	$parse	,$search,$store	,$fetch	,$compare
+	.mcall	fab$b	,fab$e	,nam$b	,nam$e
+	.mcall	$off	$testbits				;RBD01
+
+	.save
+	.psect	rmssup	,d
+
+
+
+fab:	fab$b				; argument fab
+	 f$nam	nam			; link to nam		;RBD01--
+	 f$lch	1			; a dummy channel for the i/o op
+	fab$e
+
+nam:	nam$b				; nam definition
+	 n$esa	expstr			; exp str address
+	 n$ess	64.			; exp str length
+	 n$rsa	resstr			; res str address
+	 n$rss	64.			; res str length
+	nam$e
+
+expstr:	.blkb	64.			; context must be preserved here
+resstr:	.blkb	64.			; a temp place for the result
+
+	.restore
+
+
+	.sbttl	the real work of lookup
+
+	.psect	$pdata
+					; Make this <> 0 if you can't do CALFIP
+fu$dir::.word	0			; style wildcarding on your non-standard
+					; RSTS system.  Could cause side effects
+					; with remote decnet nodes.
+	.psect	$code
+
+lookup::tst	rsx32			; /56/ Ancient RSX today?
+	beq	4$			; /56/ No
+	mov	#ER$NMF	,r0		; /56/ Yes, preset No More Files
+	tst	@4(r5)			; /56/ Second call?
+	bne	3$			; /56/ Yes, die
+	STRCPY	6(r5)	,2(r5)		; /56/ No just return the passed string
+	inc	@4(r5)			; /56/ Note that we have been here
+	clr	r0			; /56/ No errors
+3$:	return				; /56/ Exit
+					;
+4$:	save	<r1,r2,r3,r4,r5>	; Save these please
+	mov	#fab	,r1		; map the target fab	;RBD01--
+	tst	fu$def			; do we really need a default device?
+	beq	5$			; no
+	$store	#sydisk,DNA,r1		; yes, please stuff the def device name
+	$store	#sylen ,DNS,r1		; and the length of it also please
+5$:	strlen	#defdir			; anything in the Kermit default dir?
+	tst	r0			; if <> then use it
+	beq	10$			; nothing there to use. Let system do it
+	$store	#defdir	,DNA,r1		; something was there, stuff it in
+	$store	r0	,DNS,r1		; and the length of the default
+10$:	mov	r1	,r0		; save it for later
+	mov	#nam	,r3		; map the target nam
+	tst	@4(r5)			; first time thru needs a parse
+	bne	40$			; not the first time
+
+	clrb	expstr			; clear the expanded name and
+	clrb	resstr			; the resultant string
+	mov	2(r5)	,r4		; point to the filename passed
+	mov	r4	,r1		; and save the pointer
+20$:	tstb	(r1)+			; and get the length of the name
+	bne	20$			; for an .asciz string
+	sub	r4	,r1		; compute the length of the string
+	dec	r1			; which is off by one
+	$store	#lun.sr,lch,r0		; channel number please
+	$store	r1,fns,r0		; stuff the filename length
+	$store	r4,fna,r0		; and the filename address
+	$parse	r0			; parse the strings
+	$fetch	r4,sts,r0		; get error codes
+
+	cmp	#ER$UIN,r4		; Maybe a remote file spec?    ;RBD01+
+	bne	30$			; (no)
+	$testbits  #<nb$wve!nb$wty!nb$wna!nb$wdi>,fnb,r3    ; Anything wild?
+	bne	90$			; (wild remote files no good)
+	$testbits  #nb$nod,fnb,r3	; Remote file?
+	beq	90$			; (ER$UIN with no node???)
+	$off	#nb$wch,fnb,r3		; Make succeeding $search's act nice
+	$fetch	r0,esl,r3		; Pass back expanded string
+	$fetch	r2,esa,r3		;  and skip the $search.
+	br	70$						       ;RBD01-
+
+30$:	tst	r4			; < 0 ?
+	bmi	90$			; yes, error
+
+;	This added edit 2.12 by BDN for those RSTS systems that totally
+;	disallow directory lookups by modify the executive for non-priv
+;	users.
+
+40$:	tst	fu$dir			; in case george w. @ purdue
+	beq	50$			; needs this due to a hacked up exec
+	$testbits  #<nb$wve!nb$wty!nb$wna!nb$wdi>,fnb,r3    ; Anything wild?
+	bne	50$			; yes, let the $search go on
+	tst	@4(r5)			; if no wildcarding and we have
+	beq	45$			; already been here then return
+	mov	#ER$NMF	,r4		; no more files and exit
+	br	90$			; bye
+45$:	$fetch	r0,esl,r3		; no, skip the $search and get the
+	$fetch	r2,esa,r3		; expanded string from $parse
+	br	70$			; and copy it over now
+
+;	End of option tp skip lookups for non-wildcarded filenames.
+
+
+50$:	$search	r0			; get a matching file
+	$fetch	r4,sts,r0		; get error codes
+	;							       ;RBD01+
+	; The following shouldn't have been necessary, as I
+	; banged off the NB$WCH bit above. But ...
+	;
+	cmp	r4,#ER$UIN		; Remote file hacking?
+	bne	60$			; (no)
+	mov	#ER$FNF,r4		; Yes, no "more" files
+	br	90$			; and exit
+
+60$:	tst	r4			; < 0 ?			       ;RBD01-
+	bmi	90$			; yes, error
+	$fetch	r0,rsl,r3		; get the string length
+	$fetch	r2,rsa,r3		; get the string address
+
+70$:	mov	6(r5)	,r1		; where to return the string
+80$:	movb	(r2)+	,(r1)+		; copy it over
+	sob	r0	,80$		; for however the long it is
+	clrb	@r1			; insure .asciz please
+	clr	r0			; no errors
+	inc	@4(r5)			; say we have at least one file
+	br	100$			; and exit
+
+90$:	mov	r4	,r0		; error, return it please
+	br	100$			; exit
+
+100$:	unsave	<r5,r4,r3,r2,r1>
+	return
+
+
+
+	.save
+	.psect	rendat	,rw,d,lcl,con,lcl
+
+	.mcall	$compare,$fetch	,$parse	,$search,$set	,$store
+	.mcall	fab$b	,nam$b	,$rename
+
+;	24-Jan-86  14:01:48 Rename, Delete and GMCR code moved to overlay
+
+
+RNFAB1::FAB$B				; Old file name
+	 F$NAM	RNNAM1			; Link to RNNAM1	       ;RBD01--
+	 F$LCH	1			; Channel 1 (a dummy, filled in later)
+	FAB$E
+
+RNNAM1::NAM$B				; NAM definition
+	NAM$E
+
+
+RNFAB2::FAB$B				; New file name
+	 F$NAM	RNNAM2			; Link to RNNAM2	       ;RBD01--
+	 F$LCH	1			; a dummy channel
+	FAB$E
+
+RNNAM2::NAM$B				; NAM definition
+	NAM$E
+
+
+	.restore
+
+
+
+	.sbttl	fparse	parse filename and fill in with defaults
+
+	.mcall	$compar	,$fetch	,$off	,$parse	,$store
+	.mcall	tlog$s
+
+parfab	=	rnfab1
+parnam	=	rnnam1
+
+
+;	F P A R S E
+;
+;	input:	@r5	input filename,     .asciz
+;		defdir	the default directory name string to use
+;
+;	output:	2(r5)	expanded filename, .asciz, maximum length 63 bytes
+;		r0	error codes
+
+
+tlog::	save	<r1,r2,r3>		; /46/ Save registers
+	sub	#200	,sp		; /46/ Allocate a buffer
+	mov	sp	,r3		; /46/ And a pointer to it please
+	call	getsys			; /46/ Is this RSTS/E ?
+	cmpb	r0	,#SY$RSTS	; /46/ If so, don't try TLOG$S out
+	beq	100$			; /46/ Skip, must be RSTS/E
+	strlen	(r5)			; /46/ Get length of input string
+	TLOG$S	#0,ln$mk1,#0,(r5),r0,r3,#77,#tlogda,#tlogda+2
+	cmpb	@#$DSW,#IS.SUC		; /46/ Did we get a translation?
+	bne	100$			; /46/ No, exit this
+	mov	r3	,r2		; /46/ Setup to make it asciz
+	add	tlogda	,r3		; /46/ Add the translated string length
+	clrb	(r3)			; /46/ in and insure it's .asciz
+	strcpy	(r5)	,r2		; /46/ Copy new name over and exit
+100$:	add	#200	,sp		; /46/ Pop local buffer
+	unsave	<r3,r2,r1>		; /46/ Exit
+	clr	r0			; /46/ No errors
+	return				; /46/ Exit
+
+	.save
+	.psect	$PDATA
+tlogda:	.word	0,0			; /46/ Returned data
+ln$mk1::.word	0
+	.restore
+
+
+Fparse::tst	rsx32			; /56/ Old, old RSX?
+	beq	1$			; /56/ No
+	STRCPY	2(r5)	,@r5		; /56/ Yes, just copy the thing over
+	clr	r0			; /56/ Success
+	return				; /56/ Quick exit
+1$:	save	<r1,r2,r3,r4>		; /46/ save registers we may overwrite
+	mov	@r5	,r4		; /46/ Assume input from source
+	call	getsys			; /46/ Is this RSTS/E ?
+	cmpb	r0	,#SY$RSTS	; /46/ If so, don't try TLOG$S out
+	beq	2$			; /46/ Skip, must be RSTS/E
+	mov	2(r5)	,r3		; /46/ Address of a buffer to use
+	strlen	r4			; /46/ Get length of input string
+	TLOG$S	#0,ln$mk1,#0,r4,r0,r3,#77,#tlogda,#tlogda+2
+	cmpb	@#$DSW,#IS.SUC		; /46/ Did we get a translation?
+	bne	2$			; /46/ No, exit this
+	mov	r3	,r4		; /46/ We did, set a new source address
+	add	tlogda	,r3		; /46/ Add the translated string length
+	clrb	(r3)			; /46/ in and insure it's .asciz
+2$:	mov	#parfab	,r1		; point to the fab we use       ;RBD01--
+	$store	#0,DNS,r1		; /42/ PLEASE clear this OUT!
+	tst	fu$def			; do we need a defualt device string?
+	beq	3$			; no
+	$store	#sydisk,DNA,r1		; yes, please put it where we need it
+	$store	#sylen ,DNS,r1		;      also, the length also
+3$:	strlen	#defdir			; get the default directory spec
+	tst	r0			; was anything there ?
+	beq	4$			; no
+	$store	#defdir,DNA,r1		; yes, stuff that in for the default
+	$store	r0     ,DNS,r1		; name string, and stuff the length.
+4$:	$store	#lun.sr,LCH,r1		; a channel number to use for $PARSE
+	$off	#fb$fid,FOP,r1		; we want an implicit $SEARCH
+	mov	#parnam	,r2		; also point to the NAME block
+	sub	#100	,sp		; allocate result name string
+	$store	sp  ,RSA,r2		; set up the pointer to name string
+	$store	#100,RSS,r2		; and set the size of the string
+	sub	#100	,sp		; allocate result expanded name string
+	$store	sp  ,ESA,r2		; set up the pointer to expanded name
+	$store	#100,ESS,r2		; and set the size of the string
+	$store	#ER$FNM ,STS,r1		; preset a bad filename error
+	strlen	r4			; /46/ get the length of the filename
+	tst	r0			; anything left at all ?
+	beq	90$			; no, fake a bad filename please
+	$store	r0,FNS,r1		; stuff the filename size in please
+	$store	r4,FNA,r1		; /46/ stuff the filename address
+	$parse	r1			; try to parse the filename now
+
+	$compar	#ER$UIN,sts,r1		; Maybe a remote file spec?    ;RBD01+
+	bne	5$			; (no)
+	$testb	#<nb$wve!nb$wty!nb$wna!nb$wdi>,fnb,r2    ; Anything wild?
+	bne	90$			; (wild remote files no good)
+	$testb	#nb$nod,fnb,r2	; Remote file?
+	beq	90$			; (ER$UIN with no node???)
+	$off	#nb$wch,fnb,r2		; Make succeeding $search's act nice
+	br	7$			; Go ahead with it	       ;RBD01-
+
+5$:	$compar	#0  ,STS,r1		; did the parse of the name work ?
+	blt	90$			; no, exit and return STS in r0
+
+7$:	mov	2(r5)	,r1		; where we will copy the name to
+	movb	o$esl(r2),r0		; the length of the new name
+	beq	30$			; can't happen unless you fubar
+	cmp	r0	,#77		; truncate names that are too long
+	blos	10$			; it's ok
+	mov	#77	,r0		; too long, please set it to 63 (10)
+10$:	mov	o$esa(r2),r2		; where the name is coming from
+20$:	movb	(r2)+	,(r1)+		; copy a byte at a time please
+	sob	r0	,20$		; next please
+30$:	clrb	@r1			; insure .asciz please
+	clr	r0			; no errors please
+	br	100$			; bye
+
+90$:	$fetch	r0,STS,r1		; error from parse, return in r0
+100$:	add	#200	,sp		; pop local nameblock buffers
+110$:	unsave	<r4,r3,r2,r1>		; /46/ pop registers
+	return				; bye
+
+
+	global	<defdir>
+	GLOBAL	<RSX32>			; /56/
+
+
+;	F I X W I L D
+;
+;	FIXWILD will replace % with ? for RSTS/E
+;
+;	input:	@r5	Address of string to process
+
+
+fixwil::nop				; in case we want to patch to 207
+	save	<r2>			; save a register we use here
+	calls	getsys			; is this RSTS ?
+	cmpb	r0	,#sy$rsts	;
+	bne	100$			; no
+	mov	@r5	,r2		; get the string address
+10$:	tstb	@r2			; done with the filename yet ?
+	beq	100$			; yes, exit
+	cmpb	@r2	,#'%		; check for a % character
+	bne	20$			; no
+	movb	#'?	,@r2		; yes, replace with question mark
+20$:	inc	r2			; next please
+	br	10$			; back again
+100$:	unsave	<r2>			; pop r2
+	clr	r0			; no errors
+	return				; bye
+	
+
+
+iswild::save	<r1,r2>			; save a register we may use
+	mov	#parfab,r2		; get a fab to use for this
+	tst	fu$def			; do we need a defualt device string?
+	beq	5$			; no
+	$store	#sydisk,DNA,r2		; yes, please put it where we need it
+	$store	#sylen ,DNS,r2		;      also, the length also
+5$:	strlen	#defdir			; get the default directory spec
+	tst	r0			; was anything there ?
+	beq	10$			; no
+	$store	#defdir,DNA,r2		; yes, stuff that in for the default
+	$store	r0     ,DNS,r2		; name string, and stuff the length.
+10$:	$store	@r5,FNA,r2		; filename address
+	strlen	@r5			; length
+	$store	r0,FNS,r2		; into the FAB please
+	$fetch	r1,NAM,r2		; get NAM block address
+	clr	O$ESA(r1)		; no expanded string address
+	clr	O$RSA(r1)		; no resultant string address
+	clrb	O$ESS(r1)		; no length fields either
+	clrb	O$RSS(r1)		; no length fields either
+	$parse	r2			; parse the filename
+	$fetch	r0,STS,r2		; get the status
+	bmi	90$			; exit on error please
+	$testbi #NB$WVE!NB$WTY!NB$WNA!NB$WDI,FNB,r1 ; any wildcarding today ?
+	beq	90$			; no
+	mov	#1	,r0		; yes, return(true)
+	br	100$			; exit
+90$:	clr	r0
+100$:	unsave	<r2,r1>			; pop reg and exit
+	return				; exit
+
+
+
+
+
+
+
+
+	.sbttl	return current task size and return exec
+
+	.mcall	gtsk$s	,gtim$s
+
+
+
+second::save	<r2,r3>			; /43/ Get seconds past midnight
+	sub	#40	,sp		; /43/ Used for reporting transfer
+	mov	sp	,r2		; /43/ statistics
+	gtim$s	r2			; /43/ One should really get the time
+	mov	g.timi(r2),r3		; /43/ in the 64 bit klunk format to
+	mul	#60.	,r3		; /43/ avoid 24 hour rollover, but
+	add	g.tisc(r2),r3		; /43/ I really think this is
+	mov	g.tihr(r2),r0		; /43/ sufficient
+	clr	r1			; /43/ multiply hour of day by 3600
+	mul	#60.*60.,r0		; /43/ which has to be 32 bits in
+	add	r3	,r1		; /43/ size, then add in minutes*60
+	adc	r0			; /43/ + seconds.
+	add	#40	,sp		; /43/ Pop buffer and exit
+	unsave	<r3,r2>			; /43/ Pop registers
+	return				; /43/ Bye
+
+;	G E T S Y S
+;
+;	output:	r0	operating system
+;
+;	sy$11m	(1)	for rsx11m
+;	sy$ias	(3)	for ias
+;	sy$rsts	(4)	for rsts
+;	sy$mpl	(6)	for m+
+;	sy$rt	(7)	for rt11 ????
+
+
+getsys::sub	#40	,sp		; use the stack for a buffer
+	mov	sp	,r0		; and point to it please
+	gtsk$s	r0			; simple
+	mov	g.tssy(r0),r0		; return exec
+	add	#40	,sp		; pop buffer and exit
+	return				; bye
+
+
+
+	.sbttl	gsa	get space for i/o buffers
+
+
+;	Modified from sample GSA from RMS v2 distribution
+;	by Brian Nelson  05-Jan-84  10:22:06
+;
+;
+;  Interface:
+;    Request space:
+;      R0 ->  RMS/user Pool list head (maintained by RL/CQB)
+;      R1 :=  Amount of space requested (bytes)
+;      R2 :=  0 (differentiates between request and release)
+;
+;    Release space:
+;      R0 ->  RMS Pool list head (maintained by RL/CQB)
+;      R1 :=  Amount of space to be released (bytes)
+;      R2 ->  Base address (for release)
+;
+;
+;  Returns:
+;    C-Bit "set"   if an error has occurred (failure)
+;    C-Bit "clear" if no error has occurred (success)
+;
+
+
+	.Mcall	Extk$S
+
+
+	.Sbttl	Control block definitions
+
+	.Psect	GSA$$D,RW,D
+
+;
+; GSA internal data:
+;
+;   GSABAS - Base address for the next memory allocation.
+;            Initially set to zero, it will be assigned
+;            the first address outside of the task's
+;            current address limits.
+;   GSAMIN - Decimal value reflecting the minimum size
+;            (in bytes) to extend the task in order to
+;            provide space to the pool.
+;   GSAREQ - Requested pool block number.  If a request
+;            for the 'GSAMIN' fails, then the original
+;            allocation size will be attempted.  If that
+;            fails, then there is no more memory left.
+;
+
+GSABAS::			; GSA base address
+	.Word	000000		; (for next allocation)
+GSAMIN::			; Minimum allocation
+	.Word	512./64.	; (in 32-word blocks)
+GSAREQ::			; Size of this request
+	.Word	000000		; (if 'GSAMIN' extends fail)
+
+
+
+	.Sbttl	GSA Initialization code
+
+	.Psect	GSA$$I,RO,I
+
+
+	.mcall	extk$s	,gtsk$s
+
+GSAINI:
+	Mov	R0,-(SP)	; R0-2 will be used to
+	Mov	R1,-(SP)	; communicate with $INIDM
+	Mov	R2,-(SP)	; NOTE: $INIDM uses EXTSK.
+	mov	r0	,-(sp)	; save r0
+	sub	#40	,sp	; check for 512 boundary
+	mov	sp	,r0	; get the current task size and see
+	gtsk$s	r0		; if we are at a boundary. if so, then
+	mov	g.tsts(r0),r0	; extend a little bit to get INIDM to
+	add	#40	,sp	; behave itself
+	bic	#^c777	,r0	; strip all the high crap
+	cmp	r0	,#776	; should we extend a little bit?
+	blo	10$		; no
+	extk$s	#1		; yes, get 64 more bytes please
+10$:	mov	(sp)+	,r0	; restore r0
+
+	Call	$INIDM		; Initialize dynamic memory
+	Mov	R1,GSABAS	; Setup the "free" address
+	Mov	(SP)+,R2	; Restore the registers
+	Mov	(SP)+,R1	;
+	Mov	(SP)+,R0	;
+	Return			; And return to GSA
+
+
+
+	.Sbttl	GSA Mainline code
+
+	.Psect	GSA$$M,RO,I
+
+;
+; GSA Mainline
+;
+;   Entry point is "GSA", with registers 0-2 loaded as
+;   described above.
+;
+
+GSA::
+gsax:
+
+;
+; First, determine if dynamic memory has been initialized.
+; GSABAS (initially set to zero) will be non-zero if $INIDM
+; has been called and the memory list initialized.  On RSX
+; based systems it is possible to install tasks with an
+; extension (/INCREMENT).  $INIDM will detect this and setup
+; the first memory entry in the pool list.
+;
+; A point to note: If the RSX task has been installed with
+; the non-checkpointable (/-CP) flag, then EXTKs will not
+; return success.  If it is necessary to install the task
+; non-checkpointable, then the task should be installed with
+; and increment value.
+;
+
+	Tst	GSABAS		; Dynamic memory initialized?
+	Bne	10$		; Yes if NE, proceed
+	Call	GSAINI		; Otherwise, initialize pool
+10$:	Tst	R1		; Real memory?
+	Bne	20$		; Yes if NE, then process it
+	Return			; Otherwise return with success
+
+
+20$:	Tst	R2		; Address specified? (release)
+	Beq	30$		; No if EQ, then it's a request
+	Jmp	$RLCB		; Otherwise it's a release; do it
+30$:	Mov	R0,-(SP)	; save pool list head
+	Mov	R1,-(SP)	; save size of request
+	Mov	R2,-(SP)	; save entry flag
+	Call	$RQCB		; Try the allocation
+	Bcc	70$		; CC signifies success
+	Mov	2(SP),R1	; Obtain the request size
+	Add	#63.,R1		; Round the request
+	Asr	R1		; to a 32-word boundary
+	Asr	R1		; Then convert the value
+	Asr	R1		; to the number of
+	Asr	R1		; 32-word blocks.
+	Asr	R1
+	Asr	R1
+	Mov	R1,GSAREQ	; Save the real size
+	Cmp	R1,GSAMIN	; Smaller than minimum?
+	Bhi	40$		; No if HI, use it as is
+	Mov	GSAMIN,R1	; Otherwise use GSAMIN
+40$:	Extk$S	R1		; Extend the task
+	Bcc	60$		; CC if successful
+	Cmp	R1,GSAREQ	; Is this request?
+	Blos	50$		; Yes if LOS, the end
+	Mov	GSAREQ,R1	; Otherwise try to use
+	Br	40$		; the actual request
+50$:	Sec			; Mark failure
+	Br	70$		; And exit
+
+60$:	Mov	4(SP),R0	; Setup the PLH
+	Asl	R1		; Convert the real
+	Asl	R1		; size to the actual
+	Asl	R1		; 16-bit size that
+	Asl	R1		; was allocated.
+	Asl	R1		; The virtual address
+	Asl	R1		; should be after the
+	Mov	GSABAS,R2	; task (which is now
+	Add	R1,GSABAS	; part of the task)
+	Call	GSAX		; Call ourself to release
+	Mov	(SP)+,R2	; Restore our registers
+	Mov	(SP)+,R1	; to the initial state
+	Mov	(SP)+,R0	; upon entry, and reenter
+	Br	GSAX		; as if it's a new request
+
+70$:	Inc	(SP)+		; These won't alter the
+	Bit	(SP)+,(SP)+	; C-bit, so status remains
+	Return			; unchanged upon return
+
+
+
+	.sbttl	Corrected version of $INIDM
+
+;	 Re-do $INIDM to use the  actual task top address,  not
+;	that which was stored by TKB from the .LIMIT directive.
+;	This is required because we have already done a EXTK$S.
+;
+;	17-Feb-87  07:11:21  BDN edit 3.56
+
+	.mcall	GPRT$	,GTSK$	,DIR$	,GTSK$S
+	.Save
+	.psect	IMPURE	,d
+
+Limit:	.Limit
+pdpb:	GPRT$	tbuf
+tdpb:	GTSK$	tbuf
+
+tbuf:	.blkw	20
+
+	.Restore
+
+	.Psect	PURE$I	,RO,I,LCL,REL,CON
+
+;	Inidm
+;
+;	Input:	r0	Address of free code pool listhead
+;	Output:	r0	First address in task
+;		r1	Address following task
+;		r2	Size of core pool
+
+$Inidm::DIR$	#tdpb			; We already did an EXTK$S so
+	mov	tbuf+G.TSTS,r2		; want to use the CURRENT topmem
+	add	#3	,r2		; Round up to next 4 byte boundary
+	bic	#3	,r2		; ...
+	mov	r2	,@r0		; Set base address of pool
+	EXTK$S	#1			; Ask for just a little bit more
+	DIR$	#pdpb			; Get partition parameters
+	mov	$DSW	,r0		; Save starting address of partition
+	DIR$	#tdpb			; Get task parameters
+	mov	r2	,-(sp)		; Save starting address
+	clr	(r2)+			; Clear out first word
+	mov	tbuf+G.TSTS,(r2)	; Set physical size of task
+	sub	r0	,(sp)		; Compute apparent size of task
+	mov	r0	,r1		; Copy base address
+	add	(r2)	,r1		; Next address after task
+	sub	(sp)+	,(r2)		; Set size of free pool
+	mov	(r2)	,r2		; Get size
+	return				; And exit
+
+	.end

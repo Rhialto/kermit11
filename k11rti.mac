@@ -1,0 +1,676 @@
+	.title	K11RTI	One shot init code
+	.ident	/3.51/
+
+
+;	23-May-86  18:23:36 BDN	Creation from K11RT4.MAC
+;	07-Jun-86  05:39:17 BDN XM edits.
+;
+;	 As is most exec specific code, this has turned into a MESS.
+;
+;	 There are some significant assumptions made  here.  One  is
+;	that  for  the  virtual  KERMIT  (K11XM.SAV)  is  that  APR7
+;	(160000-177777) is available and does NOT contain  any  code
+;	overlays.  This  is because for XM image we create a dynamic
+;	region mapped from APR7 to allow placement  of  buffers  and
+;	the  like  up there. In the case of the disk overlayed image
+;	(K11RT4.MAC) we just do a .SETTOP  to  177776  and  allocate
+;	buffers  there, allowing the USR to swap if need be over the
+;	buffers. Additionally, the .FETCH buffer is,  for  the  disk
+;	overlayed  (non-virtual)  K11RT4.SAV,  allocated  from  this
+;	.SETTOP area.  In  the  case  of  XM,  however,  we  have  a
+;	problem.  In  order  to reduce the size of the ROOT to allow
+;	K11XM to run as a foreground job we ended up  with  the  top
+;	of  the  root mapped by APR1 (20000-37777). Now it is a well
+;	known fact that XM places many constraints on what  you  can
+;	put  in the range, QUE elements being the best known example
+;	of something you CAN NOT put there. It also turns  out  that
+;	you  must NEVER try to load a handler into that area either.
+;	If you do, depending on the address,  you  can  expect  very
+;	erratic  behavior  from the handler, if not outright failure
+;	and a system crash. Such was the case on  the  PRO/350.  The
+;	XC  driver  would  MOST  of the time work ok, but the system
+;	would ALWAYS crash on a .HRESET directive.  Addtionally  the
+;	XC  OFFDRV  .SPFUN, while setting the 'shutdown' flag in the
+;	driver,  would  be  ignored  at  program  exit.   Thus   any
+;	outstanding  XC  reads would attempt to enter a non-existent
+;	completion routine when the remote  server  timed  out,  and
+;	hang the PRO. 
+;	
+;	 The  correct method to control this buffer (K11XM.COM only)
+;	is to set the extend size  for  the  psect  HNBUFF  at  link
+;	time. 
+;
+;	 There  are  a couple of things here for TSX+ also. One, the
+;	TSX+ directive  for  altering  the  physical  address  space
+;	limit  is  used,  this is simply an EMT 375 with R0 pointing
+;	to an argument block of the form 
+;
+;	.byte	0,141
+;	.word	TOP_ADDRESS_DESIRED
+;
+;	 This is done because, as in the case  of  the  RSTS/E  RT11
+;	emulator,  the  .SETTOP  directive  only returns the current
+;	high limit, it has no effect on the memory allocation.  Both
+;	systems  thus  have special directives to actually alter the
+;	memory size, alternativly one can  patch  location  56  (for
+;	both)  to  force  additional  allocation. The other, left in
+;	for historical reasons, asks for the TSX+ 'Line  Number'  in
+;	order  to  determine if the system is TSX+. I have left that
+;	in the  init  code  instead  of  setting  the  flag  in  the
+;	previously  described  directive  because  I have no idea if
+;	the other directive works on older versions of TSX+. 
+
+
+
+	.sbttl	local copies of MUL and DIV (we relocate the real code)
+
+	.macro	mul	src,reg
+	.ntype $$,reg
+	mov	src	,-(sp)
+	mov	reg	,-(sp)
+	call	p$mul
+	.iif eq	,$$-1	,mov	(sp)+	,r1
+	.iif eq	,$$-3	,mov	(sp)+	,r3
+	.iif eq	,$$-5	,mov	(sp)+	,r5
+	.iif  ne ,<$$+1>&1, .error	; bad dst reg for MUL macro
+	.endm	mul
+
+	.macro	div	src,reg
+	.ntype	$$,reg
+	mov	src	,-(sp)
+	.iif eq	,$$,	mov r1	,-(sp)
+	.iif eq	,$$-2,	mov r3	,-(sp)
+	.iif eq	,$$-4,	mov r5	,-(sp)
+	call	p$div
+	.if	eq, $$
+	mov	(sp)+	,r1
+	mov	(sp)+	,r0
+	.endc
+	.if	eq, $$-2
+	mov	(sp)+	,r3
+	mov	(sp)+	,r2
+	.endc
+	.if	eq, $$-4
+	mov	(sp)+	,r5
+	mov	(sp)+	,r4
+	.endc
+	.endm	div
+
+
+
+
+	.sbttl	Macro references and local read/write data
+
+
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.endc
+
+
+	.psect	dirmap	,rw,d,gbl,rel,ovr
+dirnam:	.blkw	1
+dirbfr:	.blkw	1
+
+	.psect	rwdata	,rw,d,lcl,rel,con
+
+time:	.word	0,40
+mtsts:	.word	0,0,0,0,0
+timbuf:	.word	0,0
+timbf1:	.word	0,0
+tenth:	.word	0,6
+totall:	.word	0
+
+	cr	=	15
+	lf	=	12
+	ff	=	14
+	soh	=	1
+	maxsiz	=	1000
+	errbyt	==	52
+	topmem	=	50
+	JSW	=	44
+
+
+;	RMON offsets
+
+	CONFIG	=	300		; Primary RT11 configuration word
+	CONFG2	=	370		; The second one
+	SYSGEN	=	372		; RT11 SYSGEN options offset
+	$USRLC	=	266		; Location of the USR offset
+	SYSVER	=	276		; The system major and minor version
+
+;	Flags
+
+	CLOCK	=	100000		; In CONFIG, if a line clock present
+	MARKTIM	=	2000		; SJ Marktime is present
+	PRO350	=	20000		; In CONFG2, set if a PRO/350 or 380
+	TSXPLU	=	100000		; In CONFG2, set if TSX+ (not used)
+					;
+	VIRTUAL	=	2000		; In the JSW, if set, a virtual job
+	SJSYS	=	1		; In CONFIG, clear if a SJ system
+	XMSYS	=	10000		; In CONFIG, set if XM and SJSYS off
+					;
+	HNSIZE	=	6000		; Allocation for handlers in SJ/FB
+
+					
+;	Macros needed
+
+	.MCALL	.QSET,.TWAIT,.FETCH,.GVAL,.SETTOP,.SERR,.HERR,.GTIM
+	.MCALL	.DSTAT,.MTSTAT,.EXIT,.GTJB
+
+;	Macros needed for the XM dynamic region support
+
+	.MCALL	.WDBBK	,.WDBDF	,.RDBBK	,.RDBDF	,.CRRG	,.CRAW
+
+
+	.save					; Save CURRENT Psect
+	.psect	MAPWIN	,rw,d,gbl,rel,con	; Insure window data in ROOT
+						;
+	BINLSIZE ==	40*4
+	ALLOC	=	14000			; How much to allocate for NOW
+
+	.WDBDF
+	.RDBDF
+apr7wi::.WDBBK	7,ALLOC/100,0,0,ALLOC/100,WS.MAP
+apr7re::.RDBBK	ALLOC/100
+
+mapwrk::.blkw	7
+
+	LN$CNT	=	LN$ALL			; Maximum for recalling
+
+	.restore				; Pop Last PSECT
+
+
+	.sbttl	Start RT11 specific things
+	.enabl	lsb
+	.psect	$CODE	,ro,i,lcl,rel,con
+
+mapini::mov	#p$mul	,k11$mul	; For now
+	mov	#p$div	,k11$div	; This will change soon.
+	mov	#p$ttyou,$ttyout	; Ditto...
+	mov	#p$cbta	,$$cbta		; 
+	return
+
+xinit::	mov	sp	,infomsg	; Default to verbosity
+	mov	#$$BUFP	,totall		; Determine total allocation
+	add	#100+200+100+100,totall	; For TT, Directory, PHNUM buffering
+	add	#1200	,totall		; For Misc buffering
+	add	#<LN$MAX+2>*LN$CNT,totall; Insure CLE space
+	add	#120*2	,totall		; For CMDBUF and ARGBUF
+	add	#picend-picstart,totall	; For relocating code
+	STRCPY	#defdir	,#dkname	; Set default device name
+	.GTIM	#rtwork	,#timbuf	; Insure clock rollover
+	.GVAL	#rtwork,#CONFIG		; Check for what we are running on
+	bit	#SJSYS	,r0		; Can't run on SJ (perhaps)
+	bne	10$			; Ok, FB or XM
+	.PRINT	#nosj			; No, die
+	dec	montyp			; Exec type saved
+	br	20$			;
+10$:	bit	#XMSYS	,r0		; Check for XM system.
+	beq	20$			; No, must be FB
+	inc	montyp			; Its XM, save flag.
+	mov	#$limit+2,hilimit	; We really want VIRTUAL limit
+20$:	.GTJB	#rtwork,#jobsts		; So we know if BG or FG job.
+	.QSET	#rtque,#nrtque		; Allocate extra que elements
+	mov	sp	,rtvol		; Assume volume header checks
+	mov	@#50	,r5		; Save low core HIGH LIMIT
+					;
+	.SERR				; TSX+, grab some extra memory
+	mov	#tsxmem	,r0		; But inhibit aborts under RT11
+	mov	#160000	,r2		; Top limit minimum for VIRTUAL
+	add	totall	,r2		; Got it.
+	bit	#VIRTUAL,@#JSW		; Is this the virtual overlay
+	bne	30$			; save image. If ne, YES
+	mov	r5	,r2		; Disk overlayed, reset amount
+	add	#HNSIZE	,r2		; of memory desired then.
+	add	totall	,r2		; Done.
+	mov	r2	,2(r0)		; Insert the new size now.
+	dec	r2			; 
+30$:	EMT	375			; Call TSX now
+	bcs	40$			; Must be RT11 today
+	cmp	r0	,r2		; TSX+, did it give us enough?
+	bhis	40$			; Yes, Keep on going
+	octout	r0
+	octout	r2
+	message	<Please alter HIMEM to allow 32KW address space>,CR
+40$:	.HERR				; Re-enable RT11 aborts now
+					;
+	mov	#freept	,r2		; Setup a pointer to this
+	mov	@hilimit,@r2		; Free core list for SJ/FB .FETCH
+	add	#3	,@r2		; + 2 to pointer above us please
+	bic	#1	,@r2		; Insure even address
+					;
+	bit	#VIRTUAL,@#JSW		; Is this the K11XM image running?
+	bne	50$			; No, do a normal .SETTOP
+					;
+	.SETTOP	#-2			; SJ or FB, or TSX and disk overlays
+	br	70$			; Ask for all of it, ignore the USR
+					;
+50$:	.CRRG	#mapwrk	,#apr7re	; Its K11XM.SAV on RTXM or TSX+
+	bcs	60$			; We will instead create a region.
+	mov	apr7re+r.gid,apr7wi+w.nrid; This will allow future expansion.
+	.CRAW	#mapwrk	,#apr7wi	; Create address window and MAP it.
+	mov	#ALLOC+160000,r0	; Assume for now that we got it.
+	bcc	70$			; Successfull
+60$:	movb	@#ERRBYT,r1		; It failed, get the error code and
+	MESSAGE	<Failure to create or map APR7 region, error:>
+	DECOUT	r1			; Dump the error code
+	MESSAGE				; A CR/LF
+	mov	r1	,r0		; Error code
+	call	maperr			; Get the error text address
+	.PRINT	r0			; Dump the text
+	.EXIT				; And go away now on mapping failure.
+					;
+					;
+70$:	mov	r0	,r1		; Save the current MAX address.
+	mov	r1	,maxtop		; Again, save the highest possible addr
+	cmp	@r2	,r1		; Is there REALLY space available?
+	bhi	80$			; No, DIE
+	sub	@r2	,r1		; Compute space available now.
+	cmp	totall	,r1		; Space availble for buffer pool?
+	blo	90$			; Yes, it's ok
+80$:	.PRINT	#nobuf			; Print an error message and DIE
+	clr	r0			; Exit
+	.EXIT				; Bye now.
+90$:	call	loadpic			; Relocate some code
+	mov	#2	,r3		; Offset into BUFDEF and BUFLST
+	mov	#4	,r0		; Four buffers to set up
+100$:	mov	@r2	,BUFLST(r3)	; Setup our buffer addresses now
+	mov	@r2	,BUFDEF(r3)	; into the appropiate pointers.
+	add	#MAXSIZ	,@r2		; Fix FREEPT up to point to next.
+	add	#2	,r3		; Point to next list entry
+	sob	r0	,100$		; Simple
+	mov	@r2	,xklgbuf	; A special buffer for XC/XL/CL
+	add	#$$LBUF	,@r2		; Add in the allocation now.
+	mov	@r2	,albuff		; Allocate this buffer
+	add	#ALSIZE	,@r2		; And move the pointer up
+	clr	@albuff			; Insure this is cleared out.
+	mov	@r2	,r0		; Save it
+	mov	@r2	,$prtbuf	; Allocate a tt output buffer
+	add	#100	,@r2		; And move up again.
+	mov	@r2	,dirnam		; Allocate more static buffers
+	add	#200	,@r2		; Move up
+	mov	@r2	,dirbfr		; Allocate more dir listing buffers
+	add	#100	,@r2		; And move on up.
+	mov	@r2	,phnum		; Save a phonenumber for REDIAL
+	clrb	@phnum			; Clear it
+	add	#100	,@r2		; Next please
+	mov	@r2	,bintyp		; More to go
+	add	#BINLSIZ,@r2		;
+	mov	@r2	,totp.s		; Some packet stats
+	add	#34*2*2	,@r2		;
+	mov	@r2	,totp.r		; Some packet stats
+	add	#34*2*2	,@r2		;
+	mov	#LN$CNT	,r3		; Recall buffer count
+	mov	r3	,lastcnt	; Save globally
+	mov	#lastli	,r4		; Where to stuff the addresses
+104$:	mov	@r2	,(r4)+		; Command line editing
+	add	#LN$MAX+2,@r2		; Move up
+	sob	r3	,104$		; Keep going
+	mov	@r2	,cmdbuf		; Insert command line buffer
+	add	#120	,@r2		; Next
+	mov	@r2	,argbuf		; Argument buffer
+	add	#120	,@r2		; Next
+					;	
+105$:	clrb	(r0)+			; Clear out now
+	cmp	r0	,@r2		; Done?
+	blos	105$			; No
+					; All done with buffer allocation.
+	mov	r2	,fetpt		; Setup pointers for .FETCH now.
+	mov	@hilimit,fetptmax	; Max address for .FETCHING
+	tst	montyp			; But if this is XM, then we must
+	ble	110$			; force handlers into LOWCORE
+	mov	#xmflow	,xmfetpt	; We must insure APR0 .FETCHING
+	add	#3	,xmfetpt	; low core overlay instead.
+	bic	#1	,xmfetpt	; Insure EVEN
+	mov	#xmfetpt,fetpt		; Now insert address of pointer
+	mov	#xmftop	,fetptmax	; This is the top of XM .FETCH space
+					;
+110$:	clr	proflg			; assume not a pro/350
+	clr	tsxflg			; assume not TSX+
+	clr	tsxcl			; assume not tsx and cl
+;
+; ---	Use tried-and-true method to detect TSX+
+;
+	.SERR				; Stop abort from RT-11
+	mov	#tsxlin	,r0		; Set the EMT
+	EMT	375			; Do it
+	bcs	120$			; Not TSX if an error
+	mov	#1,tsxflg		; it's TSX+, folks
+	mov	#1	,tsxsav		; Have to save TSXFLG
+	mov	sp,remote		; assume remote if TSX+
+	mov	#tsxtrm	,r0		; Now get terminal type
+	EMT	375			; Do it
+	bcs	120$			; Oops
+	clr	vttype			; Assume unknown
+	clr	r1			; Map terminal type now.
+115$:	inc	r1			; Next please
+	tstb	trmlst-1(r1)		; End of the list yet?
+	bmi	120$			; Yes
+	cmpb	r0	,trmlst-1(r1)	; No, a match?
+	bne	115$			; No, keep looking
+	movb	trmtyp-1(r1),vttype	; Save internal code for TT type
+120$:	.HERR				; Reenable heavy-duty aborts
+	tst	tsxsave			; Where now?
+	beq	130$			; Off to more RTCL1 checks
+	jmp	170$			; No, TSX - skip to the end
+
+
+130$:	.GVAL	#rtwork,#SYSVER		; check for RT version 5 please
+	cmpb	r0	,#5		; must be version 5 for PRO/350
+	blo	140$			; no, can't be a pro
+	.GVAL	#rtwork,#CONFG2		; get config word number two
+	bit	#PRO350	,r0		; is this a pro/350 ?
+	beq	140$			; no
+	STRCPY	#ttname	,#xc$dev	; /42/ use strcpy, use XC:
+	STRCPY	#ttdial	,#xc$dev	; /42/ use strcpy, use XC:
+	mov	sp	,proflg		; it's a pro/350, folks
+	clr	remote			; we want to be a local kermit
+	PRINT	#xcmsg			; say so
+	br	165$			; /54/
+
+140$:	.DSTAT	#rtwork	,#XCR50		; /39/ check for XC and XL
+	bcc	160$			; /39/ found XC
+	.DSTAT	#rtwork	,#XLR50		; /39/ no  XC try XL
+	bcc	160$			; /39/ found XL
+	.MTSTAT	#rtwork	,#mtsts		; /39/ No XC: or XL:, look for
+	bcs	150$			; /39/ multiple terminal service
+	tst	mtsts+4			; /39/ Any LUNS generated ?
+	bne	160$			; /39/ Yes
+150$:	.PRINT	#noxcmt			; /39/ No, warn user of such fact
+	mov	sp	,remote		; /39/ Place us in remote mode and
+	mov	#-1	,tsxflg		; /39/ Fake it using TSX code.
+	mov	#PAR$SPACE,parity	; /39/ Force 8 bit quoting
+160$:	CALLS	gttnam	,<#errtxt>	; Get the name of the console tt:
+	PRINT	#ttn			; And say what it should be
+	PRINT	#errtxt			; Print it
+	PRINT	#crlf			; Finish the line
+165$:	tst	jobsts			; /54/ Frunned?
+	beq	170$			; /54/ No
+	clr	blip			; /54/ Yes, no packet status display
+	PRINT	#nolog			; /54/ Inform
+					;
+170$:	mov	sp	,clkflg		; Assume a clock (reasonable)
+	.GVAL	#rtwork,#CONFIG		; Get the configuration word
+	bit	#SJSYS	,r0		; Is this a SJ monitor ?
+	bne	180$			; No, just exit
+	bit	#CLOCK	,r0		; SJ, is there a clock present
+	bne	175$			; Yes
+	message	<Kermit may not run correctly without a clock>,CR
+	clr	clkflg			; Flag no clock
+	br	180$			; All done
+175$:	.GVAL	#rtwork	,#SYSGEN	; Check for MARK TIME support
+	bit	#MARKTIM,r0		; Well?
+	bne	180$			; Yes, support is present
+	message	<Kermit should have timer support for optimal >
+	message	<operation. Do a sysgen>,CR
+180$:
+190$:
+200$:	call	procl			; See if a PRO on TSX+
+	clr	r0			; No errors
+	return
+
+	.dsabl	lsb
+
+
+
+	.sbttl	See if we want to set up comm port on PRO/TSX+
+
+	.enabl	lsb
+
+procl:	.SERR				; Just to be safe.
+	mov	#tsxlin	,r0		; Find out the line number
+	EMT	375			; Do it
+	bcs	100$			; Must be rt11
+	dec	r0			; Which line (1=console)
+	bne	90$			; Not console
+	.DSTAT	#rtwork,#pisys		; Console. See if this is a pro
+	bcs	90$			; Can't be.
+	mov	#cl0text,r1		; For the STRCPY
+	mov	#cl0asn	,r0		; Try to assign line 3 to CL1
+	EMT	375			; Do it
+	bcc	10$			; Success
+	mov	#cl1text,r1		; For the STRCPY
+	mov	#cl1asn	,r0		; CL1 is busy, try CL1 for the PRO.
+	EMT	375			; Try it.
+	bcs	90$			; CL1 and CL1 are busy (unlikely).
+10$:	clr	remote			; Say we are a local Kermit.
+	clr	tsxflg			; Use PRO code for CL
+	mov	sp	,tsxcl		; Flag TSX+ and CLn:
+	mov	sp	,proflg		; Say we are a PRO now.
+	STRCPY	#ttname	,r1		; And copy the CL unit name
+	STRCPY	#ttdial	,r1		; And copy the CL unit name
+	MESSAGE	<PRO Communications port (line 3) assigned to >
+	PRINT	r1			; Dump the name
+	MESSAGE				; CRLF
+	mov	sp	,tsxcl		; Set a flag now
+	br	100$			; Exit
+90$:	PRINT	#k$tsx			; Dialup user
+	mov	sp	,remote		; Remote user flag
+100$:	.HERR				; Re-enable
+	return				; Exit
+
+
+	.dsabl	lsb
+
+
+
+
+
+	.save
+	.psect	rwdata	,rw,d,lcl,rel,con
+	.even
+tsxlin:	.byte	0,110			; TSX-Plus get-line-number emt
+tsxmem:	.byte	0,141			; TSX-Plus GET More Memory
+	.word	165300 + $$BUFP		; Should be enough
+tsxtrm:	.byte	0,137			; TSX-Plus Get terminal type
+cl0asn:	.byte	0,155			; Try to assign line 3 to CL0
+	.word	0			; CL0
+	.word	3			; Line 3
+cl1asn:	.byte	0,155			; Try to assign line 3 to CL1
+	.word	1			; CL1
+	.word	3			; Line 3
+cl0text:.asciz	/CL0/			; Asciz names
+cl1text:.asciz	/CL1/			; ...
+
+trmlst:	.byte	0	,1	,2	,3	,4	,5
+	.byte	6	,7	,8.	,9.	,-1
+trmtyp:	.byte	TTY	,TTY	,VT100	,TTY	,TTY	,TTY
+	.byte	TTY	,TTY	,TTY	,VT200
+	.even
+	.psect	$pdata
+
+dkdev:	.rad50	/DK /
+nobuf:	.ascii	/??Kermit-11-F Insufficient space available for buffer pool/
+	.byte	cr,lf
+	.ascii	/allocation. Please unload handlers or do a SET USR SWAP/
+	.byte	cr,lf,0
+nosj::	.asciz	/Kermit-11 may not run correctly on a SJ monitor/<cr><lf>
+ttn:	.asciz	/RT-11 default terminal line set to unit /
+noclock:.ascii	/This system does not appear to have a line clock./<cr><lf>
+	.asciz	/Kermit-11 may not run correctly./<cr><lf>
+xc$dev:	.asciz	/XC0:/
+xcmsg:	.asciz	#PRO/350 comm port set to XC0:#<cr><lf>
+k$tsx:	.ascii	/TSX-Plus remote mode/
+crlf:	.byte	cr,lf,0
+noxcmt:	.ascii	/ This system lacks both XC and XL drivers, and has not been/
+	.byte	cr,lf
+	.ascii	/generated  for Multiple Terminal support.  Only the CONSOLE/
+	.byte	cr,lf
+	.ascii	/will be usable for Kermit. Eight bit prefixing support will/
+	.byte	cr,lf
+	.ascii	/be required of the other  Kermit for the transfer of binary/
+	.byte	cr,lf
+	.asciz	/files./<cr><lf>
+	.even
+nolog:	.ascii	/Packet status display disabled for FRUNed Kermit. Use/<CR><LF>
+	.asciz	/SET UPDATE 1 to enable packet status during transfer./<CR><LF>
+	.even
+xcr50:	.rad50	/XC /
+xlr50:	.rad50	/XL /
+dkname:	.asciz	/DK:/
+pisys:	.rad50	/PI /
+	.even
+	.restore
+
+inqbuf::mov	#90.	,r0		; /42/ Large packets, no buffers
+	return				; /42/ for RT11 however.
+
+
+	GLOBAL	<lun.in,lun.ou,proflg,rtvol,rtque,tsxflg>
+	GLOBAL	<defdir,infomsg>
+
+
+
+	.sbttl	PIC code that gets relocated
+
+
+
+	.psect	piccod	,ro,i,lcl,rel,con
+
+loadpic:mov	#picstart,r1		; Starting address of code to be
+	mov	#picend-picstart+2,r0	; relocated. Number of bytes
+	bic	#1	,r0		; Insure .EVEN (would be anyway)
+	mov	@r2	,r3		; Buffer address for code
+	add	r0	,@r2		; Point to next free address
+	mov	r3	,k11$mul	; Insert address for EIS emulation
+	add	#p$mul-picstart,k11$mul	; Add offset
+	mov	r3	,k11$div	; Again.
+	add	#p$div-picstart,k11$div	; Add offset
+	mov	r3	,$ttyout	; Again
+	add	#p$ttyou-picstart,$ttyou; Add offset
+	mov	r3	,$$cbta		; Again
+	add	#p$cbta-picstart,$$cbta	; Offset
+10$:	movb	(r1)+	,(r3)+		; Copy
+	sob	r0	,10$		; Next please
+	return				; Exit
+
+	picstart =	.
+
+p$mul::	mov	r0	,-(sp)
+	mov	r1	,-(sp)
+	mov	6(sp)	,r0
+	mov	10(sp)	,r1
+	mov	r0,-(sp)
+	mov	#21,-(sp)
+	clr	r0
+10$:	ror	r0
+	ror	r1
+	bcc	20$
+	add	2(sp),r0
+20$:	dec	(sp)
+	bgt	10$
+	cmp	(sp)+	,(sp)+
+	mov	r1	,10(sp)
+	mov	(sp)+	,r1
+	mov	(sp)+	,r0
+	mov	(sp)	,2(sp)
+	tst	(sp)+
+	return
+	
+p$div::	mov	r0	,-(sp)
+	mov	r1	,-(sp)
+	mov	6(sp)	,r0
+	mov	10(sp)	,r1
+	mov	#20,-(sp)
+	mov	r1,-(sp)
+	clr	r1
+e00040:	asl	r0
+	rol	r1
+	cmp	r1,(sp)
+	bcs	e00054
+	sub	(sp),r1
+	inc	r0
+e00054:	dec	2(sp)
+	bgt	e00040
+	cmp	(sp)+	,(sp)+
+	mov	r1	,6(sp)
+	mov	r0	,10(sp)
+	mov	(sp)+	,r1
+	mov	(sp)+	,r0
+	return
+
+
+
+p$ttyo:	save	<r0,r1,r2,r3>		; save registers we may need
+	mov	@r5	,r1		; get the string address
+	mov	2(r5)	,r2		; get the string length
+	bne	20$			; non-zero then
+	mov	r1	,r2		; count until a null now
+10$:	tstb	(r2)+			; well ?
+	bne	10$			; not yet, keep looking
+	sub	r1	,r2		; get the length now
+	dec	r2			; all done
+	beq	100$			; nothing to print at all?
+
+20$:	mov	@#$prtbuf,r0		; now buffer the i/o to avoid
+	mov	#36	,r3		; the printing of cr/lf at the
+30$:	tstb	(r1)+			; don't copy nulls please
+	beq	35$			; ignore if null
+	movb	-1(r1)	,(r0)+		; copy a byte please
+35$:	dec	r2			; done yet ?
+	beq	40$			; yes
+	sob	r3	,30$		; no, next please
+40$:	movb	#200	,(r0)+		; insure no carraige control !
+	clrb	@r0			; must be passed .asciz
+	mov	@#$prtbuf,r0		; point back to the start of buffer
+	emt	351			; do the .print kmon request
+	tst	r2			; any more data to buffer ?
+	bne	20$			; yes, try again
+
+100$:	unsave	<r3,r2,r1,r0>
+	return
+
+
+
+	.sbttl	Conversion from RSX syslib
+
+
+P$CBTA:	JSR	R5,@#$SAVRG
+	MOVB	R2,R5
+	CLRB	R2
+	SWAB	R2
+	ASR	R2
+	BCC	E00134
+	TST	R1
+	BPL	E00134
+	NEG	R1
+	MOVB	#55,(R0)+
+E00134:	MOV	R0,R4
+	ROR	R2
+	ROR	R2
+	ROR	R3
+	CLRB	R3
+	BISB	R2,R3
+	CLRB	R2
+	BISB	#60,R2
+	MOV	R1,R0
+E00160:	MOV	R0,R1
+	CLR	R0
+	DIV	R5,R0
+	CMP	R1,#11
+	BLOS	E00200
+	ADD	#7,R1
+E00200:	ADD	R2,R1
+	MOV	R1,-(SP)
+	DECB	R3
+	BLE	E00234
+	TST	R0
+	BNE	E00230
+	TST	R2
+	BPL	E00234
+	TST	R3
+	BPL	E00230
+	BIC	#20,R2
+E00230:	CALL	E00160
+E00234:	MOVB	(SP)+,(R4)+
+	MOV	R4,R0
+	RETURN
+
+	picend	=	.
+
+	.blkw	2
+
+	.end

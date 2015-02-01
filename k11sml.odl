@@ -1,0 +1,85 @@
+	.psect	topmem	,d,rw,gbl,ovr,rel
+	.name	utl
+	.name	err
+	.name	sr
+
+	.root	rm-rmsrot,rmsall,senrec,utilty,error,topmem
+rm:	.fctr	a-b-c-d-e-f-errdvr-mem-sub
+a:	.fctr	k11pak
+b:	.fctr	k11dat
+c:	.fctr	k11rms
+d:	.fctr	k11m41
+e:	.fctr	k11cmd
+f:	.fctr	k11lcl
+
+senrec:	.fctr	sr-*(k11sen,k11rec,k11cm1-k11edi)
+
+set0:	.fctr	k11st0
+set1:	.fctr	k11st1
+show:	.fctr	k11sho
+connec:	.fctr	k11pco
+alt:	.fctr	k11mco
+help:	.fctr	k11hlp
+server:	.fctr	k11ser
+transf:	.fctr	k11tra
+debug:	.fctr	k11deb
+dial:	.fctr	k11dia
+utilty:	.fctr	utl-*(set0,set1,show,server,connec,help,transf,debug,dial,alt)
+errdvr:	.fctr	k11err
+
+;	 This overlay must  NOT contain ANY routines called by the
+;	command parser  (GETCMD, GETCM0 and GETCM1) as the command
+;	lists for LOCAl and REMOTE commands are in here and loaded
+;	via calls to LOACMD  and LOAREM,  which simply force $AUTO
+;	to load the overlay and then they return the  command list
+;	address in R0.
+
+error:	.fctr	err-*(x1,x2)
+x1:	.fctr	*(er1,er2,er3,direrr,k11rmz)
+x2:	.fctr	*(hl,copy,cmdlst,setlst,conver-atr,ini)
+
+copy:	.fctr	k11cpy
+er1:	.fctr	k11er1
+er2:	.fctr	k11er2
+er3:	.fctr	k11er3
+direrr:	.fctr	k11der
+sub:	.fctr	k11sub
+hl:	.fctr	k11dfh
+cmdlst:	.fctr	k11com
+setlst:	.fctr	k11std
+conver:	.fctr	k11cvt
+atr:	.fctr	k11atr
+ini:	.fctr	k11ini
+
+;	Get some memory please
+
+mem:	.fctr	lb:[1,1]VMLIB/lb:extsk
+
+
+; RMS-11 V2.0
+
+	.NAME	RMS11
+RMSROT:	.FCTR	LB:[1,1]RMSLIB/LB:RMSSYM:R0AUTO:R0EXSY:R0IMPA
+RMSALL:	.FCTR	RMS11-*RMSRT1-RMSIO-*(RMFIL,RMREC)
+RMSRT1:	.FCTR	LB:[1,1]RMSLIB/LB:R0MAPC:R0RSES
+RMSIO:	.FCTR	LB:[1,1]RMSLIB/LB:R0CACH:R0MDAT:R0RLCH:R0RWBF:R0UNLK:R0WTBS
+;
+; The remainder of this ODL is common for both asynchronous and synchronous-only support.
+;
+RMFIL:	.FCTR	(RMCOP,RMDIR,RM23DP-RMEEXT,RMSMIS)
+RMREC:	.FCTR	(RMBIO,RMCLO-RMMIS-RMSCD,RMGET1,RMPUT1,RMUPD1)
+RMCOP:	.FCTR	LB:[1,1]RMSLIB/LB:R0CRFL:R0OPFL:R0RXAC:R0RXDI:R1CRCK:R1OPFL
+RMDIR:	.FCTR	LB:[1,1]RMSLIB/LB:R0ERFL:R0RXDI
+RM23DP:	.FCTR	LB:[1,1]RMSLIB/LB:R0CKSM:R0DPYC
+RMEEXT:	.FCTR	LB:[1,1]RMSLIB/LB:R0EXT0
+RMSMIS:	.FCTR	LB:[1,1]RMSLIB/LB:R0MKWA:R0PRFN
+RMCLO:	.FCTR	LB:[1,1]RMSLIB/LB:R0CLCM:R1CLOS:R1NXBK:R1RLBK
+RMBIO:	.FCTR	LB:[1,1]RMSLIB/LB:R0RWBI:R0XPFN
+RMMIS:	.FCTR	LB:[1,1]RMSLIB/LB:R0FREE:R0MAGT:R0RWIN:R0WATR:R1TRUN
+RMSCD:	.FCTR	LB:[1,1]RMSLIB/LB:R0ALBS:R0CCLN:R1CONP:R1DISC
+RMREC1:	.FCTR	LB:[1,1]RMSLIB/LB:R0ACBB:R1CKEF:R1NXBK:R1RLBK
+RMGET1:	.FCTR	RMREC1-LB:[1,1]RMSLIB/LB:R1GBLD:R1GET:R1GSET
+RMPUT1:	.FCTR	RMREC1-LB:[1,1]RMSLIB/LB:R1PBLD:R1PSET:R1PUNR:R1PUT
+RMUPD1:	.FCTR	RMREC1-LB:[1,1]RMSLIB/LB:R1DELE:R1PSET:R1UBLD:R1UPDA
+
+	.end

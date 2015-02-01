@@ -1,0 +1,86 @@
+
+As submitted to Decus, Kermit-11 is on one of three types of media:
+
+1. 16MT9 DOS format tape, full kit, read by FLX on RSX and PIP on RSTS/E
+2.  3  RX01  RT11 format disks, read by COPY on RT11, FLX on RSX and FIT
+on RSTS/E 
+3. 2 RX50 disks, one P/OS format for use on  P/OS,  RSX  and  Micro/RSX,
+and the other RT11 format for reading under RT11, RSTS/E (with FIT). 
+
+
+The floppy disk kits do NOT include any source files.  The  installation
+notes,  K11INS.DOC,  do  not contain any references to specific media or
+ways to transfer files from a specific type of media. See notes  at  the
+end of this file for information. 
+
+
+For the RX01 disks, the files are:
+
+	1/3		K11.TSK, K11RT4.SAV, K11XM.SAV
+	2/3		K11POS.TSK, K11RSX.TSK
+	3/3		K11NRS.TSK, K11HLP.HLP, K11INS.DOC and K11FLP.DOC.
+
+For the RX50 disks, the files are:
+
+	1/2 RT11 format	K11POS.TSK, K11.TSK, K11RT4.SAV, K11XM.SAV, K11HLP.HLP
+			K11INS.DOC
+	2/2 P/OS format	K11RSX.TSK, K11POS.TSK, K11XM.SAV, K11HLP.HLP
+			K11INS.DOC
+
+
+P/OS disks are readable under MicroRSX, the files  are  in  directory  [KERMIT].
+RT11 format disks can be read with FLX on RSX and FIT on RSTS/E. 
+
+The best way to make copies of the diskettes is  to  use  the  COPY/DEV  command
+under  RT11  and  PRO/RT11. This does a physical copy of the entire disk without
+regard for the internal file structure or data  on  the  diskettes.  Of  course,
+copying disks under P/OS from the menu is only possible for P/OS format disks. 
+
+Note  the  K11POS.TSK  will run under RSX11M/M+, the only difference from K11RSX
+is (1) NO DAP support and (2) the task is linked to RMSRES. 
+
+In all cases, please read K11INS.DOC for more information.
+
+
+
+
+What to do with RX50 Kermit-11
+
+
+Short notes for RX50 diskettes of Kermit-11   11-Nov-85  19:15:19 BDN
+In all cases DZn: refers to DZ drive unit N
+
+RSX, RSXM+ and Micro-RSX
+
+	If you have the segmented RMSRES from M+ or Micro-RSX
+	then
+	  (1) Copy DZn:[1,2]K11POS.TSK to [1,54]KERMIT.TSK
+	else
+	  (1) Copy DZn:[1,2]K11RSX.TSK to [1,54]KERMIT.TSK
+	
+	(2) Copy DZn:[1,2]K11HLP.HLP to [1,2]
+	(3) Copy and print K11USR.DOC
+	(4) Set protection on the files
+	(5) Do INS $KERMIT/TASK=...KER
+
+
+RT11 and TSX+
+
+	If you are using the XM (RT11) monitor or TSX with PLAS
+	then
+	  (1) Copy K11XM.SAV to KERMIT.SAV
+	else
+	  (1) Copy K11RT4.SAV to KERMIT.SAV
+	
+	(2) Copy K11HLP.HLP to SY:
+	(3) Copy K11USR.DOC and print it
+
+
+RSTS/E
+
+	Use [1,2]FIT.TSK to copy K11.TSK to [1,2]KERMIT.TSK/PR:104/MO:16
+	Use [1,2]FIT.TSK to copy K11HLP.HLP to [1,2]K11HLP.HLP/MO:16/PR:40
+	Use [1,2]FIT.TSK to copy K11USR.DOC and print it
+	Do the DCL command DEF/COM/SYS KER-MIT [1,2]KERMIT.TSK/LIN=30000
+	and place that command in [0,1]START.COM
+	

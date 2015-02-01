@@ -1,0 +1,156 @@
+
+K11AAA.AAA     Updated: 19-Feb-87  16:51:24
+
+
+Kermit-11 Edit history:  K11CMD.MAC
+Kermit-11 Installation:  K11INS.DOC
+Kermit-11 Documentation: K11HLP.HLP  (no separate user manual)
+Kermit-11 Files:	 K11FIL.DOC  (PLEASE read this)
+
+
+
+Please note that while Kermit-11 uses RMS11 for all versions (RT11 excluded)
+you do not need RMS on your system unless you opt to use the versions linked
+to RMSRES (K11.TSK for RSTS/E and K11POS.TSK for M/M+ and P/OS).
+For further information, please read K11INS.DOC
+
+
+
+To get Kermit-11 and all the other Kermits:
+
+  KERMIT Distribution
+  Columbia University Center for Computing Activities
+  7th Floor, Watson Laboratory
+  612 West 115th Street
+  New York, N.Y.  10025
+
+
+There is also a fairly current copy of Kermit-11 available  from  DECUS,
+order  number  11-731.  As  of June 1985 the DECUS library has Kermit-11
+available on RX01's and RX50's (in RT and  P/OS  format).  Additionally,
+the SIG tapes almost always have a current version on them. 
+
+---------------------------------------------------------------------
+To get Kermit-11 from the author:
+
+
+Mail:
+
+800bpi		DOS-11 format
+1600 bpi tape	DOS-11, ANSI or VMS Backup
+RX01		RT format, binaries only
+RX50		RT or P/OS (readable on Micro/RSX), delays are possible
+		since I have only one PRO/350 and one hard disk.
+
+For tapes,  VMS Backup format is preferred (default if not specified).
+For RSTS/E, V9 Backup format is preferred. V9 backup is NOT compatible
+with previous releases of RSTS/E, but IS compatible with VMS backup.
+
+You must supply the media
+
+
+Brian Nelson
+Computer Services
+University of Toledo
+2801 West Bancroft
+Toledo, Oh 43606
+(419) 537-2841   or   BRIAN@UOFT02.BITNET
+
+-----------------------------------------------------------
+Bitnet:
+
+from VM/CMS:	CP SMSG RSCS MSG UOFT02 KERMSRV DIR
+		CP SMSG RSCS MSG UOFT02 KERMSRV SEND K11*.*
+
+from VMS Jnet:	$ SEN/REM UOFT02 KERMSRV SEND K11*.*
+
+
+ Columbia University maintains a BITNET Kermit server also,
+username KERMSRV node CUVMA.  Command format is similiar to
+the VMS KERMSRV on node UOFT01.
+-----------------------------------------------------------
+Dialup:
+
+	(419) 537-4411
+	Service class  VX785A
+	User: KERMIT
+	Password: KERMIT
+
+Source and hex files are in KER:, binaries are in KERBIN:
+
+-----------------------------------------------------------
+
+See K11INS.DOC
+
+
+For edit history, see K11CMD.MAC
+
+If you really have a problem with RMS, please read K11INS.DOC
+first. You DO NOT need RMSRES on your system to use Kermit.
+
+You don not even need ANY RMS-11 files on your system to run.
+
+
+To reach me
+
+	Brian Nelson
+	Computer Services
+	University of Toledo
+	2801 West Bancroft
+	Toledo, Oh 43606
+	(419) 537-2841
+
+ The KERMIT file transfer protocol is intended for use in an  environment  where
+ there  may  be  a  diverse  mixture of computers -- micros, personal computers,
+ workstations, laboratory computers, timesharing systems -- from  a  variety  of
+ manufacturers.    All  these systems need have in common is the ability to com-
+ municate in ASCII over ordinary serial telecommunication lines.
+
+ KERMIT was originally designed at Columbia University to meet the need for file
+ transfer between our DECSYSTEM-20 and IBM  370-series  mainframes  and  various
+ microcomputers.   It turned out that the diverse characteristics of these three
+ kinds of systems resulted in a design that was general enough to fit almost any
+ system.  The IBM mainframe, in  particular,  strains  most  common  assumptions
+ about how computers communicate.
+
+ The  KERMIT  protocol is specifically designed for character-oriented transmis-
+ sion over serial telecommunication lines.  The design allows for  the  restric-
+ tions and peculiarities of the medium and the requirements of diverse operating
+ environments  --  buffering,  duplex, parity, character set, file organization,
+ etc.  The protocol is carried out by KERMIT programs on each end of the  serial
+ connection  sending "packets" back and forth; the sender sends file names, file
+ contents, and control information; the  receiver  acknowledges  (positively  or
+ negatively) each packet.
+
+ The  packets  have  a  layered  design,  in  keeping  with  the  ANSI  and  ISO
+ philosophies, with the outermost fields used by the data link layer  to  verify
+ data  integrity,  the  next  by the session layer to verify continuity, and the
+ data itself at the application level.
+
+ Connections between systems are established by the ordinary user.  In a typical
+ case, the user runs KERMIT on a microcomputer, enters terminal emulation,  con-
+ nects  to  a remote host computer (perhaps by dialing up), logs in, runs KERMIT
+ on the remote host, and then issues commands to that KERMIT  to  start  a  file
+ transfer,  "escapes"  back  to the micro, and issues commands to that KERMIT to
+ start its side of the file transfer.  Files may be  transferred  singly  or  in
+ groups.
+
+ Basic  KERMIT  provides only file transfer, and that is provided for sequential
+ files only, though the protocol attempts to allow for various types of  sequen-
+ tial  files.    Microcomputer  implementations  of  KERMIT are also expected to
+ provide terminal emulation, to facilitate the initial connection.
+
+ More  advanced implementations simplify the "user interface" somewhat by allow-
+ ing the KERMIT on the remote host to run as  a  "server",  which  can  transfer
+ files in either direction upon command from the local "user" Kermit.  The serv-
+ er  can  also  provide  additional functionality, such as file management, mes-
+ sages, mail, and so forth.  Other optional features  also  exist,  including  a
+ variety  of  block  check  types,  a mechanism for passing 8-bit data through a
+ 7-bit communication link, a way to compressing a repeated sequence  of  charac-
+ ters, and so forth.
+
+ As  local area networks become more popular, inexpensive, and standardized, the
+ demand for KERMIT and similar protocols may dwindle, but will never wither away
+ entirely.  Unlike hardwired networks, KERMIT gives the ordinary user the  power
+ to  establish  reliable  error-free connections between any two computers; this
+ may always be necessary for one-shot or long-haul connections.

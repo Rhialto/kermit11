@@ -1,0 +1,1100 @@
+	.title	k11ser	server for KERMIT-11
+	.ident	/8.0.01/
+
+
+
+;	Brian Nelson  22-Dec-83  12:16:59
+;
+;	This is the server module for KERMIT-11
+;	it also has the modules to talk to a remote kermit
+
+
+
+
+	.if ndf, K11INC
+	.ift
+	.include	/IN:K11MAC.MAC/
+	.include	/IN:K11DEF.MAC/
+	.include	/IN:K11CDF.MAC/
+	.endc
+
+	.iif ndf	,k11inc	,.error	; missing INCLUDE for K11MAC.MAC
+	.enabl	gbl
+
+
+
+	rodata
+
+notimp:	.asciz	/?Kermit-11  Unimplemented server command/
+notgen:	.asciz	/?Kermit-11  Unimplemented server generic command/
+kertmp:	.asciz	/KERMIT.TMP/
+invarg:	.asciz	/?Kermit-11  Invalid arguments for remote server command/
+crlf:	.byte	cr,lf,0
+fubar	=	0
+	.even
+
+	global	<null>
+
+	code
+
+
+
+	.sbttl	call the server
+
+
+
+c$serv::$name	<SER>			; allow patching this out (why??)
+	clr	notatt			; assume attached
+	tstb	@argbuf			; if nothing for arg, do normal server
+	beq	20$			; ok, do normal server thing
+	calls	getcm0	,<argbuf,#serlst>; no, check for server cmd argument
+	tst	r0			; did we find a valid one
+	bmi	110$			; no
+	jsr	pc	,@r1		; yes, process it
+	tst	r0			; did this work?
+	bne	100$			; no, exit please
+
+20$:	clr	mcrcmd			; always allow remote FIN command
+	tst	notatt			; are we attached today?
+	bne	30$			; no
+	tst	infomsg			; /41/ Should we be verbose today?
+	beq	30$			; /41/ no
+	print	#sertxt			; dump a message out please
+30$:	call	opentt			; get the line open please
+	direrr	r0			; print any errors out
+	calls	cantyp	,<#ttname,#lun.ti>; dump garbage perhaps
+	call	server			; and do it
+	call	clostt			; we came back ?
+	clr	notatt			; assume attached now
+100$:	clr	r0
+	return				; ok
+
+
+110$:	message	<Invalid SERVER subcommand>,cr
+	return
+
+	.enabl	lsb
+
+sr$det:	tstb	ttdial			; insure a SET LINE command was done
+	beq	110$			; no, thats an error please
+	message	<Server detaching from TI:>,cr
+	call	detach			; detach from the current TI:
+	tst	r0			; did this work ok ?
+	bne	90$			; no
+	mov	sp	,notatt		; no longer attached to ti:
+	clr	r0
+	br	100$
+90$:	direrr	r0			; say why please
+100$:	return
+
+110$:	message	<You must use the SET LINE command before detaching the server>
+	message
+	mov	sp	,r0
+	return
+
+	.dsabl	lsb
+
+
+	$cmglob	=	0
+
+	command	serlst	,DETACH	,3	,sr$det
+	command	serlst
+
+
+	global	<detach	,lun.ti	,notatt	,server>
+
+
+	.save
+	.psect	$pdata
+
+sertxt:
+
+.ascii #Kermit Server running on PDP-11 host. Please type your escape sequence#
+.byte  cr,lf
+.ascii #to return  to your local machine.  Shut down the server by  typing the#
+.byte  cr,lf
+.asciz #Kermit BYE command on your local machine.#<cr><lf>
+
+	.even
+	.restore
+
+
+
+
+	.sbttl	the main server loop
+	code
+
+
+server::mov	remote	,-(sp)		; save the local/remote flag
+	mov	sp	,remote		; if a server we are always remote
+	mov	sp	,inserv		; global flag to say we are a server
+
+10$:	clr	paknum			; packetnumber := 0
+	clr	numtry			; number_of_retrys := 0
+	clr	oldtry			; oldtries := 0
+	clr	cccnt			; /38/ clear control C flag
+	textsrc				; /38/ reset to normal file i/o
+	mov	#defchk	,chktyp		; checksum_type := type_1
+	mov	#1	,chksiz		; checksum_len  := 1
+	mov	$image	,image		; insure correct default is set
+	call	fixchk			; sendpar_checktype := set_checktype
+	mov	serwai	,sertim		; /41/ set a new timeout please
+	rpack	r2,r3,#packet		; loop forever
+	clr	sertim			; normal timeouts now
+
+	scan	r1	,#sercom	; is the generic command type
+	asl	r0			; index into dispatch table
+	jsr	pc	,@serdsp(r0)	; simple
+
+	tst	r0			; done flag ?
+	beq	10$			; next server command please
+100$:	calls	suspend	,<#2>		; sleep a moment please
+	clr	inserv			; no longer a server
+	mov	(sp)+	,remote		; save the local/remote flag
+	return
+
+
+	dispat	basedsp=serdsp	,baseval=sercom	,default=serv.$
+
+	dispat	MSG$SND		,serv.s	; server init for receive a file
+	dispat	MSG$RCV		,serv.r	; send a file
+	dispat	MSG$GENERIC	,serv.g	; do a server command
+	dispat	MSG$SER		,serv.i	; do a server sinit
+	dispat	TIMOUT		,serv$$	; we timed out
+	dispat	BADCHK		,serchk	; a fubar checksum
+	dispat	MSG$NAK		,serv$$	; a NAK this time
+	dispat	MSG$ACK		,serv$$	; things are ok now
+	dispat	MSG$COMMAND	,serv.c	; a host command
+	dispat	MSG$ERROR	,sernop	; ignore 'E' packets from remote
+	dispat
+
+	global	<badchk	,numtry	,oldtry	,paknum	,sertim>
+	global	<chksiz	,chktyp	,inserv	,fixchk	,$image>
+
+
+
+	.sbttl	routines for server
+
+
+serv.$:	strlen	#notimp
+	spack	#MSG$ERROR,paknum,r0,#notimp ; ignore unrecognized packet type
+	clr	r0			; not done yet
+	return
+
+
+serv$$:	call	serchk			; timeout, send a NAK please
+sernop:	clr	r0			; not yet done
+	return				; ignore timeouts, ACKS and NAKS
+
+
+serchk:	mov	r3	,paknum		; nak checksum errors
+	spack	#MSG$NAK,paknum		; send the NAK out please
+	clr	r0			; we are not done
+	return
+
+
+serv.i:	mov	r3	,paknum		; we got an init packet. respond in
+	calls	rpar	,<#packet,r2>	; kind please
+	calls	spar	,<#packet>	; get our parameters and send them to
+	spack	#MSG$ACK,paknum,sparsz,#packet; the other kermit
+	call	inirepeat		;
+	clr	r0			; not done
+	return				; bye
+
+	global	<inirepeat>
+
+
+serv.s:	mov	pauset	,oldpau		; save the old pause time please
+	call	throtl			; and throttle the line speed
+	mov	r3	,paknum		; got a SINIT, initialize packet number
+	calls	rpar	,<#packet,r2>	; store there send init info away
+	calls	spar	,<#packet>	; and send them ours for the ACK
+	spack	#MSG$ACK,paknum,sparsz,#packet
+	call	inirepeat		; do repeat initialization
+	mov	numtry	,oldtry		; save the retry count
+	clr	numtry			; retrycount := 0
+	incm64	paknum			; paknum := ( paknum+1 ) mod 64
+	calls	rec.sw	,<#STA.FIL>	; and get set to receive a filename
+	clr	r0			; not done
+	mov	oldpau	,pauset		; restore old pause time
+	return				; next server command please
+
+
+
+serv.r:	calls	bufunp	,<#packet,#srcnam> ; /53/
+	clrb	srcnam(r1)		; /53/
+	calls	fixwild	,<#srcnam>	; change % to ?
+	clr	index			; first file in directory please
+	call	getnxt			; get the first filename please
+	tst	r0			; did it work ?
+	bne	100$			; no. Getnxt will send the error pak
+	calls	sen.sw	,<#STA.SIN>
+100$:	clr	r0			; not done
+	return
+
+
+	.enabl	lsb
+
+serv.c:	call	cretmp			; create the temp file please
+	bcs	100$			; oops
+	calls	sercmd	,<#packet,#lun.ou>; it worked
+	cmpb	r0	,#377		; normal exit on KMON wait?
+	beq	10$			; yes
+	tst	r0			; zero (?)
+	beq	10$			; yes
+	calls	syserr	,<r0,#errtxt>	; no, send the error over
+	strlen	#errtxt			; the length
+	spack	#MSG$ERROR,paknum,r0,#errtxt ; ignore unrecognized packet type
+	call	clotmp			; no, send error over
+	br	100$			; bye
+10$:	call	clotmp			; close it and send the file over
+	mov	#kertmp	,r0		; as a text reply
+	call	xreply
+100$:	clr	r0
+	return
+
+	.save
+	.psect	$PDATA	,D
+200$:	.asciz	/Spawned job failed due to timeout or TT read wait/<cr><lf>
+	.even
+	.restore
+	.dsabl	lsb
+
+
+serv.g:	sub	#200	,sp		; /53/ Make a temp copy of data
+	mov	sp	,r2		; /53/ Point to it
+	STRCPY	r2	,#packet	; /53/ Copy it
+	calls	bufunp	,<r2,#packet>	; /53/ Undo it (with repeats)
+	add	#200	,sp		; /53/ Pop buffer
+	movb	packet+0,r2		; get the first data byte which
+	scan	r2,#gencom		; is the generic command type
+	asl	r0			; index into dispatch table
+	jsr	pc	,@gendsp(r0)	; simple
+	return
+
+
+	dispat	basedsp=gendsp	,baseval=gencom	,default=gen.$
+
+	dispat	GN$LOGIN	,gen.i
+	dispat	GN$EXIT		,gen.f
+	dispat	GN$CONNECT	,gen.c
+	dispat	GN$BYE		,gen.l
+	dispat	GN$DIRECTORY	,gen.d
+	dispat	GN$DISK		,gen.u
+	dispat	GN$DELETE	,gen.e
+	dispat	GN$SUBMIT	,gen.$
+	dispat	GN$WHO		,gen.w
+	dispat	GN$SEND		,gen.$
+	dispat	GN$HELP		,gen.h
+	dispat	GN$QUERY	,gen.$
+	dispat	GN$RENAME	,gen.r
+	dispat	GN$COPY		,gen.k
+	dispat	GN$PRINT	,gen.$
+	dispat	GN$PROGRAM	,gen.$
+	dispat	GN$JOURNAL	,gen.$
+	dispat	GN$VARIABLE	,gen.$
+	dispat	GN$TYPE		,gen.t
+	dispat
+
+
+	global	<getnxt	,index	,numtry	,oldtry	,paknum>
+	global	<srcnam	,sparsz	,pauset	,oldpau	,throtl>
+
+
+
+	.sbttl	generic kermit routines
+
+
+gen.$:	strlen	#notgen			; NO-OP for unimplemented generic
+	spack	#MSG$ERROR,paknum,r0,#notgen ; send an error packet back please
+	clr	r0			; not done
+	return
+
+
+gen.f:	spack	#MSG$ACK,paknum		; send a simple ACK
+	clr	r0			; /45/ May want to stay in server
+	tst	srvprot			; /45/ Do we REALLY want to do this?
+	bne	100$			; /45/ No
+	call	clostt			; close the terminal up and exit
+	mov	sp	,r0		; all done, return to command mode
+100$:	return
+
+
+	.enabl	lsb			; /54/ I/D space
+
+gen.l:	call	quochk			; see if they will be able to logout
+	tst	r0			; well ?
+	bne	10$			; not likely, but try anyway
+	tst	srvprot			; /45/ Is the server protected?
+	beq	5$			; /45/ No
+	strlen	#210$			; /45/ Yes, tell them what we did
+	spack	#MSG$ERR,paknum,r0,#210$; /45/ Ie, DISCONNECT but no LOGOUT
+	calls	suspend	,<#2,#0>	; /45/ Insure response gets through
+	calls	ttyhang	,<#ttname>	; /45/ Drop the line please
+	br	100$			; /45/ Now do it
+5$:	spack	#MSG$ACK,paknum		; assume we can log out
+10$:	call	clostt			; close the terminal please
+	bit	#log$op	,trace		; a logfile open now ?
+	beq	20$			; no
+	calls	close	,<#lun.lo>	; yes, close it please
+20$:	call	logout			; and log out of the system
+	call	opentt			; get the terminal back
+	strlen	#200$			; logout failed
+	spack	#MSG$ERROR,paknum,r0,#200$ ; send an error message back then
+100$:	clr	r0			; not yet done
+	return				; oops
+
+	.save
+	.psect	$PDATA	,D
+	.enabl	lc
+200$:	.asciz	/Logout failed - Quota exceeded/
+210$:	.asciz	/Server disconnected and still logged in/
+	.even
+	.restore
+	.dsabl	lsb
+
+
+gen.u:	sub	#120	,sp		; allocate a buffer for string
+	mov	sp	,r1		; and point to it
+	calls	dskuse	,<r1>		; get the string to print
+	strlen	r1			; get the string length
+	spack	#MSG$ACK,paknum,r0,r1	; and send the data back
+	add	#120	,sp		; and exit
+	clr	r0			; not yet done
+	return
+
+
+	.enabl	lsb			; /54/ I/D space
+
+gen.c:	mov	#packet+1,r1		; get the packet address
+	mov	#defdir	,r4		; /59/
+	clrb	@r4			; /59/ Assume clearing defdir
+	unchar	(r1)+	,r2		; get the size of the data
+	beq	90$			; nothing to do ?
+	mov	r1	,-(sp)		; /59/ Save source address
+10$:	movb	(r1)+	,(r4)+		; /59/ Copy dir name, and do not
+	sob	r2	,10$		; /59/ include password length and
+	mov	(sp)+	,r1		; /59/ actual password, if present
+	sub	#140	,sp		; allocate a buffer
+	mov	sp	,r2		; point to the buffer
+	strcpy	r2	,#110$		; build up a message
+	strcat	r2	,r1		; add the directory name in
+	strlen	r2			; get the total length
+	spack	#MSG$ACK,paknum,r0,r2	; and sent the ack message
+	add	#140	,sp		; pop buffer
+	br	100$			; and exit
+90$:	strlen	#120$			; Say we cleared it
+	spack	#MSG$ACK,paknum,r0,#120$; error text to send
+100$:	clr	r0			; not done
+	return
+
+
+	.save
+	.psect	$PDATA	,D
+110$:	.asciz	/Default directory set to /
+120$:	.asciz	/Default directory cleared/ ; /58/ Changed as per the frog book
+	.even
+	.restore
+	.dsabl	lsb
+
+
+
+
+	.sbttl	handle the request for erase (delete) and directory
+
+gen.e:	mov	#packet+1,r1		; get the packet address
+	unchar	(r1)+	,r2		; get the arguement length
+	bne	10$			; non zero
+	clrb	@r1			; zero, make the string null
+10$:	call	cretmp			; create temporary log file
+	bcs	100$			; oops
+	calls	delete	,<r1,#lun.ou>	; do it
+	save	<r0>			; save the error code please
+	call	clotmp			; close the temp file up
+	unsave	<r0>			; restore delete's error code
+	tst	r0			; did it work ?
+	beq	80$			; yes
+	call	generr			; no, send the RMS error code over
+	br	100$
+
+80$:	dec	r1			; only delete one file ?
+	bne	90$			; no, set up for extended reply
+	copyz	#<packet+2>,#errtxt	; a simple reply for one file deleted
+	strlen	#errtxt			; get the length so far
+	add	#errtxt	,r0		; point to the end of it please
+	copyz	#delmsg	,r0		; and copy some informative text
+	strlen	#errtxt			; get the total length now
+	spack	#MSG$ACK,paknum,r0,#errtxt ; and send a simple ACK packet
+	br	100$			; bye
+
+90$:	mov	#kertmp	,r0		; send over the delete log file
+	call	xreply
+100$:	clr	r0			; not done with the server yet
+	return
+
+	.Save
+	.Psect	$Pdata	,D
+delmsg:	.asciz	/ deleted/		; some text to send
+	.even
+	.Restore
+
+
+;	REMOTE DIRECTORY
+;
+;	Modified 07-Nov-85 by BDN to not use a work file for storing
+;	the results of the lookups. Much faster than old way.
+
+gen.d:	mov	#packet+1,r1		; /38/ get the packet address
+	unchar	(r1)+	,r2		; /38/ get the arguement length
+	bne	5$			; /38/ something was there
+	clrb	@r1			; /38/ nothing was there, insure .asciz
+5$:	calls	fixwild	,<r1>		; /38/ convert % to ? for RSTS/E only
+	calls	sdirini	,<r1>		; /38/ Init directory lookup and 
+	tst	r0			; /38/ preload sdodir's buffer.
+	beq	10$			; /38/ Send error packet on any error
+	call	generr			; /38/ Makes interfacing to BUFFIL
+	br	100$			; /38/ a bit simpler
+10$:	mov	#sdodir	,getcroutine	; /38/ Stuff address of get_nextchar
+	mov	#null	,r0		; /38/ and flag we are NOT using a file
+	call	xreply			; /38/ Do the extended reply now
+100$:	clr	r0			; /38/ cleared
+	return				; /38/ and exit
+
+
+;	mov	#packet+1,r1		; get the packet address
+;	unchar	(r1)+	,r2		; get the arguement length
+;	bne	5$			; something was there
+;	clrb	@r1			; nothing was there, insure .asciz
+;5$:	call	cretmp			; create the temp file please
+;	bcs	100$			; oops
+;	calls	fixwild	,<r1>		; change % to ?
+;	calls	dodir	,<r1,#lun.ou>	; it worked
+;	call	clotmp			; close it and send the file over
+;	mov	#kertmp	,r0		; as a text reply
+;	call	xreply
+;100$:	clr	r0
+;	return
+
+
+
+
+
+
+	.sbttl	do remote help command
+
+
+gen.h:	textsrc	#htxt			; /38/ use memory resident
+	mov	#null	,r0		; /38/ for this extended response
+	call	xreply			; /38/
+	clr	r0			; /38/ success
+	return				; /38/ exit
+
+	.save
+	.psect	$Pdata	,D
+htxt:	.ascii	/The following commands are available for the Kermit-11/<cr><lf>
+	.ascii	/server.  To avoid ambiguity with local Kermit commands/<cr><lf>
+	.ascii	/some of the  server commands will  need to be prefixed/<cr><lf>
+	.ascii	/with the REMOTE keyword./<cr><lf>
+	.byte	cr,lf
+	.ascii	/BYE		Logout Kermit-11/<cr><lf>
+	.ascii	/REMOTE COPY	Copy one file to another/<cr><lf>
+	.ascii	/REMOTE CWD	Change default directory/<cr><lf>
+	.ascii	/REMOTE DIR 	Prints the directory out/<cr><lf>
+	.ascii	/REMOTE DISK	Prints  available  space/<cr><lf>
+	.ascii	/REMOTE ERASE	Deletes  the filename(s)/<cr><lf>
+	.ascii	/FINISH		Exits a Kermit-11 server/<cr><lf>
+	.ascii	/GET 		Sends  the filename(s)/<cr><lf>
+	.ascii	/REMOTE HELP	Prints this  help text/<cr><lf>
+	.ascii	/REMOTE HOST	Execute a host command/<cr><lf>
+	.ascii	/REMOTE LOGIN	Login.  RSTS V9.x only/<cr><lf>
+	.ascii	/REMOTE RENAME	Rename old file to new/<cr><lf>
+	.ascii	/REMOTE SPACE	Prints the disk  space/<cr><lf>
+	.ascii	/REMOTE TYPE	Prints the filename(s)/<cr><lf>
+	.ascii	/REMOTE WHO	Shows users logged  in/<cr><lf>
+	.byte	cr,lf,0
+	.even
+	.restore
+
+	global	<clostt	,exit	,logout	,opentt	,paknum	,quochk>
+	global	<lun.lo	,trace>
+
+
+
+
+
+	.sbttl	the remote type command and who commands
+	.enabl	lsb
+
+
+	
+gen.t:	mov	#packet+1,r1		; get the packet address
+	tstb	@r1			; anything there ?
+	beq	5$			; no, thats an error
+	unchar	(r1)+	,r2		; get the arguement length
+	bne	10$			; something was there
+5$:	calls	error	,<#1,#200$>	; have to have something to type
+	br	100$			; bye
+10$:	mov	r1	,r0		; send the file over now
+	call	xreply			; simple to do
+100$:	clr	r0			; not done yet
+	return
+
+	.save
+	.psect	$Pdata,d
+200$:	.asciz	/I need a filename to TYPE/
+	.even
+	.restore
+	.dsabl	lsb
+	.enabl	lsb
+
+gen.w:	call	cretmp			; get the temp file created  first
+	bcs	100$			; oops
+	calls	systat	,<#lun.ou>	; dump the systat out to disk now.
+	tst	r0			; did it work ?
+	beq	10$			; yes
+	calls	error	,<#1,#200$>	; no, send an error packet over
+	call	clotmp			; insure temp file is closed
+	br	100$			; bye
+10$:	call	clotmp			; close the temp file now
+	mov	#kertmp	,r0		; and send an extended reply
+	call	xreply			; simple to do
+100$:	clr	r0			; not done yet
+	return				; bye
+
+	.save
+	.psect	$Pdata,d
+200$:	.asciz	/SYSTAT failed/
+	.even
+	.restore
+	.dsabl	lsb
+
+
+	.sbttl	do the server copy and rename functions
+	.enabl	lsb
+
+gen.i:	sub	#120	,sp
+	mov	#120$	,r3
+	call	get2ar
+	bcs	90$
+	mov	sp	,r3
+	calls	login	,<r1,r2,r3>	; 1=uic,2=password,3=addr(msgtext)
+	tst	r0			; did this one work ?
+	bne	90$			; no
+	strlen	#110$			; an ack message
+	spack	#MSG$ACK,paknum,r0,#110$; send it back
+	br	100$			; and exit please
+
+90$:	calls	error	,<#1,r3>	; invalid arguments
+
+100$:	clr	r0			; no errros
+	add	#120	,sp		; pop stack and exit
+	return				; exit
+
+	.save
+	.psect	$Pdata,d
+110$:	.asciz	/Login successful/
+120$:	.asciz	/Missing password or UIC (PPN)/
+	.even
+	.restore
+	.dsabl	lsb
+	.enabl	lsb
+
+gen.k:	call	get2ar			; get pointers to 'from' and 'to'
+	bcs	90$			; oops, send an error packet over
+	calls	copy	,<r1,r2,#-1>	; copy the file now
+	tst	r0			; did it work out ok ?
+	bne	80$			; no
+	sub	#50	,sp		; yes, formulate a simple ack
+	mov	sp	,r2		; response telling them how many
+	deccvt	r1,r2,#5		; blocks that we copied over
+	add	#5	,r2		; point past the block count
+	copyz	#200$	,r2		; copy a message and then ack it
+	mov	sp	,r2		; point back to the start of buffer
+	strlen	r2			; get the string length now
+	spack	#MSG$ACK,paknum,r0,r2	; send the ack over
+	add	#50	,sp		; pop the local buffer and exit
+	br	100$			; bye
+
+80$:	call	generr			; error, send RMS (sys) error text
+	br	100$			; bye
+
+90$:	calls	error	,<#1,#invarg>	; invalid arguments
+
+100$:	clr	r0			; exit
+	return				; bye
+
+	.Save
+	.Psect	$Pdata,d
+200$:	.asciz	/ blocks copied/
+	.even
+	.restore
+	.dsabl	lsb
+	.enabl	lsb
+
+
+;	RENAME
+
+gen.r:	call	get2ar			; get pointers to 'from' and 'to'
+	bcs	90$			; oops, send an error packet over
+	calls	rename	,<r1,r2,#-1>	; rename the file(s) now
+	tst	r0			; did it work out ok ?
+	bne	80$			; no
+	sub	#50	,sp		; yes, formulate a simple ack
+	mov	sp	,r2		; response telling them how many
+	deccvt	r1,r2,#5		; number of files that were renamed
+	add	#5	,r2		; point past the block count
+	copyz	#200$	,r2		; copy a message and then ack it
+	mov	sp	,r2		; point back to the start of buffer
+	strlen	r2			; get the string length now
+	spack	#MSG$ACK,paknum,r0,r2	; send the ack over
+	add	#50	,sp		; pop the local buffer and exit
+	br	100$			; bye
+
+80$:	call	generr			; error, send RMS (sys) error text
+	br	100$			; bye
+
+90$:	calls	error	,<#1,#invarg>	; invalid arguments
+
+100$:	clr	r0			; exit
+	return				; bye
+
+	.save
+	.psect	$Pdata,d
+200$:	.asciz	/ file(s) renamed/
+	.even
+	.restore
+	.dsabl	lsb
+
+
+
+	.sbttl	create the server temp file
+	.enabl	lsb
+
+cretmp:	save	<r1>
+	mov	#errtxt	,r0		; must fill in defdir also
+	mov	#defdir	,r1		; default directory string
+10$:	movb	(r1)+	,(r0)+		; copy it over please
+	bne	10$			; not the end of it yet
+	dec	r0			; end, backup over the null
+	mov	#kertmp	,r1		; and copy the filename over please
+20$:	movb	(r1)+	,(r0)+		; do it
+	bne	20$			; not the end yet
+	calls	create	,<#errtxt,#lun.ou,#text>
+	tst	r0			; did the create for the temp
+	beq	100$			; file work
+	save	<r0>			; save the error number
+	calls	syserr	,<r0,#errtxt>	; no
+	calls	error	,<#2,#200$,#errtxt>; get the error text and send it
+	unsave	<r0>			; keep the RMS error number around
+	sec				; say it did not work
+	br	110$			; bye
+
+100$:	clr	r0			; clc and clear r0 both
+	clc
+110$:	unsave	<r1>
+	return
+
+	.save
+	.psect	$Pdata,d
+200$:	.asciz	/Can't create KERMIT.TMP /
+	.even
+	.restore
+	.dsabl	lsb
+
+clotmp:	calls	close	,<#lun.ou>
+	clr	r0
+	return
+
+
+
+generr:	calls	syserr	,<r0,#errtxt>	; send a system error E packet over
+	calls	error	,<#1,#errtxt>	; simple to do
+	clr	r0			; assume no errors and exit
+	return
+
+
+
+
+	.sbttl	get pointer for a two argument server command
+
+;	input:	packet	what we just read as a server
+;	output:	r1	first  argument address (in 'packet'), .asciz
+;		r2	second argument address (in 'packet'), .asciz
+;		carry	set on missing arg, clear if all is well and good
+;
+;	assumptions: the packet received is .asciz
+
+
+get2ar:	save	<r3,r4>			; save work registers please
+	mov	#packet+1,r3		; get the address of our parameters
+	tstb	@r3			; a null. if so, thats an error
+	beq	90$			; exit with carry set
+	unchar	(r3)+	,r4		; get the length of the first arg
+	beq	90$			; a null string, exit with error
+	mov	r3	,r1		; not null, point to the first one
+	add	r4	,r3		; point to the length field for 2nd
+	tstb	@r3			; must not be null or zero
+	beq	90$			; null, missing second argument
+	unchar	(r3)+	,r4		; get the length of the last field
+	beq	90$			; nothing is there, abort please
+	mov	r3	,r2		; return a pointer to the second arg
+	clrb	-(r3)			; insure the first argument is .asciz
+	clc				; success at last
+	br	100$			; exit please
+
+90$:	sec				; failure, to try again someday
+100$:	unsave	<r4,r3>			; pop the registers we used and exit
+	return				; good bye
+
+
+
+
+
+	.sbttl	talk to a remote server
+	.enabl	lsb
+
+remfin::clr	paknum			; packetnumber := 0
+	call	seropn			; get the link line intialzied
+	spack	#MSG$GENERIC,paknum,#1,#200$ ; send a generic F command
+	rpack	r2,r3,#packet		; get an ack for it please
+	cmpb	r1	,#MSG$ACK	; did the server like it
+	beq	100$			; yes
+	calls	error	,<#1,#210$>	; no, say so
+100$:	call	clostt			; close up the remote link now
+	return				; and back please
+
+
+	.save
+	.psect	$Pdata,d
+200$:	.byte	GN$EXIT,0
+210$:	.asciz	/Can't get the remote KERMIT to FINISH/<cr><lf>
+	.even
+	.restore
+	.dsabl	lsb
+	.enabl	lsb
+
+rembye::clr	paknum			; packetnumber := 0
+	call	seropn			; get the link line intialzied
+	spack	#MSG$GENERIC,paknum,#1,#200$ ; send a generic L command
+	rpack	r2,r3,#packet		; get an ack for it please
+	cmpb	r1	,#MSG$ACK	; did the server like it
+	beq	100$			; yes
+	cmpb	r1	,#MSG$ERROR	; what about an error packet
+	bne	10$			; no
+	calls	error	,<#1,#packet>	; yes, print the response
+	br	100$			; exit
+10$:	calls	error	,<#1,#210$>	; other error
+100$:	call	clostt			; close up the remote link now
+	return
+
+
+	.save
+	.psect	$Pdata,d
+200$:	.byte	GN$BYE	,0
+210$:	.asciz	/Can't get the remote KERMIT to LOGOUT/<cr><lf>
+	.even
+	.restore
+	.dsabl	lsb
+
+
+remget::call	seropn			; get the link line intialzied
+	call	sinfo			; exchange information please
+	clr	paknum			; packet_number := 0
+	strlen	argbuf			; get the length of the filename
+	spack	#MSG$RCV,paknum,r0,argbuf ; get the server to send this file
+	calls	recsw	,<#STA.RIN>	; and call the receiver
+10$:	call	clostt			; close up the remote link now
+	return				; bye
+
+
+
+remhos::call	seropn			; get the link line intialzied
+	call	sinfo			; exchange information please
+	clr	paknum			; packet_number := 0
+	strlen	argbuf			; get the length of the filename
+	spack	#MSG$COMMAND,paknum,r0,argbuf ; get the server to execute
+	call	getres			; off to common code
+;-	call	clostt			; insure closed
+	return
+
+
+
+	.sbttl	the remote space, dir, erase and help commands
+
+
+remspa::calls	doremo	,<#GN$DISK,#1,#null>
+	clr	r0
+	return
+
+
+
+remdir::calls	doremo	,<#GN$DIRECTORY,#1,@r5>
+	clr	r0
+	return
+
+
+remtyp::calls	doremo	,<#GN$TYPE,#1,@r5>
+	clr	r0
+	return
+
+
+remwho::calls	doremo	,<#GN$WHO,#1,#null>
+	clr	r0
+	return
+
+
+remera::calls	doremo	,<#GN$DELETE,#1,@r5>
+	clr	r0
+	return
+
+
+remhlp::calls	doremo	,<#GN$HELP,#1,#null>
+	clr	r0
+	return
+
+remren::calls	doremo	,<#GN$RENAME,#2,@r5,2(r5)>
+	clr	r0
+	return
+
+remcop::calls	doremo	,<#GN$COPY,#2,@r5,2(r5)>
+	clr	r0
+	return
+
+remcwd::mov	2(r5)	,r0		; get address of second (password) arg
+	tstb	@r0			; is there anything there (not likely)
+	beq	10$			; no
+	calls	doremo	,<#GN$CONNECT,#2,@r5,2(r5)> ; insert password also
+	br	100$			;
+10$:	calls	doremo	,<#GN$CONNECT,#1,@r5> ; no password today
+100$:	clr	r0
+	return
+
+remlgi::mov	2(r5)	,r0		; get address of second (password) arg
+	tstb	@r0			; is there anything there (not likely)
+	beq	10$			; no
+	calls	doremo	,<#GN$LOGIN,#2,@r5,2(r5)> ; insert password also
+	br	100$			;
+10$:	calls	doremo	,<#GN$LOGIN,#1,@r5> ; no password today
+100$:	clr	r0
+	return
+
+	global	<sinfo>
+
+
+
+	.sbttl	carry out the remote command please
+
+;	DOREMOTE handles most generic commands that may have
+;	a variable response, such as a simple ACK ("Y") with
+;	the  response in the data packet, an SINIT or an "X"
+;	packet.
+
+
+doremo:	clr	paknum			; generic command
+	sub	#130	,sp		; allocate a buffer please
+	mov	sp	,r2		; point to it
+	movb	@r5	,@r2		; the generic command to execute
+	bicb	#40	,(r2)+		; insure command is upper case
+	mov	4(r5)	,r1		; get the first command argument
+	strlen	r1			; get the length of it please
+	tochar	r0	,(r2)+		; followed by len of first arg
+	copyz	r1	,r2,#40		; copy the arglist over please
+	cmp	2(r5)	,#1		; one or two arguments passed ?
+	beq	30$			; only one
+10$:	tstb	(r2)+			; two, so find the end so far
+	bne	10$			; not yet
+	strlen	6(r5)			; get the length of the second arg
+	dec	r2			; point back to the null please
+	tochar	r0	,(r2)+		; and copy the new length over
+	copyz	6(r5)	,r2,#40		; copy the second arg over now
+
+30$:	mov	sp	,r0		; point back to the command buffer
+	calls	bufpak	,<r0,cmdbuf>	; encoding the data as normal
+	mov	r1	,r5		; save the encoded packet length
+	add	#130	,sp		; pop the local buffer and exit
+	call	seropn			; initialize the link first
+	call	sinfo			; exchange things first
+	clr	paknum			; start over now
+	clr	numtry			; clear the retry counter please
+
+	spack	#MSG$GENERIC,paknum,r5,cmdbuf	; send the command over please
+
+getres:
+50$:	rpack	r2,r3,#packet		; get the response from remote
+	mov	r3	,paknum		; save the packet number please
+	scan	r1	,#remrsp	; what to do with the response
+	asl	r0			; get the index times 2
+	jsr	pc	,@remdsp(r0)	; and dispatch on the response
+	tst	r0			; try to read again ?
+	bne	50$			; yes, we must have gotten a NAK
+	call	clostt			; close the link for now
+	clr	xmode			; no extended reply stuff now
+	clr	xgottn			; we don't have any X packets
+	clr	r0			; don't exit the server yet
+	return				; or a timeout
+
+	.save
+	.psect	$Pdata,d
+remrsp:	.byte	MSG$ERROR,MSG$NAK,MSG$SND,MSG$ACK,MSG$TEXT
+	.byte	timout	,badchk	,0
+	.even
+
+remdsp:	.word	rem.$
+	.word	rem.e	,rem.n	,rem.s	,rem.y	,rem.x
+	.word	rem.t	,rem.ck
+	.restore
+
+
+
+
+	.sbttl	routines for doremote
+
+
+rem.t:	inc	numtry			; timeout error
+	cmp	numtry	,#10		; been trying too hard ?
+	bhi	10$			; yes, abort please
+	mov	#1	,r0		; no, return code to do rpack again
+	return
+10$:	message	<Remote fails to respond to the command>,cr
+	clr	r0			; ok
+	return
+
+
+rem.n:	inc	numtry			; got a NAK back from remote
+	cmp	numtry	,#5		; been trying too hard ?
+	bhi	10$			; yes, abort please
+	spack	#MSG$GENERIC,paknum,r5,cmdbuf	; send command again please
+	mov	#1	,r0		; no, return code to do rpack again
+	return
+10$:	message	<Remote NAK'ed the command 5 times>,cr
+	clr	r0			; ok
+	return
+
+
+rem.ck:	inc	numtry			; got a NAK back from remote
+	cmp	numtry	,#5		; been trying too hard ?
+	bhi	10$			; yes, abort please
+	spack	#MSG$GENERIC,paknum,r5,cmdbuf	; send command again please
+	mov	#1	,r0		; no, return code to do rpack again
+	return
+10$:	message	<Bad checksum retry abort>,cr
+	clr	r0			; ok
+	return
+
+
+rem.x:	mov	sp	,xmode		; set a global flag for this
+	mov	sp	,xgottn		; we already have the x packet
+	message	<Remote server response>,cr
+	calls	rec.sw	,<#STA.FIL>	; yes, switch to receive DATA
+	clr	xmode			; no longer want output to TI:
+	clr	xgottn			; we don't have any X packets
+	message				; a cr/lf
+	tst	r0			; did the receive succeed ?
+	beq	rxend			; yes
+	message	<Receive data failed>,cr; no, please say so then
+rxend:	clr	r0			; all done
+	return
+
+
+rem.s:	calls	rpar	,<#packet,r2>	; yes, handle the SINIT now
+	calls	spar	,<#packet>	; and send my init things over
+	spack	#MSG$ACK,paknum,sparsz,#packet
+	incm64	paknum			; bump the packet number up mod 64
+	calls	rec.sw	,<#STA.FIL>	; switch to get fileheader state
+	message
+	clr	r0			; all done
+	return
+
+
+rem.y:	strlen	#packet			; any data in the field ?
+	tst	r0			; if so, simply print it out
+	bne	10$			; no, just exit
+	return
+10$:	message	<Remote ack: >
+	print	#packet			; yes, print the text out please
+	print	#crlf			; a cr/lf perhaps ?
+	clr	r0			; all done
+	return
+
+
+rem.e:	calls	error	,<#1,#packet>	; yes, print the error text out
+	clr	r0			; all done
+	return				; and exit please
+
+rem.$:	calls	error	,<#1,#nores>	; otherwise say they did not respond
+	clr	r0
+	return				; and exit please
+
+	.save
+	.psect	$Pdata,d
+nores:	.asciz	/Can't get the remote KERMIT to respond/
+	.even
+	.restore
+
+	global	<clostt	,seropn	,paknum	,sparsz	,xmode>
+	global	<xgottn>
+
+
+
+
+	.sbttl	initialize for a long (X) response for generic command
+
+
+;	 Here is where we send an X packet back to the requesting Kermit
+;	to  say that we are going to send an extended reply to it.  This
+;	reply takes the form of a  normal file transfer but we will want
+;	it to be printed on the user's terminal rather than go to a disk
+;	file. Thus the use of the 'X' packet to start things off.
+
+
+xreply:	copyz	r0	,#srcnam	; copy the filename to be sent
+	clrb	filnam			; /38/ insure cleared out
+	clr	index			; wildcard filenumber := 0
+	tstb	srcnam			; /38/ is there really a file?
+	beq	20$			; /38/ no, ignore lookup then.
+	call	getnxt			; go do a directory lookup please
+	tst	r0			; well, did the lookup work out ?
+	beq	20$
+5$:	call	generr			; no, send the error text over
+	br	100$			; and abort
+20$:	mov	sp	,xmode
+	calls	sen.sw	,<#STA.FIL>	; and switch to senddata state
+	clr	xmode			; no longer XTENDED reply mode
+	clr	xgottn			; we don't have any X packets (?)
+	clr	r0			; success (?)
+100$:	textsrc				; /38/ reset to normal file i/o
+	return				; bye
+
+
+
+
+
+	global	<getnxt	,index	,inopn	,lun.in	,size>
+
+
+	.enabl	lsb
+
+seropn:	save	<r1>
+	call	opentt			; open the link for a server command
+	tst	r0			; did it work ?
+	beq	10$			; yes
+	strlen	#200$			; no
+	spack	#MSG$ERROR,paknum,r0,#200$	; try to send an error packet
+	clr	r0			; no errors now
+10$:	calls	cantyp	,<#ttname,#lun.ti>; flush any accumulated NAKS
+	unsave	<r1>
+	return				; bye
+
+
+	.save
+	.psect	$Pdata,d
+200$:	.asciz	/Init failed for link/
+	.even
+	.restore
+	.dsabl	lsb
+
+
+	global	<lun.ti	,paknum	,ttname>
+
+
+	.end
