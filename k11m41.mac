@@ -94,7 +94,8 @@
 ;
 ; 02-Feb-2015 Olaf Seibert 5.0.07 /64/
 ;	Small improvement when packet reading: use TF.RNF (Read No Filter)
-;	to accept un-prefixed CTRL/U, CTRL/R and DEL. 
+;	to accept un-prefixed CTRL/U, CTRL/R and DEL.
+;	Swap code for IBM so it won't get undone by the general case.
 ;
 ;
 ;	RSX11M,M+ and P/OS support.
@@ -494,10 +495,11 @@ ttyini::save	<r1>
 	mov	sp	,savdon			; we have done the save
 	mov	2(r5)	,inilun			; save this lun (BDN)
 	srex$s	#abort				; in case server aborted (BDN)
+	QIOW$S	#sf.smc,2(r5),#ef.tt,,#kbiost,,<#datchr,#datlen> ; /64/usual settings
 	tstb	handch				; IBM crap (BDN 04-Aug-84)
 	beq	5$				; no
-	QIOW$S	#sf.smc,2(r5),#ef.tt,,#kbiost,,<#ibmmod,#2> ;
-5$:	QIOW$S	#sf.smc,2(r5),#ef.tt,,#kbiost,,<#datchr,#datlen>
+	QIOW$S	#sf.smc,2(r5),#ef.tt,,#kbiost,,<#ibmmod,#2> ; modify /RPA only
+5$:						;/64/IBM QUIW$S moved from here
 	clr	eioinit				;
 	mov	kbiost,r0
 	cmpb	r0,#IS.SUC			; OK?

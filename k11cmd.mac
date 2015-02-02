@@ -35,6 +35,7 @@ $beep2:	.byte	CR,LF,7,7,0
 ;
 ; 64 02-Feb-2015	  K11M41.MAC	Allow input of unprefixed
 ;					^R, ^U and DEL in packet mode.
+;					Reorder IBM terminal setting code.
 ;
 ;	Johnny Billquist 17-Oct-96 13:30:40
 ;
