@@ -1,6 +1,6 @@
 	.title	k11m41	kermit i/o for RSX11M/M+ v4.1 and 2.1
 
-	.ident	/5.0.06/	; Johnny Billquist
+	.ident	/5.0.07/	; Olaf Seibert
 
 ;	define macros and things we want for KERMIT-11
 
@@ -91,6 +91,10 @@
 ;
 ; 21-Oct-04 Johnny Billquist 5.0.06
 ;	Y2K fixup.
+;
+; 02-Feb-2015 Olaf Seibert 5.0.07 /64/
+;	Small improvement when packet reading: use TF.RNF (Read No Filter)
+;	to accept un-prefixed CTRL/U, CTRL/R and DEL. 
 ;
 ;
 ;	RSX11M,M+ and P/OS support.
@@ -842,7 +846,7 @@ eiorea::mov	r3	,-(sp)		; Save please
 	mov	2(r5)	,E$TMO(r3)	; Insert the timeout please
 	mov	#linbuf	,E$BUFF(r3)	; Insert the buffer address next.
 	mov	#maxlin	,E$LEN(r3)	; Insert the buffer size also.
-	mov	#TF.TMO	,E$MOD1(r3)	; Insert desired read modifiers.
+	mov	#TF.TMO!TF.RNF,E$MOD1(r3) ; /64/ Insert desired read modifiers.
 	tst	chario			; Do we read EXACTLY whats in buffer?
 	bne	15$			; Yes.
 	tstb	parity			; Is parity on ?

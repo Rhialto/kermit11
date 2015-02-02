@@ -1,14 +1,14 @@
 	.title	k11cmd	command level for kermit-11
-	.ident	/3.63/
+	.ident	/3.64/
 	.enabl	gbl
 
 	baselev	==	3		; baseline level
-	edit	==	63.		; edit (independent of base_level)
+	edit	==	64.		; edit (independent of base_level)
 	release	==	'T&137		; T for test, V for release
 
 	.save
 	.psect	ident	,ro,d,gbl,rel,con
-lasted::.ascii	/  Last edit: 3-Oct-06 /
+lasted::.ascii	/  Last edit: 02-Feb-2015 /
 	.ascii	/ /
 	.byte	0
 	.even
@@ -31,6 +31,11 @@ $beep2:	.byte	CR,LF,7,7,0
 	PRINT	#$beep2
 	.endm	BEEP2
 
+;	Olaf Seibert February 2015
+;
+; 64 02-Feb-2015	  K11M41.MAC	Allow input of unprefixed
+;					^R, ^U and DEL in packet mode.
+;
 ;	Johnny Billquist 17-Oct-96 13:30:40
 ;
 ; 63 03-Oct-06  20:00:00  K11M41.MAC	Bugfix with outstanding QIOs
