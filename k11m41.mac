@@ -499,7 +499,7 @@ ttyini::save	<r1>
 	tstb	handch				; IBM crap (BDN 04-Aug-84)
 	beq	5$				; no
 	QIOW$S	#sf.smc,2(r5),#ef.tt,,#kbiost,,<#ibmmod,#2> ; modify /RPA only
-5$:						;/64/IBM QUIW$S moved from here
+5$:						;/64/non-IBM QUIW$S moved from here
 	clr	eioinit				;
 	mov	kbiost,r0
 	cmpb	r0,#IS.SUC			; OK?
