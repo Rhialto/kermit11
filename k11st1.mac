@@ -1,7 +1,12 @@
 	.title	k11st1	the SET command,overlay one
-	.ident	/2.0.43/
+	.ident	/2.0.44/
 
-
+; Taken from
+;  /BBS/  1-Dec-91  Billy Youdelman  V03.61
+;
+;	st$nlp - clr senlng, which is now used to ensure a packet of
+;	alost or equal to 94 bytes in a long-packet xfr will get the 
+;	correct header.
 
 	.if ndf, K11INC
 	.ift
@@ -799,8 +804,9 @@ st$nat::clr	doattr
 	clr	r0
 	return
 
-st$nlp::clr	dolong
-	clr	r0
+st$nlp::clr	dolong			; don't do long packets
+	clr	senlng			; /BBS/ for short long packet fix
+	clr	r0			; /B62/ no error
 	return
 
 	cm$glob	=	0
@@ -812,6 +818,7 @@ st$nlp::clr	dolong
 
 
 s$of:	clr	r0
+	clr	senlng			; /BBS/ for short long packet fix
 	return
 
 s$on:	mov	sp	,r0

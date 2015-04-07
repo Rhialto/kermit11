@@ -1,6 +1,8 @@
 	.title	k11ini	initialization and rarely used routines
-	.ident	/3.42/
+	.ident	/3.42.01/
 
+; from /BBS/  1-Dec-91  Billy Youdelman  V03.61
+;	initialisation of senlng
 
 ;	03-Jul-84  09:34:32  Brian Nelson
 ;
@@ -344,36 +346,42 @@ rpar::	save	<r0,r1,r2,r3,r4>	; save registers we may use
 	br	70$
 60$:	mov	sp	,do8bit		; flag for doing 8 bit prefixing then
 	movb	p.qbin(r1),ebquot	; and set the quote character please
+
 70$:	clr	senlng			; /42/ Clear the write long buffer size
 	tst	dolong			; /42/ Really want long packets today?
-	bne	75$			; /42/ Yes
-	bicb	#CAPA.L	,p.capas(r1)	; /42/ No, so turn it off please
-75$:	bitb	#CAPA.L	,p.capas(r1)	; /42/ Can the sender do long packets?
-	beq	90$			; /42/ No
-	mov	r3	,senlng		; /42/ Yes, stuff the max buffersize
-	bne	80$			; /42/ Something is there
-..DEFL	==	. + 2			; /52/ Default
-	mov	#90.	,senlng		; /42/ Nothing, assume 90 (10) chars
-80$:	cmp	senlng	,#MAXLNG	; /42/ Is this size bigger than buffer?
-	ble	100$			; /42/ No
-	mov	#MAXLNG	,senlng		; /42/ Yes, please fix it then
-	br	100$			; /43/ And exit
-90$:	tst	reclng			; /43/ Ever do a SET REC PAC > 94 ?
-	beq	100$			; /43/ No
-	tst	infomsg			; /43/ Really dump this message?
-	beq	100$			; /43/ No
-	tst	msgtim			; /43/ Please, NOT for EVERY file
-	bne	100$			; /43/ Not again
-	mov	sp	,msgtim		; /43/ Flag we printed a warning
-	calls	printm	,<#1,#lmsg>	; /43/ Yes, print a warning message
-100$:	unsave	<r4,r3,r2,r1,r0>
+	bne	80$			; /42/ Yes
+	bitb	#capa.l ,p.capas(r1)	; /BBS/ no, but can other end do them?
+	beq	120$			; /BBS/ no
+	tst	msgtim			; /BBS/ ya, is this a new transaction?
+	bne	120$			; /B62/ no, continue..
+	calls	printm	,<#2,#prefix,#cando> ; /BBS/ ya, say it is possible..
+	br	110$
+
+80$:	bitb	#capa.l	,p.capas(r1)	; /42/ can other end do long packets?
+	beq	100$			; /42/ no
+	mov	r3	,senlng		; /42/ yes, load its passed pak length
+	bne	90$			; /42/ something was there
+	mov	#maxpak	,senlng		; /BBS/ not there, use normal packets
+90$:	cmp	senlng	,#maxlng	; /42/ is this bigger than our buffer?
+	ble	120$			; /42/ no
+	mov	#maxlng	,senlng		; /42/ yes, please fix it then
+	br	120$			; /43/ and continue
+
+100$:	cmp	reclng	,#maxpak	; /BBS/ is SET REC PAC > 94. here?
+	ble	120$			; /BBS/ no
+	tst	msgtim			; /43/ ya, say long-packets possible
+	bne	120$			; /43/ but please, NOT for every file
+	calls	printm	,<#2,#prefix,#lmsg> ; /BBS/ print a warning message
+110$:	mov	sp	,msgtim		; /43/ flag we printed a warning
+120$:	unsave	<r4,r3,r2,r1,r0>
 	return
 
 
 	.save
 	.psect	$PDATA	,D
-lmsg:	.ascii	/%Warning - You have requested LONG packet support/<CR><LF>
-	.asciz	/but the other Kermit does not support this feature./<CR><LF>
+prefix:	.asciz "The other Kermit "
+cando:	.asciz "supports long packets, which are disabled locally"<CR><LF>
+lmsg:	.asciz "doesn't support or has disabled long packets"<CR><LF>
 	.even
 	.restore
 

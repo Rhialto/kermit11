@@ -1,5 +1,5 @@
 	.title	k11pak	packet driver for kermit-11
-	.ident	/8.0.01/
+	.ident	/8.0.02/
 	.enabl	gbl
 
 ;	Brian Nelson	30-Nov-83  10:20:09
@@ -8,6 +8,18 @@
 ;	Change Software, Toledo, Ohio
 ;	University of Toledo, Toledo, Ohio
 ;
+; Olaf "Rhialto" Seibert  incorporated changes from
+; /B62/  27-Jul-93  Billy Youdelman  V03.62
+; /BBS/  1-Dec-91  Billy Youdelman  V03.61
+;	spack$ packet length test fixed to determine the true length of
+;	a packet near or equal to 94 bytes when long packets are use
+;	it was possible to generate a "normal" packet with an out-of-
+;	range LENGTH character (using all eight bits) when reaching
+;	the EOF produced a last packet in a long packet series close to
+;	94 bytes, as the routine filling the packet data input buffer
+;	is still looking for enough to make a long packet, with no
+;	consideration for the added SEQ and TYP bytes nor the checksum
+;	size (up to three more bytes with CRC block checking)..
 
 	.enabl	lc
 
@@ -241,15 +253,17 @@ spack$::save	<r1,r2,r3,r4>		; Save registers that we may use
 5$:	setpar	sensop	,(r4)+		; Start all packets with control A 
 	mov	r4	,r2		; Get address for checksum compute
 	inc	@sp			; Packetlength := succ(packetlength)
-	mov	4(r5)	,r0		; The length of the packet
-	cmp	r0	,#MAXPAK	; Packet too large ?
-	blos	15$			; No
-	bitb	#CAPA.L,conpar+p.capas	; /43/ Check to see if both sides
-	beq	10$			; /43/ REALLY understand long packets
-	bitb	#CAPA.L,senpar+p.capas	; /43/ We would normally but it is
-	beq	10$			; /43/ possible to SET NOLONG
+	mov	4(r5)	,r0		; The length of the data
+	mov	#maxpak	,r1		; /BBS/ preset for compare
+	cmp	senlng	,r1		; /BBS/ long packets this time?
+	blos	330$			; /BBS/ nope..
+	sub	chksiz	,r1		; /BBS/ ya, be sure checksum will fit
+	sub	#2	,r1		; /BBS/ SEQ + TYP have to fit too..
+330$:	cmp	r0	,r1		; /BBS/ packet too large?
+	blos	15$			; no
 	tst	senlng			; /42/ Receiver said it can do long
 	beq	10$			; /42/ packets? If eq, then no
+
 					; /42/ Otherwise, build ext header.
 	mov	r2	,-(sp)		; /42/ Save this
 	mov	#40	,-(sp)		; /42/ Accumulate header checksum
@@ -283,6 +297,7 @@ spack$::save	<r1,r2,r3,r4>		; Save registers that we may use
 	mov	#7	,(sp)		; /42/ We now have seven characters.
 	br	20$			; /42/ Add off we go
 
+					; build short header and packet
 10$:	mov	#MAXPAK-3,r0		; Yes, reset packet size please
 15$:	add	#2	,r0		; + two for number and type
 	add	chksiz	,r0		; + the length of the checksum please
@@ -1262,15 +1277,13 @@ inirepeat::
 buffil::save	<r2,r3,r4,r5>		; save all registers we may use
 	mov	@r5	,r4		; point to the destination address
 	clr	r3			; use as a length counter
-	clr	r5			;
-	bitb	#CAPA.L,conpar+p.capas	; /42/ Check to see if both sides
-	beq	4$			; /42/ REALLY understand long packets
-	bitb	#CAPA.L,senpar+p.capas	; /42/ We would normally but it is
-	beq	4$			; /42/ possible to SET NOLONG
-	mov	senlng	,r5		; /42/ Does receiver understand
-	bne	5$			; /42/ long packets today?
-4$:	bisb	conpar+p.spsiz,r5	; get the recievers maximum size
-5$:	sub	#14	,r5		; being overcautious today ?
+	mov	senlng	,r5		; /B63/ long_packets on?   or clears r5
+	bne	5$			; /B62/ ya..  to avoid sxt on next inst
+	bisb	conpar+p.spsiz,r5	; /B63/ get receiver's max size
+5$: ;	cmp	r5	,senlen		; /B63/ rec'd packet_len > SET SEN PAC?
+;	ble	6$			; /B62/ no
+;	mov	senlen	,r5		; /B63/ ya, let SET SEN PAC prevail
+6$:	sub	#10	,r5		; /B63/ allow for rpt quoting, etc, etc
 
 10$:	tst	dorpt			; are we doing repeat counts
 	beq	50$			; no

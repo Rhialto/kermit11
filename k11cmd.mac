@@ -1,5 +1,5 @@
 	.title	k11cmd	command level for kermit-11
-	.ident	/3.64/
+	.ident	/3.64.01/
 	.enabl	gbl
 
 	baselev	==	3		; baseline level
@@ -30,6 +30,19 @@ $beep2:	.byte	CR,LF,7,7,0
 	.macro	BEEP2
 	PRINT	#$beep2
 	.endm	BEEP2
+
+;	Olaf Seibert April 2015
+;	Started to integrate the first patch from K11 (long packet fix).
+;  KRTPAK - from /BBS/ /B62/ /B63/
+;	spack$ packet length test fixed to determine the true length of
+;	a packet near or equal to 94 bytes when long packets are used.
+;	it was possible to generate a "normal" packet with an out-of-
+;	range LENGTH character (using all eight bits) when reaching
+;	the EOF produced a last packet in a long packet series close to
+;	94 bytes, as the routine filling the packet data input buffer
+;	is still looking for enough to make a long packet, with no
+;	consideration for the added SEQ and TYP bytes nor the checksum
+;	size (up to three more bytes with CRC block checking)..
 
 ;	Olaf Seibert February 2015
 ;
